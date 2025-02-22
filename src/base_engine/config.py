@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+
+import argcomplete
+from termcolor import colored
+
+from qlever.command import QleverCommand
+from qlever.config import ConfigException, QleverConfig
+from qlever.containerize import Containerize
+from qlever.log import log
+from qlever.qleverfile import Qleverfile
+
+
+def all_arguments():
+    """
+    Take all existing arguments from Qleverfile
+    and add/replace the ones that are new/different from QLever
+    """
+
+    def arg(*args, **kwargs):
+        return (args, kwargs)
+
+    all_args = Qleverfile.all_arguments()
+    all_args["runtime"]["system"] = arg(
+        "--system",
+        type=str,
+        choices=Containerize.supported_systems(),
+        default="docker",
+        help=(
+            "Which system to use to run commands like `index` "
+            "or `start` in a container"
+        ),
+    )
+    all_args["runtime"]["index_container"] = arg(
+        "--index-container",
+        type=str,
+        help="The name of the container used by the index command",
+    )
+    all_args["runtime"]["server_container"] = arg(
+        "--server-container",
+        type=str,
+        help="The name of the container used by the start command",
+    )
+    return all_args
+
+
+class ArgumentsManager(QleverConfig):
+    def __init__(
+        self, script_name: str, command_objects: dict[str, QleverCommand]
+    ) -> None:
+        self.script_name = script_name
+        self.engine_name = script_name[1:]
+        self.command_objects = command_objects
+
+    def parse_args(self):
+        # Determine whether we are in autocomplete mode or not.
+        autocomplete_mode = "COMP_LINE" in os.environ
+
+        # Check if the user has registered this script for argcomplete.
+        argcomplete_check_off = os.environ.get(
+            f"{self.engine_name.upper()}_ARGCOMPLETE_CHECK_OFF"
+        )
+        argcomplete_enabled = os.environ.get(
+            f"{self.engine_name.upper()}_ARGCOMPLETE_ENABLED"
+        )
+        if not argcomplete_enabled and not argcomplete_check_off:
+            log.info("")
+            log.warning(
+                f"To enable autocompletion, run the following command, "
+                f"and consider adding it to your `.bashrc` or `.zshrc`:"
+                f"\n\n"
+                f'eval "$(register-python-argcomplete {self.script_name})"'
+                f" && export {self.engine_name.upper()}_ARGCOMPLETE_ENABLED=1"
+            )
+            log.info("")
+
+        # Create a temporary parser only to parse the `--qleverfile` option, in
+        # case it is given, and to determine whether a command was given that
+        # requires a Qleverfile. This is because in the actual parser below we
+        # want the values from the Qleverfile to be shown in the help strings,
+        # but only if this is actually necessary.
+        def add_qleverfile_option(parser):
+            parser.add_argument(
+                "--qleverfile", "-q", type=str, default="Qleverfile"
+            )
+
+        qleverfile_parser = argparse.ArgumentParser(add_help=False)
+        add_qleverfile_option(qleverfile_parser)
+        qleverfile_parser.add_argument("command", type=str, nargs="?")
+        qleverfile_args, _ = qleverfile_parser.parse_known_args()
+        qleverfile_path_name = qleverfile_args.qleverfile
+        # command = qleverfile_args.command
+        # should_have_qleverfile = command in command_objects \
+        #     and command_objects[command].should_have_qleverfile()
+
+        # Check if the Qleverfile exists and if we are using the default name.
+        # We need this again further down in the code, so remember it.
+        qleverfile_path = Path(qleverfile_path_name)
+        qleverfile_exists = qleverfile_path.is_file()
+        qleverfile_is_default = (
+            qleverfile_path_name == qleverfile_parser.get_default("qleverfile")
+        )
+        # If a Qleverfile with a non-default name was specified, but it does
+        # not exist, that's an error.
+        if not qleverfile_exists and not qleverfile_is_default:
+            raise ConfigException(
+                f"Qleverfile with non-default name "
+                f"`{qleverfile_path_name}` specified, "
+                f"but it does not exist"
+            )
+        # If it exists and we are not in the autocompletion mode, parse it.
+        #
+        # IMPORTANT: No need to parse the Qleverfile in autocompletion mode and
+        # it would be unnecessarily expensive to do so.
+        #
+        # TODO: What if `command.should_have_qleverfile()` is `False`, should
+        # we then parse the Qleverfile or not.
+        if qleverfile_exists and not autocomplete_mode:
+            try:
+                qleverfile_config = Qleverfile.read_qleverfile(qleverfile_path)
+                for section in ["data", "index", "server", "runtime"]:
+                    if section not in qleverfile_config:
+                        qleverfile_config[section] = {}
+
+                # Add default values that are based on other values.
+                if "name" in qleverfile_config["data"]:
+                    name = qleverfile_config["data"]["name"]
+                    runtime = qleverfile_config["runtime"]
+                    if "server_container" not in runtime:
+                        runtime["server_container"] = (
+                            f"{self.engine_name}.server.{name}"
+                        )
+                    if "index_container" not in runtime:
+                        runtime["index_container"] = (
+                            f"{self.engine_name}.index.{name}"
+                        )
+            except Exception as e:
+                log.info("")
+                log.error(f"Error parsing Qleverfile `{qleverfile_path}`: {e}")
+                log.info("")
+                exit(1)
+        else:
+            qleverfile_config = None
+
+        # Now the regular parser with commands and a subparser for each
+        # command. We have a dedicated class for each command. These classes
+        # are defined in the modules in `qlever/commands`. In `__init__.py`
+        # an object of each class is created and stored in `command_objects`.
+        parser = argparse.ArgumentParser(
+            description=colored(
+                f"This is the {self.script_name} command line tool, "
+                f"it's all you need to work with {self.engine_name.capitalize()}",
+                attrs=["bold"],
+            )
+        )
+        add_qleverfile_option(parser)
+        subparsers = parser.add_subparsers(dest="command")
+        subparsers.required = True
+        all_args = all_arguments()
+        for command_name, command_object in self.command_objects:
+            self.add_subparser_for_command(
+                subparsers,
+                command_name,
+                command_object,
+                all_args,
+                qleverfile_config,
+            )
+
+        # Enable autocompletion for the commands and their options.
+        #
+        # NOTE: All code executed before this line should be relatively cheap
+        # because it is executed whenever the user triggers the autocompletion.
+        argcomplete.autocomplete(parser, always_complete_options="long")
+
+        # If called without arguments, show the help message.
+        if len(os.sys.argv) == 1:
+            parser.print_help()
+            exit(0)
+
+        # Parse the command line arguments.
+        args = parser.parse_args()
+
+        # If the command says that we should have a Qleverfile, but we don't,
+        # issue a warning.
+        if self.command_objects[args.command].should_have_qleverfile():
+            if not qleverfile_exists:
+                log.warning(
+                    f"Invoking command `{args.command}` without a "
+                    "Qleverfile. You have to specify all required "
+                    "arguments on the command line. This is possible, "
+                    "but not recommended."
+                )
+
+        return args

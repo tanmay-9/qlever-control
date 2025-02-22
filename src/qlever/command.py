@@ -71,7 +71,11 @@ class QleverCommand(ABC):
         pass
 
     @staticmethod
-    def show(command_description: str, only_show: bool = False):
+    def show(
+        command_description: str,
+        only_show: bool = False,
+        script_name: str = "qlever",
+    ) -> None:
         """
         Helper function that shows the command line or description of an
         action, together with an explanation.
@@ -81,7 +85,7 @@ class QleverCommand(ABC):
         log.info("")
         if only_show:
             log.info(
-                'You called "qlever ... --show", therefore the command '
+                f'You called "{script_name} ... --show", therefore the command '
                 'is only shown, but not executed (omit the "--show" to '
                 "execute it)"
             )
