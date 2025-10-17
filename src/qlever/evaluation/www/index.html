@@ -32,7 +32,7 @@
     </head>
     <body>
         <nav class="navbar navbar-expand-lg sticky-top border-bottom">
-            <div class="container-fluid flex-nowrap mx-2">
+            <div class="container-fluid flex-nowrap mx-0 mx-md-2 px-0 px-md-2">
                 <a href="/" data-navigo class="btn d-flex align-items-center" style="z-index: 1030">
                     <i class="bi bi-house-fill fs-5"></i>
                 </a>
@@ -53,8 +53,13 @@
                                 type="button"
                                 id="resourcesDropdown"
                                 data-bs-toggle="dropdown"
+                                title="Resources"
                             >
-                                Resources
+                                <!-- Icon for small screens -->
+                                <i class="bi bi-link-45deg"></i>
+
+                                <!-- Text for medium and larger -->
+                                <span class="d-none d-md-inline">Resources</span>
                             </button>
                             <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="resourcesDropdown">
                                 <li>
@@ -122,10 +127,10 @@
             <div class="spinner-border" style="color: var(--bs-body-color); width: 3rem; height: 3rem" role="status">
                 <span class="visually-hidden">Loading...</span>
             </div>
-            <span class="ms-4 text-center spinner-text">Fetching evaluation results</span>
+            <span class="ms-2 ms-md-4 text-center fw-bold fs-4">Fetching evaluation results</span>
         </div>
 
-        <div id="page-main" class="page container-lg">
+        <div id="page-main" class="page container-lg p-0 p-md-3">
             <!-- <div class="main-title">SPARQL Engine Comparison</div> -->
             <div class="accordion mb-3" id="helpAccordion">
                 <div class="accordion-item">
@@ -195,7 +200,7 @@
             <div id="main-table-container"></div>
         </div>
 
-        <div id="page-details" class="page hidden container-lg" data-kb="" data-engine="">
+        <div id="page-details" class="page hidden container-lg p-0 p-md-3" data-kb="" data-engine="">
             <!-- Tabs here -->
             <ul class="nav nav-tabs sticky-top bg-body d-flex align-items-center" id="myTab" role="tablist">
                 <li class="nav-item" role="presentation">
@@ -322,7 +327,7 @@
             </div>
         </div>
 
-        <div id="page-comparison" class="page hidden container-lg pb-0" data-kb="">
+        <div id="page-comparison" class="page hidden container-lg p-1 p-md-3 pb-0" data-kb="">
             <div class="accordion mb-1" id="comparisonHelpAccordion">
                 <div class="accordion-item">
                     <h2 class="accordion-header" id="comparisonHeadingHelp">
@@ -354,7 +359,8 @@
                                     a query across all engines.
                                 </li>
                                 <li>
-                                    <span class="text-danger fw-bold">Red cells</span>: Query either failed or timed out for that engine.
+                                    <span class="text-danger fw-bold">Red cells</span>: Query either failed or timed out
+                                    for that engine.
                                 </li>
                                 <li>
                                     <span class="fw-bold"
@@ -370,8 +376,8 @@
                                     <span class="fw-bold"
                                         ><i class="bi bi-bootstrap-reboot"></i> in an engine column cell:</span
                                     >
-                                    The server for that engine was restarted after the query, either due to a crash or no
-                                    response after timeout + 30s.
+                                    The server for that engine was restarted after the query, either due to a crash or
+                                    no response after timeout + 30s.
                                 </li>
                                 <li>
                                     <span class="fw-bold">Click a cell</span>: Shows additional information which can be

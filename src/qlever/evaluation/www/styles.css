@@ -3,9 +3,14 @@ body {
     font-family: "Helvetica Neue", sans-serif;
 }
 
-.ag-theme-balham {
-    font-size: 16px; /* Change this to 15px, 16px etc. as needed */
+html {
+    font-size: clamp(12px, 1vw + 10px, 16px);
 }
+
+/* .ag-theme-balham,
+.ag-theme-balham-dark {
+  font-size: clamp(12px, 1vw + 8px, 14px);
+} */
 
 .btn-outline-theme {
     color: var(--bs-body-color);
@@ -47,7 +52,7 @@ body {
     position: absolute;
     left: 0;
     right: 0;
-    padding: 20px;
+    /* padding: 20px; */
 }
 
 .page.visible {
@@ -98,12 +103,12 @@ body {
 
 .custom-tooltip,
 .popover {
-  background-color: var(--bs-body-color);
-  color: var(--bs-body-bg);
-  border: 1px solid var(--bs-border-color);
-  border-radius: 0.25rem;
-  box-shadow: var(--bs-box-shadow-sm);
-  /* padding: 0.5rem; */
+    background-color: var(--bs-body-color);
+    color: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.25rem;
+    box-shadow: var(--bs-box-shadow-sm);
+    /* padding: 0.5rem; */
 }
 
 .popover-body {
