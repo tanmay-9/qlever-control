@@ -130,7 +130,7 @@
             <span class="ms-2 ms-md-4 text-center fw-bold fs-4">Fetching evaluation results</span>
         </div>
 
-        <div id="page-main" class="page container-lg p-0 p-md-3">
+        <div id="page-main" class="page container-lg p-0 px-md-4 py-md-3">
             <!-- <div class="main-title">RDF Graph Database Performance Evaluation</div> -->
             <div class="accordion mb-3" id="helpAccordion">
                 <div class="accordion-item">
@@ -199,7 +199,7 @@
             <div id="main-table-container"></div>
         </div>
 
-        <div id="page-details" class="page hidden container-lg p-0 p-md-3" data-kb="" data-engine="">
+        <div id="page-details" class="page hidden container-lg p-0 px-md-4 pt-md-3" data-kb="" data-engine="">
             <!-- Tabs here -->
             <ul class="nav nav-tabs sticky-top bg-body d-flex align-items-center" id="myTab" role="tablist">
                 <li class="nav-item" role="presentation">
@@ -326,7 +326,7 @@
             </div>
         </div>
 
-        <div id="page-comparison" class="page hidden container-lg p-1 p-md-3 pb-0" data-kb="">
+        <div id="page-comparison" class="page hidden container-lg p-0 px-md-4 pt-md-3" data-kb="">
             <div class="accordion mb-1" id="comparisonHelpAccordion">
                 <div class="accordion-item">
                     <h2 class="accordion-header" id="comparisonHeadingHelp">
@@ -395,7 +395,7 @@
             <div class="d-flex align-items-start">
                 <!-- Accordion takes most of the space -->
                 <div class="flex-grow-1">
-                    <div class="py-2 pe-3" id="columns-checkbox-container">
+                    <div class="py-2 ps-2 pe-3" id="columns-checkbox-container">
                         <div class="d-flex align-items-center flex-wrap gap-3">
                             <label
                                 class="fw-bold"
@@ -416,13 +416,13 @@
 
             <div class="d-flex align-items-center justify-content-between flex-wrap">
                 <!-- Left side: Label + dropdown -->
-                <div class="d-flex align-items-center gap-2 flex-grow-1 flex-wrap py-2">
+                <div class="d-flex align-items-center gap-2 flex-grow-1 flex-wrap ps-2 py-2">
                     <label
                         for="orderColumnsDropdown"
                         title="Change how the systems are ordered from left to right"
                         class="fw-bold"
-                        style="font-size: 0.95rem; cursor: pointer"
-                        >Order Engines by Metric:</label
+                        style="cursor: pointer"
+                        >Order Engines:</label
                     >
                     <select class="form-select form-select-sm" id="orderColumnsDropdown" style="max-width: 250px">
                         <option value="gmeanTime2-asc">Geometric Mean (P=2) ↑</option>
@@ -439,7 +439,7 @@
                 </div>
 
                 <!-- Right side: toggles -->
-                <div class="d-flex align-items-center gap-3 ms-3 flex-wrap">
+                <div class="d-flex align-items-center gap-3 ms-2 flex-wrap">
                     <button id="comparisonDownloadTsv" class="btn btn-outline-theme btn-sm" title="Download as TSV">
                         <i class="bi bi-download"></i>
                     </button>
@@ -459,11 +459,11 @@
                 </div>
             </div>
 
-            <div id="comparison-grid" class="ag-theme-balham-dark mt-3" style="width: 100%"></div>
+            <div id="comparison-grid" class="ag-theme-balham-dark mt-2" style="width: 100%"></div>
         </div>
 
-        <div id="page-compareExecTrees" class="page hidden container-lg">
-            <div id="compareExecQueryContainer" class="d-flex align-items-center mb-3">
+        <div id="page-compareExecTrees" class="page hidden">
+            <div id="compareExecQueryContainer" class="d-flex align-items-center container-lg px-0 py-3 px-md-4">
                 <!-- Query content (left-aligned) -->
                 <div id="compareExecQuery" class="alert alert-secondary p-2 mb-0 flex-grow-1 text-center"></div>
 
@@ -475,41 +475,45 @@
             </div>
 
             <!-- Second row: Two selects + Compare button -->
-            <div class="row g-3 align-items-end">
-                <div class="col-md-5">
-                    <!-- <label for="select1" class="form-label">Select QLever tree 1</label> -->
-                    <select title="First QLever instance" class="form-select" id="select1"></select>
-                </div>
-                <div class="col-md-5">
-                    <!-- <label for="select2" class="form-label">Select QLever tree 2</label> -->
-                    <select title="Second QLever instance" class="form-select" id="select2"></select>
-                </div>
-                <div class="col-md-2">
-                    <button id="compareExecTreesBtn" class="btn btn-outline-theme w-100">Compare</button>
+            <div class="container-lg p-0 px-md-4">
+                <div class="d-flex align-items-center gap-2 flex-nowrap">
+                    <select title="First QLever instance" class="form-select flex-grow-1" id="select1"></select>
+                    <button id="compareExecTreesBtn" class="btn btn-outline-theme d-flex align-items-center gap-1 px-md-5">
+                        <i class="bi bi-diagram-2-fill"></i>
+                        <span class="d-none d-md-inline">Compare</span>
+                    </button>
+                    <select title="Second QLever instance" class="form-select flex-grow-1" id="select2"></select>
                 </div>
             </div>
 
-            <div class="mt-4">
+            <div class="mx-2 mt-3 mb-0 mx-lg-4">
                 <div class="row g-3 overflow-hidden">
                     <div class="col-6">
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <div id="meta-info-1" class="flex-grow-1"></div>
 
                             <div class="ms-2" role="group" aria-label="CompareExecTrees zoom">
-                                <button id="zoomIn1" title="Zoom in" class="btn btn-outline-secondary">+</button>
-                                <button id="zoomOut1" title="Zoom out" class="btn btn-outline-secondary">−</button>
+                                <button id="zoomIn1" title="Zoom in" class="btn btn-outline-theme">
+                                    <i class="bi bi-zoom-in"></i>
+                                </button>
+                                <button id="zoomOut1" title="Zoom out" class="btn btn-outline-theme">
+                                    <i class="bi bi-zoom-out"></i>
+                                </button>
                             </div>
                         </div>
                         <div id="tree1" class="overflow-auto" style="height: calc(100vh - 250px)"></div>
                     </div>
-                    <div class="col-6 border-start border-dark border-2">
+                    <div class="col-6 border-start border-2">
                         <div class="d-flex justify-content-between align-items-start mb-2">
-                            <div id="meta-info-2" class="flex-grow-1"></div>
-
-                            <div class="ms-2" role="group" aria-label="CompareExecTrees zoom">
-                                <button id="zoomIn2" title="Zoom in" class="btn btn-outline-secondary">+</button>
-                                <button id="zoomOut2" title="Zoom out" class="btn btn-outline-secondary">−</button>
+                            <div class="me-2" role="group" aria-label="CompareExecTrees zoom">
+                                <button id="zoomIn2" title="Zoom in" class="btn btn-outline-theme">
+                                    <i class="bi bi-zoom-in"></i>
+                                </button>
+                                <button id="zoomOut2" title="Zoom out" class="btn btn-outline-theme">
+                                    <i class="bi bi-zoom-out"></i>
+                                </button>
                             </div>
+                            <div id="meta-info-2" class="flex-grow-1 text-end"></div>
                         </div>
                         <div id="tree2" class="overflow-auto" style="height: calc(100vh - 250px)"></div>
                     </div>

@@ -49,7 +49,7 @@ function getAllQueryStatsByKb(performanceData, kb) {
  */
 function mainTableColumnDefs() {
     // Define custom formatting and filters based on column keys
-    let columnDefs = [
+    return [
         {
             headerName: "System",
             field: "engine_name",
@@ -69,6 +69,16 @@ function mainTableColumnDefs() {
             flex: 1.3,
         },
         {
+            headerName: "Geom. Mean (P=10)",
+            field: "gmeanTime10",
+            filter: "agNumberColumnFilter",
+            type: "numericColumn",
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
+            headerTooltip: `Geometric mean of all query runtimes. Failed queries are penalized with a runtime of timeout × 10`,
+            tooltipComponent: CustomDetailsTooltip,
+            flex: 1.3,
+        },
+        {
             headerName: "Median (P=2)",
             field: "medianTime",
             filter: "agNumberColumnFilter",
@@ -77,6 +87,47 @@ function mainTableColumnDefs() {
             headerTooltip: `Median runtime of all queries. Failed queries are penalized with a runtime of timeout × 2`,
             tooltipComponent: CustomDetailsTooltip,
             flex: 1.25,
+        },
+        {
+            headerName: "Arith. Mean (P=2)",
+            field: "ameanTime",
+            filter: "agNumberColumnFilter",
+            type: "numericColumn",
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
+            headerTooltip: `Arithmetic mean of all query runtimes. Failed queries are penalized with a runtime of timeout × 2`,
+            tooltipComponent: CustomDetailsTooltip,
+            flex: 1.3,
+        },
+        {
+            headerName: "<= 1s",
+            field: "under1s",
+            filter: "agNumberColumnFilter",
+            type: "numericColumn",
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
+            headerTooltip: "Percentage of all queries that successfully finished in 1 second or less",
+            tooltipComponent: CustomDetailsTooltip,
+            flex: 1,
+        },
+        {
+            headerName: "(1s, 5s]",
+            field: "between1to5s",
+            filter: "agNumberColumnFilter",
+            type: "numericColumn",
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
+            headerTooltip:
+                "Percentage of all queries that successfully completed in more than 1 second and up to 5 seconds",
+            tooltipComponent: CustomDetailsTooltip,
+            flex: 1,
+        },
+        {
+            headerName: "> 5s",
+            field: "over5s",
+            filter: "agNumberColumnFilter",
+            type: "numericColumn",
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
+            headerTooltip: "Percentage of all queries that successfully completed in more than 5 seconds",
+            tooltipComponent: CustomDetailsTooltip,
+            flex: 1,
         },
         {
             headerName: "Failed",
@@ -89,64 +140,6 @@ function mainTableColumnDefs() {
             flex: 1,
         },
     ];
-    if (window.matchMedia("(min-width: 768px)").matches) {
-        columnDefs.push(
-            ...[
-                {
-                    headerName: "Geom. Mean (P=10)",
-                    field: "gmeanTime10",
-                    filter: "agNumberColumnFilter",
-                    type: "numericColumn",
-                    valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
-                    headerTooltip: `Geometric mean of all query runtimes. Failed queries are penalized with a runtime of timeout × 10`,
-                    tooltipComponent: CustomDetailsTooltip,
-                    flex: 1.3,
-                },
-                {
-                    headerName: "Arith. Mean (P=2)",
-                    field: "ameanTime",
-                    filter: "agNumberColumnFilter",
-                    type: "numericColumn",
-                    valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
-                    headerTooltip: `Arithmetic mean of all query runtimes. Failed queries are penalized with a runtime of timeout × 2`,
-                    tooltipComponent: CustomDetailsTooltip,
-                    flex: 1.3,
-                },
-                {
-                    headerName: "<= 1s",
-                    field: "under1s",
-                    filter: "agNumberColumnFilter",
-                    type: "numericColumn",
-                    valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
-                    headerTooltip: "Percentage of all queries that successfully finished in 1 second or less",
-                    tooltipComponent: CustomDetailsTooltip,
-                    flex: 1,
-                },
-                {
-                    headerName: "(1s, 5s]",
-                    field: "between1to5s",
-                    filter: "agNumberColumnFilter",
-                    type: "numericColumn",
-                    valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
-                    headerTooltip:
-                        "Percentage of all queries that successfully completed in more than 1 second and up to 5 seconds",
-                    tooltipComponent: CustomDetailsTooltip,
-                    flex: 1,
-                },
-                {
-                    headerName: "> 5s",
-                    field: "over5s",
-                    filter: "agNumberColumnFilter",
-                    type: "numericColumn",
-                    valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
-                    headerTooltip: "Percentage of all queries that successfully completed in more than 5 seconds",
-                    tooltipComponent: CustomDetailsTooltip,
-                    flex: 1,
-                },
-            ]
-        );
-    }
-    return columnDefs;
 }
 
 function updateMainPage(performanceData, additionalData) {
