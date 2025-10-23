@@ -49,7 +49,7 @@ function getAllQueryStatsByKb(performanceData, kb) {
  */
 function mainTableColumnDefs() {
     // Define custom formatting and filters based on column keys
-    return [
+    let columnDefs = [
         {
             headerName: "System",
             field: "engine_name",
@@ -69,16 +69,6 @@ function mainTableColumnDefs() {
             flex: 1.3,
         },
         {
-            headerName: "Geom. Mean (P=10)",
-            field: "gmeanTime10",
-            filter: "agNumberColumnFilter",
-            type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
-            headerTooltip: `Geometric mean of all query runtimes. Failed queries are penalized with a runtime of timeout × 10`,
-            tooltipComponent: CustomDetailsTooltip,
-            flex: 1.3,
-        },
-        {
             headerName: "Median (P=2)",
             field: "medianTime",
             filter: "agNumberColumnFilter",
@@ -87,47 +77,6 @@ function mainTableColumnDefs() {
             headerTooltip: `Median runtime of all queries. Failed queries are penalized with a runtime of timeout × 2`,
             tooltipComponent: CustomDetailsTooltip,
             flex: 1.25,
-        },
-        {
-            headerName: "Arith. Mean (P=2)",
-            field: "ameanTime",
-            filter: "agNumberColumnFilter",
-            type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
-            headerTooltip: `Arithmetic mean of all query runtimes. Failed queries are penalized with a runtime of timeout × 2`,
-            tooltipComponent: CustomDetailsTooltip,
-            flex: 1.3,
-        },
-        {
-            headerName: "<= 1s",
-            field: "under1s",
-            filter: "agNumberColumnFilter",
-            type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
-            headerTooltip: "Percentage of all queries that successfully finished in 1 second or less",
-            tooltipComponent: CustomDetailsTooltip,
-            flex: 1,
-        },
-        {
-            headerName: "(1s, 5s]",
-            field: "between1to5s",
-            filter: "agNumberColumnFilter",
-            type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
-            headerTooltip:
-                "Percentage of all queries that successfully completed in more than 1 second and up to 5 seconds",
-            tooltipComponent: CustomDetailsTooltip,
-            flex: 1,
-        },
-        {
-            headerName: "> 5s",
-            field: "over5s",
-            filter: "agNumberColumnFilter",
-            type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
-            headerTooltip: "Percentage of all queries that successfully completed in more than 5 seconds",
-            tooltipComponent: CustomDetailsTooltip,
-            flex: 1,
         },
         {
             headerName: "Failed",
@@ -140,6 +89,64 @@ function mainTableColumnDefs() {
             flex: 1,
         },
     ];
+    if (window.matchMedia("(min-width: 768px)").matches) {
+        columnDefs.push(
+            ...[
+                {
+                    headerName: "Geom. Mean (P=10)",
+                    field: "gmeanTime10",
+                    filter: "agNumberColumnFilter",
+                    type: "numericColumn",
+                    valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
+                    headerTooltip: `Geometric mean of all query runtimes. Failed queries are penalized with a runtime of timeout × 10`,
+                    tooltipComponent: CustomDetailsTooltip,
+                    flex: 1.3,
+                },
+                {
+                    headerName: "Arith. Mean (P=2)",
+                    field: "ameanTime",
+                    filter: "agNumberColumnFilter",
+                    type: "numericColumn",
+                    valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
+                    headerTooltip: `Arithmetic mean of all query runtimes. Failed queries are penalized with a runtime of timeout × 2`,
+                    tooltipComponent: CustomDetailsTooltip,
+                    flex: 1.3,
+                },
+                {
+                    headerName: "<= 1s",
+                    field: "under1s",
+                    filter: "agNumberColumnFilter",
+                    type: "numericColumn",
+                    valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
+                    headerTooltip: "Percentage of all queries that successfully finished in 1 second or less",
+                    tooltipComponent: CustomDetailsTooltip,
+                    flex: 1,
+                },
+                {
+                    headerName: "(1s, 5s]",
+                    field: "between1to5s",
+                    filter: "agNumberColumnFilter",
+                    type: "numericColumn",
+                    valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
+                    headerTooltip:
+                        "Percentage of all queries that successfully completed in more than 1 second and up to 5 seconds",
+                    tooltipComponent: CustomDetailsTooltip,
+                    flex: 1,
+                },
+                {
+                    headerName: "> 5s",
+                    field: "over5s",
+                    filter: "agNumberColumnFilter",
+                    type: "numericColumn",
+                    valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
+                    headerTooltip: "Percentage of all queries that successfully completed in more than 5 seconds",
+                    tooltipComponent: CustomDetailsTooltip,
+                    flex: 1,
+                },
+            ]
+        );
+    }
+    return columnDefs;
 }
 
 function updateMainPage(performanceData, additionalData) {
@@ -173,16 +180,16 @@ function updateMainPage(performanceData, additionalData) {
         const header = document.createElement("div");
         header.className = "kg-header";
 
-        const titleWrapper = document.createElement("div");
-        titleWrapper.className = "d-inline-flex align-items-center";
+        // const titleWrapper = document.createElement("div");
+        // titleWrapper.className = "d-inline-flex align-items-center";
 
         const benchmarkDescription = additionalData.kbs[kb].description;
         const benchmarkName = additionalData.kbs[kb].name;
 
-        const title = document.createElement("h5");
+        const title = document.createElement("div");
         title.textContent = benchmarkName || capitalize(kb);
-        title.style.fontWeight = "bold";
-        title.classList.add("mb-1");
+        // title.style.fontWeight = "bold";
+        title.classList.add("fs-5", "fw-bold", "mb-1");
 
         let infoPill = null;
         if (benchmarkDescription) {
@@ -211,7 +218,8 @@ function updateMainPage(performanceData, additionalData) {
 
         const compareBtn = document.createElement("button");
         compareBtn.className = "btn btn-outline-theme btn-sm";
-        compareBtn.textContent = "Compare Results";
+        compareBtn.innerHTML = `<i class="bi bi-table d-inline d-md-none"></i><span class="d-none d-md-inline">Compare Results</span>`;
+        compareBtn.title = "Compare per-query results";
         compareBtn.onclick = () => {
             router.navigate(`/comparison?kb=${encodeURIComponent(kb)}`);
         };
@@ -219,12 +227,12 @@ function updateMainPage(performanceData, additionalData) {
         btnGroup.appendChild(downloadBtn);
         btnGroup.appendChild(compareBtn);
 
-        titleWrapper.appendChild(title);
+        // titleWrapper.appendChild(title);
         if (infoPill) {
-            titleWrapper.appendChild(infoPill);
+            title.appendChild(infoPill);
             new bootstrap.Popover(infoPill);
         }
-        header.appendChild(titleWrapper);
+        header.appendChild(title);
         header.appendChild(btnGroup);
 
         const html = document.documentElement;
@@ -264,9 +272,10 @@ function updateMainPage(performanceData, additionalData) {
                 sortable: true,
                 filter: true,
                 resizable: true,
+                minWidth: 80,
             },
             domLayout: "autoHeight",
-            rowStyle: { fontSize: "14px", cursor: "pointer" },
+            rowStyle: { fontSize: "clamp(12px, 1vw + 8px, 14px)", cursor: "pointer" },
             tooltipShowDelay: 500,
             onRowClicked: onRowClicked,
             suppressDragLeaveHidesColumns: true,
