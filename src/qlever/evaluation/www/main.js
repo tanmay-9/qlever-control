@@ -218,7 +218,7 @@ function updateMainPage(performanceData, additionalData) {
 
         const compareBtn = document.createElement("button");
         compareBtn.className = "btn btn-outline-theme btn-sm";
-        compareBtn.innerHTML = `<i class="bi bi-table d-inline d-md-none"></i><span class="d-none d-md-inline">Compare Results</span>`;
+        compareBtn.innerHTML = `<i class="bi bi-table d-inline d-md-none"></i><span class="d-none d-md-inline">Detailed Results per Query</span>`;
         compareBtn.title = "Compare per-query results";
         compareBtn.onclick = () => {
             router.navigate(`/comparison?kb=${encodeURIComponent(kb)}`);
