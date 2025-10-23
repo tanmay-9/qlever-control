@@ -132,7 +132,7 @@
 
         <div id="page-main" class="page container-lg p-0 px-md-4 py-md-3">
             <!-- <div class="main-title">RDF Graph Database Performance Evaluation</div> -->
-            <div class="accordion mb-3" id="helpAccordion">
+            <div class="accordion mb-4" id="helpAccordion">
                 <div class="accordion-item">
                     <h2 class="accordion-header" id="headingHelp">
                         <button
@@ -154,7 +154,8 @@
                     >
                         <div class="accordion-body bg-info bg-opacity-10 pb-1">
                             <p>
-                                Each table shows the <strong>aggregate metrics</strong> for all RDF graph databases evaluated on the given benchmark.
+                                Each table shows the <strong>aggregate metrics</strong> for all RDF graph databases
+                                evaluated on the given benchmark.
                             </p>
                             <ul>
                                 <li>
@@ -259,12 +260,16 @@
                     </button>
                 </li>
                 <li class="ms-auto">
-                    <button id="detailsCompareExecTreesBtn" class="btn btn-outline-theme">
-                        Compare Execution Trees
+                    <button
+                        id="detailsCompareExecTreesBtn"
+                        class="btn btn-outline-theme d-flex align-item-center me-2 me-md-0"
+                        title="Compare Execution Trees for the selected benchmark"
+                    >
+                        <i class="bi bi-diagram-2-fill"></i>|<i class="bi bi-diagram-2-fill"></i>
                     </button>
                 </li>
             </ul>
-            <div class="tab-content px-3" id="myTabContent">
+            <div class="tab-content" id="myTabContent">
                 <div
                     class="tab-pane fade show active"
                     id="runtimes-tab-pane"
@@ -363,8 +368,7 @@
                                 </li>
                                 <li>
                                     <span class="fw-bold"
-                                        ><i class="bi
-                                          bi-exclamation-triangle-fill"></i> in a system column cell</span
+                                        ><i class="bi bi-exclamation-triangle-fill"></i> in a system column cell</span
                                     >: Result size for that system differs from the majority.
                                 </li>
                                 <li>
@@ -409,8 +413,12 @@
                         </div>
                     </div>
                 </div>
-                <button id="goToCompareExecTreesBtn" class="btn btn-sm btn-outline-theme ms-3 mt-2">
-                    Compare Execution Trees
+                <button
+                    id="goToCompareExecTreesBtn"
+                    class="btn btn-sm btn-outline-theme ms-1 ms-md-3 mt-1 me-2 me-md-0 d-flex align-items-center"
+                    title="Compare Execution Trees for the selected benchmark"
+                >
+                    <i class="bi bi-diagram-2-fill"></i>|<i class="bi bi-diagram-2-fill"></i>
                 </button>
             </div>
 
@@ -478,8 +486,11 @@
             <div class="container-lg p-0 px-md-4">
                 <div class="d-flex align-items-center gap-2 flex-nowrap">
                     <select title="First QLever instance" class="form-select flex-grow-1" id="select1"></select>
-                    <button id="compareExecTreesBtn" class="btn btn-outline-theme d-flex align-items-center gap-1 px-md-5">
-                        <i class="bi bi-diagram-2-fill"></i>
+                    <button
+                        id="compareExecTreesBtn"
+                        class="btn btn-outline-theme d-flex align-items-center gap-1 px-md-5"
+                    >
+                        <i class="bi bi-diagram-2-fill"></i>|<i class="bi bi-diagram-2-fill"></i>
                         <span class="d-none d-md-inline">Compare</span>
                     </button>
                     <select title="Second QLever instance" class="form-select flex-grow-1" id="select2"></select>

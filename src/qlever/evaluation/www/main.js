@@ -167,7 +167,7 @@ function updateMainPage(performanceData, additionalData) {
     for (const kb of sortedKbNames) {
         // Create section wrapper
         const section = document.createElement("div");
-        section.className = "kg-section";
+        section.className = "mb-4 border border-secondary rounded-3 border-opacity-25 p-3";
 
         // Header with KB name and a compare button
         const header = document.createElement("div");

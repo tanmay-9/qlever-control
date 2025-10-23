@@ -27,13 +27,6 @@ html {
     font-size: 1.5rem;
 }
 
-.kg-section {
-    border-radius: 10px;
-    box-shadow: var(--bs-box-shadow);
-    padding: 1rem;
-    margin-bottom: 1.5rem;
-}
-
 .kg-header {
     display: flex;
     justify-content: space-between;
