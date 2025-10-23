@@ -45,16 +45,8 @@ def get_query_data(
         runtime = float(query["runtime_info"]["client_time"])
         if len(query["headers"]) == 0 and isinstance(query["results"], str):
             failed += 1
-            runtime_gm2 = (
-                runtime * 2
-                if timeout is None
-                else timeout * 2
-            )
-            runtime_gm10 = (
-                runtime * 10
-                if timeout is None
-                else timeout * 10
-            )
+            runtime_gm2 = runtime * 2 if timeout is None else timeout * 2
+            runtime_gm10 = runtime * 10 if timeout is None else timeout * 10
             runtimes_gm2.append(runtime_gm2)
             runtimes_gm10.append(runtime_gm10)
         else:
@@ -80,9 +72,7 @@ def get_query_data(
     return query_data
 
 
-def create_json_data(
-    yaml_dir: Path, title: str
-) -> dict | None:
+def create_json_data(yaml_dir: Path, title: str) -> dict | None:
     data = {
         "performance_data": None,
         "additional_data": {
@@ -127,7 +117,7 @@ class CustomHTTPRequestHandler(SimpleHTTPRequestHandler):
         *args,
         yaml_dir: Path | None = None,
         # error_penalty: int = 2,
-        title: str = "SPARQL Engine Performance Evaluation",
+        title: str = "RDF Graph Database Performance Evaluation",
         **kwargs,
     ) -> None:
         self.yaml_dir = yaml_dir
@@ -140,9 +130,7 @@ class CustomHTTPRequestHandler(SimpleHTTPRequestHandler):
 
         if path == "/yaml_data":
             try:
-                data = create_json_data(
-                    self.yaml_dir, self.title
-                )
+                data = create_json_data(self.yaml_dir, self.title)
                 json_data = json.dumps(data, indent=2).encode("utf-8")
 
                 self.send_response(200)
@@ -168,7 +156,10 @@ class ServeEvaluationAppCommand(QleverCommand):
         pass
 
     def description(self) -> str:
-        return "Serve the SPARQL Engine performance comparison webapp"
+        return (
+            "Serve the web app for the RDF Graph "
+            "Database Performance Evaluation"
+        )
 
     def should_have_qleverfile(self) -> bool:
         return False
@@ -207,7 +198,7 @@ class ServeEvaluationAppCommand(QleverCommand):
         subparser.add_argument(
             "--title-overview-page",
             type=str,
-            default="SPARQL Engine Performance Evaluation",
+            default="RDF Graph Database Performance Evaluation",
             help="Title text displayed in the navigation bar of the Overview page.",
         )
         # subparser.add_argument(

@@ -51,10 +51,10 @@ function mainTableColumnDefs() {
     // Define custom formatting and filters based on column keys
     return [
         {
-            headerName: "SPARQL Engine",
+            headerName: "System",
             field: "engine_name",
             filter: "agTextColumnFilter",
-            headerTooltip: "Name of the SPARQL engine being benchmarked.",
+            headerTooltip: "Name of the RDF graph database being benchmarked.",
             tooltipComponent: CustomDetailsTooltip,
             flex: 1.25,
         },
