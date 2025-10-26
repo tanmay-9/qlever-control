@@ -61,7 +61,7 @@ class Qleverfile:
             "--text-description",
             type=str,
             default=None,
-            help="A concise description of the additional text data" " if any",
+            help="A concise description of the additional text data if any",
         )
         data_args["format"] = arg(
             "--format",
@@ -167,10 +167,10 @@ class Qleverfile:
         )
         index_args["use_patterns"] = arg(
             "--use-patterns",
-            action="store_true",
-            default=True,
-            help="Precompute so-called patterns needed for fast processing"
-            " of queries like SELECT ?p (COUNT(DISTINCT ?s) AS ?c) "
+            choices=["yes", "no"],
+            default="yes",
+            help="Whether to precompute the so-called patterns used for fast "
+            "processing of queries like SELECT ?p (COUNT(DISTINCT ?s) AS ?c) "
             "WHERE { ?s ?p [] ... } GROUP BY ?p",
         )
         index_args["text_index"] = arg(
@@ -283,10 +283,10 @@ class Qleverfile:
         )
         server_args["use_patterns"] = arg(
             "--use-patterns",
-            action="store_true",
-            default=True,
-            help="Use the patterns precomputed during the index build"
-            " (see `qlever index --help` for their utility)",
+            choices=["yes", "no"],
+            default="yes",
+            help="Whether to use the patterns precomputed during the index "
+            "build (see `qlever index --help` for their utility)",
         )
         server_args["use_text_index"] = arg(
             "--use-text-index",
@@ -438,6 +438,10 @@ class Qleverfile:
             server = config["server"]
         if index.get("text_index", "none") != "none":
             server["use_text_index"] = "yes"
+        if index.get("only_pso_and_pos_permutations", "false") == "true":
+            index["use_patterns"] = "no"
+        if index.get("use_patterns", None) == "no":
+            server["use_patterns"] = "no"
 
         # Add other non-trivial default values.
         try:
