@@ -652,8 +652,7 @@ class BenchmarkQueriesCommand(QleverCommand):
 
         # Show what the command will do.
         example_queries_cmd = (
-            "curl -sv https://qlever.cs.uni-freiburg.de/"
-            f"api/examples/{args.ui_config}"
+            f"curl -sv https://qlever.dev/api/examples/{args.ui_config}"
         )
         sparql_endpoint = (
             args.sparql_endpoint
