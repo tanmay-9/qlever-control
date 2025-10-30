@@ -1,17 +1,3 @@
-/**
- * List of query statistics keys (values unused, so just keys kept)
- */
-const QUERY_STATS_KEYS = [
-    "ameanTime",
-    "gmeanTime2",
-    "gmeanTime10",
-    "medianTime",
-    "under1s",
-    "between1to5s",
-    "over5s",
-    "failed",
-];
-
 const mainGridApis = {};
 
 /**
@@ -23,17 +9,27 @@ const mainGridApis = {};
  * @returns {Object<string, Array>} Object mapping metric keys and engine names to arrays of values
  */
 function getAllQueryStatsByKb(performanceData, kb) {
+    const query_stats_keys = [
+        "ameanTime",
+        "gmeanTime2",
+        "gmeanTime10",
+        "medianTime",
+        "under1s",
+        "between1to5s",
+        "over5s",
+        "failed",
+    ];
     const enginesDict = performanceData[kb];
     const enginesDictForTable = { engine_name: [] };
 
     // Initialize arrays for all metric keys
-    QUERY_STATS_KEYS.forEach((key) => {
+    query_stats_keys.forEach((key) => {
         enginesDictForTable[key] = [];
     });
 
     for (const [engine, engineStats] of Object.entries(enginesDict)) {
         enginesDictForTable.engine_name.push(capitalize(engine));
-        for (const metricKey of QUERY_STATS_KEYS) {
+        for (const metricKey of query_stats_keys) {
             enginesDictForTable[metricKey].push(engineStats[metricKey]);
         }
     }
@@ -280,65 +276,62 @@ function updateMainPage(performanceData, additionalData) {
     container.appendChild(fragment);
 }
 
-function setThemeTogglerListener() {
+/**
+ * Handles light/dark theme management including:
+ * - Setting the preferred theme based on system settings
+ * - Toggling between light and dark modes on button click
+ * - Updating Bootstrap and Ag-Grid theme classes
+ * - Adjusting toggle button icon and title
+ */
+function initThemeManager() {
     const themeToggleBtn = document.getElementById("themeToggleBtn");
     const themeToggleIcon = document.getElementById("themeToggleIcon");
+    const html = document.documentElement;
 
-    themeToggleBtn.addEventListener("click", () => {
-        const html = document.documentElement;
+    /**
+     * Updates the current theme across UI components.
+     * @param {string} theme - The theme to apply ("light" or "dark").
+     */
+    function applyTheme(theme) {
+        html.setAttribute("data-bs-theme", theme);
+        themeToggleIcon.className = theme === "light" ? "bi bi-moon-fill" : "bi bi-sun-fill";
+        themeToggleBtn.title = `Click to change to ${theme === "light" ? "dark" : "light"} mode!`;
+
+        const grids = document.querySelectorAll(".ag-theme-balham, .ag-theme-balham-dark");
+        grids.forEach(grid => {
+            grid.classList.toggle("ag-theme-balham", theme === "light");
+            grid.classList.toggle("ag-theme-balham-dark", theme === "dark");
+        });
+    }
+
+    /**
+     * Detects and applies the user's preferred color scheme.
+     */
+    function applyPreferredTheme() {
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        applyTheme(prefersDark ? "dark" : "light");
+    }
+
+    /**
+     * Toggles the theme between light and dark.
+     */
+    function toggleTheme() {
         const currentTheme = html.getAttribute("data-bs-theme") || "light";
         const newTheme = currentTheme === "light" ? "dark" : "light";
+        applyTheme(newTheme);
+    }
 
-        // Update Bootstrap theme
-        html.setAttribute("data-bs-theme", newTheme);
+    // Initialize preferred theme
+    applyPreferredTheme();
 
-        // Update toggle icon
-        themeToggleIcon.className = newTheme === "light" ? "bi bi-moon-fill" : "bi bi-sun-fill";
-        themeToggleBtn.title = `Click to change to ${currentTheme} mode!`;
-
-        // Update all Ag-Grid containers
-        const grids = document.querySelectorAll(".ag-theme-balham, .ag-theme-balham-dark");
-        grids.forEach((grid) => {
-            if (newTheme === "light") {
-                grid.classList.remove("ag-theme-balham-dark");
-                grid.classList.add("ag-theme-balham");
-            } else {
-                grid.classList.remove("ag-theme-balham");
-                grid.classList.add("ag-theme-balham-dark");
-            }
-        });
-    });
-}
-
-function applyPreferredTheme() {
-    const themeToggleBtn = document.getElementById("themeToggleBtn");
-    const themeToggleIcon = document.getElementById("themeToggleIcon");
-
-    const html = document.documentElement;
-    const theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-
-    html.setAttribute("data-bs-theme", theme);
-    themeToggleIcon.className = theme === "light" ? "bi bi-moon-fill" : "bi bi-sun-fill";
-    themeToggleBtn.title = `Click to change to ${theme === "light" ? "dark" : "light"} mode!`;
-
-    // Update all Ag-Grid containers
-    const grids = document.querySelectorAll(".ag-theme-balham, .ag-theme-balham-dark");
-    grids.forEach((grid) => {
-        if (theme === "light") {
-            grid.classList.remove("ag-theme-balham-dark");
-            grid.classList.add("ag-theme-balham");
-        } else {
-            grid.classList.remove("ag-theme-balham");
-            grid.classList.add("ag-theme-balham-dark");
-        }
-    });
+    // Attach click listener to toggle button
+    themeToggleBtn.addEventListener("click", toggleTheme);
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
     router = new Navigo("/", { hash: true });
 
-    setThemeTogglerListener();
-    applyPreferredTheme();
+    initThemeManager();
 
     try {
         showSpinner();
