@@ -52,11 +52,11 @@ function setCompareExecTreesEvents() {
     // Event to handle zoom in/out of execution trees
     document.querySelectorAll('[aria-label="CompareExecTrees zoom"]').forEach((node) => {
         node.addEventListener("click", function (event) {
-            if (event.target.tagName === "BUTTON") {
+            if (["BUTTON", "I"].includes(event.target.tagName)) {
                 const engine1 = document.querySelector("#select1").value;
                 const engine2 = document.querySelector("#select2").value;
                 if (!engine1 || !engine2) return;
-                const buttonId = event.target.id;
+                const buttonId = event.target.closest("button").id;
                 const purpose = buttonId.slice(0, -1);
                 const treeId = `#tree${buttonId.slice(-1)}`;
                 const currentFontSize = document

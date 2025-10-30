@@ -109,7 +109,7 @@ class CustomDetailsTooltip {
  * @returns {Array<Object>} columnDefs for ag-Grid
  */
 function getQueryRuntimesColumnDefs() {
-    return [
+    let columnDefs = [
         {
             headerName: "SPARQL Query",
             field: "query",
@@ -128,14 +128,21 @@ function getQueryRuntimesColumnDefs() {
             flex: 1,
             valueFormatter: (params) => (params.value != null ? `${params.value.toFixed(2)}s` : ""),
         },
-        {
-            headerName: "Result Size",
-            field: "result_size",
-            type: "numericColumn",
-            filter: "agTextColumnFilter",
-            flex: 1.5,
-        },
     ];
+    if (window.matchMedia("(min-width: 768px)").matches) {
+        columnDefs.push(
+            ...[
+                {
+                    headerName: "Result Size",
+                    field: "result_size",
+                    type: "numericColumn",
+                    filter: "agTextColumnFilter",
+                    flex: 1.5,
+                },
+            ]
+        );
+    }
+    return columnDefs;
 }
 
 function setTabsToDefault() {
@@ -226,7 +233,7 @@ function updateTabsWithSelectedRow(rowData) {
                 minWidth: 100,
             },
             domLayout: domLayout,
-            rowStyle: { fontSize: "14px", cursor: "pointer" },
+            rowStyle: { fontSize: "clamp(12px, 1vw + 8px, 14px)", cursor: "pointer" },
             suppressDragLeaveHidesColumns: true,
         });
     } else {
@@ -297,7 +304,7 @@ function updateDetailsPage(performanceData, kb, engine) {
             detailsGridApi = params.api;
         },
         getRowStyle: (params) => {
-            let rowStyle = { fontSize: "14px", cursor: "pointer" };
+            let rowStyle = { fontSize: "clamp(12px, 1vw + 8px, 14px)", cursor: "pointer" };
             if (params.data.failed === true) {
                 rowStyle.backgroundColor = "var(--bs-danger-border-subtle)";
             }

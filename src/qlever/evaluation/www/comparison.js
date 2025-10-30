@@ -513,6 +513,7 @@ function getComparisonColumnDefs(engines, showResultSize) {
             autoHeight: showResultSize,
             tooltipValueGetter: getTooltipValue,
             tooltipComponent: CustomTooltip,
+            minWidth: 120,
         },
     ];
     const kb = document.querySelector("#page-comparison").dataset.kb;
@@ -609,10 +610,10 @@ function updateComparisonPage(performanceData, kb, kbAdditionalData) {
             filter: true,
             resizable: true,
             flex: 1,
-            minWidth: 100,
+            minWidth: 90,
         },
         domLayout: "normal",
-        rowStyle: { fontSize: "14px", cursor: "pointer" },
+        rowStyle: { fontSize: "clamp(12px, 1vw + 8px, 14px)", cursor: "pointer" },
         onGridReady: (params) => {
             gridApi = params.api;
         },
