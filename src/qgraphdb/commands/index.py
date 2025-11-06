@@ -40,8 +40,13 @@ class IndexCommand(QleverCommand):
             ],
         }
 
-    def additional_arguments(self, subparser):
-        pass
+    def additional_arguments(self, subparser) -> None:
+        subparser.add_argument(
+            "--overwrite-existing",
+            action="store_true",
+            default=False,
+            help="Overwrite an existing index, think twice before using this",
+        )
 
     def update_config_ttl(self, config_dict: dict[str, str]) -> None:
         graph = rdflib.Graph()
@@ -90,11 +95,16 @@ class IndexCommand(QleverCommand):
 
     def execute(self, args) -> bool:
         index_cmd = (
-            f"{args.index_binary} preload {args.jvm_args} -c config.ttl "
-            f"{'-t ' + args.threads if args.threads is not None else ''}"
-            f"-Dgraphdb.home={args.name}_index {args.extra_args} {args.input_files}"
+            f"{args.index_binary} preload {args.jvm_args} -c config.ttl"
         )
-        index_cmd += f" | tee {args.name}.index-log.txt"
+        if args.overwrite_existing:
+            index_cmd += " -f"
+        if args.threads:
+            index_cmd += f" -t {args.threads}"
+        index_cmd += (
+            f" -Dgraphdb.home={args.name}_index {args.extra_args} "
+            f"{args.input_files} | tee {args.name}.index-log.txt"
+        )
 
         if args.system != "native":
             index_cmd = self.wrap_cmd_in_container(args, index_cmd)
@@ -141,14 +151,15 @@ class IndexCommand(QleverCommand):
             )
             return False
 
-        # index_dir = Path(f"{args.name}_index/data/repositories/{args.name}")
-        # if index_dir.exists():
-        #     log.error(
-        #         f"Index directory found in {args.name}_index/data/repositories "
-        #         "which shows presence of a previous index\n"
-        #     )
-        #     log.info("Aborting the index operation...")
-        #     return False
+        index_dir = Path(f"{args.name}_index/data/repositories/{args.name}")
+        if index_dir.exists() and not args.overwrite_existing:
+            log.error(
+                f'Index files for basename "{args.name}" found, if you '
+                f"want to overwrite them, use --overwrite-existing"
+            )
+            log.info("")
+            log.info(f"Index directory found in current directory: {index_dir}")
+            return False
 
         # Run the index command.
         try:
