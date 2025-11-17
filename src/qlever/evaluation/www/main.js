@@ -167,7 +167,7 @@ function updateMainPage(performanceData, additionalData) {
 
         // Header with KB name and a compare button
         const header = document.createElement("div");
-        header.className = "kg-header";
+        header.className = "kg-header px-2 px-md-0";
 
         // const titleWrapper = document.createElement("div");
         // titleWrapper.className = "d-inline-flex align-items-center";
