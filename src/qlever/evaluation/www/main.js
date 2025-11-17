@@ -377,7 +377,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                         );
                         return;
                     }
-                    updateDetailsPage(performanceData, kb, engine);
+                    updateDetailsPage(performanceData, kb, engine, additionalData.kbs[kb]);
                     showPage("details");
                 },
                 "/comparison": (params) => {

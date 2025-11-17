@@ -564,7 +564,8 @@ function updateComparisonPage(performanceData, kb, kbAdditionalData) {
     const lastKb = pageNode.dataset.kb;
     removeTitleInfoPill();
     const titleNode = document.querySelector("#main-page-header");
-    let title = `Performance Evaluation for ${kbAdditionalData.name}`;
+    let kbHeader = kbAdditionalData?.name || capitalize(kb);
+    let title = `Performance Evaluation for ${kbHeader}`;
     let infoPill = null;
     if (kbAdditionalData.description) {
         infoPill = createBenchmarkDescriptionInfoPill(kbAdditionalData.description, "bottom");
