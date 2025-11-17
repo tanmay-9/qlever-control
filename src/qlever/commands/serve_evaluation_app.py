@@ -76,7 +76,6 @@ def create_json_data(yaml_dir: Path, title: str) -> dict | None:
     data = {
         "performance_data": None,
         "additional_data": {
-            # "penalty": error_penalty,
             "title": title,
             "kbs": {},
         },
@@ -96,15 +95,13 @@ def create_json_data(yaml_dir: Path, title: str) -> dict | None:
         with yaml_file.open("r", encoding="utf-8") as queries_file:
             queries_data = yaml.safe_load(queries_file)
             data["additional_data"]["kbs"][dataset] = {
-                "description": queries_data.get("description"),
-                "title": queries_data.get("title"),
                 "name": queries_data.get("name"),
+                "description": queries_data.get("description"),
                 "scale": queries_data.get("scale"),
             }
             query_data = get_query_data(
                 queries_data["queries"],
                 queries_data.get("timeout"),
-                # error_penalty,
             )
             performance_data[dataset][engine] = {**query_data}
     data["performance_data"] = performance_data
@@ -116,12 +113,10 @@ class CustomHTTPRequestHandler(SimpleHTTPRequestHandler):
         self,
         *args,
         yaml_dir: Path | None = None,
-        # error_penalty: int = 2,
         title: str = "RDF Graph Database Performance Evaluation",
         **kwargs,
     ) -> None:
         self.yaml_dir = yaml_dir
-        # self.error_penalty = error_penalty
         self.title = title
         super().__init__(*args, **kwargs)
 
@@ -201,16 +196,6 @@ class ServeEvaluationAppCommand(QleverCommand):
             default="RDF Graph Database Performance Evaluation",
             help="Title text displayed in the navigation bar of the Overview page.",
         )
-        # subparser.add_argument(
-        #     "--error-penalty",
-        #     type=int,
-        #     default=2,
-        #     help=(
-        #         "The timeout (or failed runtime) will be multiplied with this "
-        #         "error penalty factor when computing aggregate query metrics "
-        #         "(Default = 2)"
-        #     ),
-        # )
 
     def execute(self, args) -> bool:
         yaml_dir = Path(args.results_dir)
@@ -218,7 +203,6 @@ class ServeEvaluationAppCommand(QleverCommand):
             CustomHTTPRequestHandler,
             directory=EVAL_DIR,
             yaml_dir=yaml_dir,
-            # error_penalty=args.error_penalty,
             title=args.title_overview_page,
         )
         httpd = HTTPServer(("", args.port), handler)

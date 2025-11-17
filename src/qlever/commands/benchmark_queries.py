@@ -30,7 +30,7 @@ class BenchmarkQueriesCommand(QleverCommand):
     """
 
     def __init__(self):
-        self.benchmark_title = None
+        self.benchmark_name = None
         self.benchmark_description = None
 
     def description(self) -> str:
@@ -81,7 +81,7 @@ class BenchmarkQueriesCommand(QleverCommand):
             help=(
                 "Path to a YML file containing the benchmark queries. "
                 "The YAML must follow this structure ->"
-                "title: <benchmark title (str)>, "
+                "name: <benchmark name (str)>, "
                 "description: <benchmark description (str)>, "
                 "queries: <list[query]> where each query contains: "
                 "name: <short query name (mandatory)>, "
@@ -215,26 +215,26 @@ class BenchmarkQueriesCommand(QleverCommand):
             ),
         )
         subparser.add_argument(
-            "--title",
+            "--benchmark-name",
             type=str,
             default=None,
             help=(
-                "Benchmark title to be saved in result YML file (This will "
-                "override the 'title' field in --queries-yml file). This benchmark "
-                "title would be displayed as header title when comparing engines "
-                "on the evaluation web app for the given dataset. Only relevant "
+                "Benchmark name to be saved in result YML file (This will "
+                "override the 'name' field in --queries-yml file). This benchmark "
+                "name would be displayed as header title when comparing RDF Graph "
+                "Databases on the evaluation web app. Only relevant "
                 "when --result-file argument is passed."
             ),
         )
         subparser.add_argument(
-            "--description",
+            "--benchmark-description",
             type=str,
             default=None,
             help=(
-                "Benchmark description to be saved in result YML file. (This "
-                "will override the 'description' field in --queries-yml file) "
-                " This benchmark description would be displayed as additional "
-                "help text on the evaluation web app for the given dataset. "
+                "Benchmark description to be saved in result YML file (This "
+                "will override the 'description' field in --queries-yml file). "
+                "This benchmark description would be displayed as additional "
+                "help text on the evaluation web app for the given benchmark. "
                 "Only relevant when --result-file argument is passed."
             ),
         )
@@ -362,8 +362,8 @@ class BenchmarkQueriesCommand(QleverCommand):
             log.error("Error: 'queries' key in YML file must hold a list.")
             return []
 
-        if title := data.get("title"):
-            self.benchmark_title = title
+        if name := data.get("name"):
+            self.benchmark_name = name
         if description := data.get("description"):
             self.benchmark_description = description
 
@@ -525,9 +525,7 @@ class BenchmarkQueriesCommand(QleverCommand):
                 )
                 results_dir_path.mkdir(parents=True, exist_ok=True)
             dataset, engine = result_file_parts
-            self.benchmark_title = (
-                f"Performance Evaluation for {dataset.capitalize()}"
-            )
+            self.benchmark_name = dataset.capitalize()
             self.benchmark_description = (
                 f"{dataset.capitalize()} benchmark ran using {script_name} "
                 "benchmark-queries"
@@ -657,17 +655,17 @@ class BenchmarkQueriesCommand(QleverCommand):
         result_sizes = []
         if args.result_file:
             result_yml_query_records = {
-                "queries": [],
-                "title": self.benchmark_title,
+                "name": self.benchmark_name,
                 "description": self.benchmark_description,
+                "queries": [],
             }
             if timeout:
                 result_yml_query_records["timeout"] = timeout
-            # Override the title and description if provided as args
-            if args.title:
-                result_yml_query_records["title"] = args.title
-            if args.description:
-                result_yml_query_records["description"] = args.description
+            # Override the name and description if provided as args
+            if args.benchmark_name:
+                result_yml_query_records["name"] = args.benchmark_name
+            if args.benchmark_description:
+                result_yml_query_records["description"] = args.benchmark_description
 
         num_failed = 0
         for name, description, query in filtered_queries:
