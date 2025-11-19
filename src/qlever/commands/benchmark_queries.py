@@ -15,7 +15,7 @@ import rdflib
 import yaml
 from termcolor import colored
 
-from qlever import script_name
+from qlever import command_objects, script_name
 from qlever.command import QleverCommand
 from qlever.commands.clear_cache import ClearCacheCommand
 from qlever.commands.ui import dict_to_yaml
@@ -665,7 +665,13 @@ class BenchmarkQueriesCommand(QleverCommand):
             if args.benchmark_name:
                 result_yml_query_records["name"] = args.benchmark_name
             if args.benchmark_description:
-                result_yml_query_records["description"] = args.benchmark_description
+                result_yml_query_records["description"] = (
+                    args.benchmark_description
+                )
+
+            index_time, index_size = self.compute_index_stats(args)
+            result_yml_query_records["index_time"] = index_time
+            result_yml_query_records["index_size"] = index_size
 
         num_failed = 0
         for name, description, query in filtered_queries:
@@ -962,6 +968,29 @@ class BenchmarkQueriesCommand(QleverCommand):
 
         # Return success (has nothing to do with how many queries failed).
         return True
+
+    @staticmethod
+    def compute_index_stats(args) -> tuple[float | None, float | None]:
+        """
+        Compute the index size (Bytes) and time (seconds) if available
+        """
+        index_stats = command_objects["index-stats"]
+        # Set the args for index-stats command
+        args.time_unit = "s"
+        args.size_unit = "B"
+        args.ignore_text_index = False
+        index_time = index_size = None
+        index_log_file = next(Path.cwd().glob("*.index-log.txt"), None)
+        if index_log_file:
+            # index-stats needs args.name to get the text index filename
+            args.name = index_log_file.name.split(".")[0]
+            durations = index_stats.execute_time(args, index_log_file.name)
+            if len(durations) > 0 and "TOTAL time" in durations:
+                index_time = durations["TOTAL time"][0]
+        sizes = index_stats.execute_space(args)
+        if len(sizes) > 0 and "TOTAL size" in sizes:
+            index_size = sizes["TOTAL size"][0]
+        return index_time, index_size
 
     def get_result_yml_query_record(
         self,
