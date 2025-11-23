@@ -5,6 +5,7 @@ import statistics
 from functools import partial
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote
 
 import yaml
@@ -15,7 +16,7 @@ from qlever.log import log
 EVAL_DIR = Path(__file__).parent.parent / "evaluation"
 
 
-QUERY_STATS_DICT = {
+PERFORMANCE_STATS_DICT = {
     "ameanTime": None,
     "gmeanTime2": None,
     "gmeanTime10": None,
@@ -27,12 +28,12 @@ QUERY_STATS_DICT = {
 }
 
 
-def get_query_data(
-    queries: list[dict], timeout: int | None
-) -> dict[str, float | None]:
-    query_data = {stat: val for stat, val in QUERY_STATS_DICT.items()}
+def get_performance_data(result_data: dict[str, Any]) -> dict[str, Any]:
+    queries = result_data.get("queries")
+    timeout = result_data.get("timeout")
+    performance_data = {stat: val for stat, val in PERFORMANCE_STATS_DICT.items()}
     if not queries:
-        return query_data
+        return performance_data
     failed = under_1 = bw_1_to_5 = over_5 = 0
     runtimes_gm2 = []
     runtimes_gm10 = []
@@ -59,17 +60,19 @@ def get_query_data(
             runtimes_gm2.append(runtime)
             runtimes_gm10.append(runtime)
 
-    query_data["timeout"] = timeout
-    query_data["ameanTime"] = statistics.mean(runtimes_gm2)
-    query_data["gmeanTime2"] = statistics.geometric_mean(runtimes_gm2)
-    query_data["gmeanTime10"] = statistics.geometric_mean(runtimes_gm10)
-    query_data["medianTime"] = statistics.median(runtimes_gm2)
-    query_data["failed"] = (failed / len(queries)) * 100
-    query_data["under1s"] = (under_1 / len(queries)) * 100
-    query_data["between1to5s"] = (bw_1_to_5 / len(queries)) * 100
-    query_data["over5s"] = (over_5 / len(queries)) * 100
-    query_data["queries"] = queries
-    return query_data
+    performance_data["timeout"] = timeout
+    performance_data["indexTime"] = result_data.get("index_time")
+    performance_data["indexSize"] = result_data.get("index_size")
+    performance_data["ameanTime"] = statistics.mean(runtimes_gm2)
+    performance_data["gmeanTime2"] = statistics.geometric_mean(runtimes_gm2)
+    performance_data["gmeanTime10"] = statistics.geometric_mean(runtimes_gm10)
+    performance_data["medianTime"] = statistics.median(runtimes_gm2)
+    performance_data["failed"] = (failed / len(queries)) * 100
+    performance_data["under1s"] = (under_1 / len(queries)) * 100
+    performance_data["between1to5s"] = (bw_1_to_5 / len(queries)) * 100
+    performance_data["over5s"] = (over_5 / len(queries)) * 100
+    performance_data["queries"] = queries
+    return performance_data
 
 
 def create_json_data(yaml_dir: Path, title: str) -> dict | None:
@@ -92,18 +95,15 @@ def create_json_data(yaml_dir: Path, title: str) -> dict | None:
             performance_data[dataset] = {}
         if performance_data[dataset].get(engine) is None:
             performance_data[dataset][engine] = {}
-        with yaml_file.open("r", encoding="utf-8") as queries_file:
-            queries_data = yaml.safe_load(queries_file)
+        with yaml_file.open("r", encoding="utf-8") as result_file:
+            result_data = yaml.safe_load(result_file)
             data["additional_data"]["kbs"][dataset] = {
-                "name": queries_data.get("name"),
-                "description": queries_data.get("description"),
-                "scale": queries_data.get("scale"),
+                "name": result_data.get("name"),
+                "description": result_data.get("description"),
+                "scale": result_data.get("scale"),
             }
-            query_data = get_query_data(
-                queries_data["queries"],
-                queries_data.get("timeout"),
-            )
-            performance_data[dataset][engine] = {**query_data}
+            per_kb_engine_data = get_performance_data(result_data)
+            performance_data[dataset][engine] = {**per_kb_engine_data}
     data["performance_data"] = performance_data
     return data
 
