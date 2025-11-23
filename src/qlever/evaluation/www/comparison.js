@@ -308,7 +308,7 @@ class WarningCellRenderer {
                 container.appendChild(document.createTextNode(`${value}`));
             } else {
                 const unit = params.data.query === "Failed Queries" ? "%" : "s";
-                container.appendChild(document.createTextNode(`${value.toFixed(2)}${unit}`));
+                container.appendChild(document.createTextNode(`${value.toFixed(2)} ${unit}`));
             }
         } else if (params.column.getColId() === "query") {
             if (params.data.row_warning) {
@@ -322,7 +322,7 @@ class WarningCellRenderer {
             const timeout = performanceData[kb][engine].timeout;
             const engineStatsColumn = engine + "_stats";
             const engineStats = params.data[engineStatsColumn];
-            let cellValue = `${value}s`;
+            let cellValue = `${value} s`;
             if (engineStats && typeof engineStats === "object") {
                 if (engineStats.size_warning) {
                     container.appendChild(warning);

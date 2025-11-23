@@ -126,7 +126,7 @@ function getQueryRuntimesColumnDefs() {
             type: "numericColumn",
             filter: "agNumberColumnFilter",
             flex: 1,
-            valueFormatter: (params) => (params.value != null ? `${params.value.toFixed(2)}s` : ""),
+            valueFormatter: (params) => (params.value != null ? `${params.value.toFixed(2)} s` : ""),
         },
     ];
     if (window.matchMedia("(min-width: 768px)").matches) {
