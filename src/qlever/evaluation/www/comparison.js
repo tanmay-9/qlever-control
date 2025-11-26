@@ -1,35 +1,4 @@
 let gridApi;
-/**
- * Populate the checkbox container inside the accordion with column names.
- * @param {string[]} columnNames - List of Ag Grid column field names
- */
-function populateColumnCheckboxes(columnNames) {
-    const container = document.querySelector("#columnCheckboxContainer");
-    container.innerHTML = "";
-
-    columnNames.forEach((col) => {
-        const div = document.createElement("div");
-        div.classList.add("form-check");
-
-        const checkbox = document.createElement("input");
-        checkbox.className = "form-check-input";
-        checkbox.style.cursor = "pointer";
-        checkbox.type = "checkbox";
-        checkbox.id = `col-${col}`;
-        checkbox.value = col;
-        checkbox.checked = true;
-
-        const label = document.createElement("label");
-        label.className = "form-check-label";
-        label.style.cursor = "pointer";
-        label.setAttribute("for", `col-${col}`);
-        label.textContent = capitalize(col);
-
-        div.appendChild(checkbox);
-        div.appendChild(label);
-        container.appendChild(div);
-    });
-}
 
 function setComparisonPageEvents() {
     document.querySelector("#columnCheckboxContainer").addEventListener("change", (event) => {
@@ -579,7 +548,13 @@ function updateComparisonPage(performanceData, kb, kbAdditionalData) {
     pageNode.dataset.kb = kb;
     document.querySelector("#orderColumnsDropdown").selectedIndex = 0;
 
-    populateColumnCheckboxes(Object.keys(performanceData[kb]));
+    // populateColumnCheckboxes(Object.keys(performanceData[kb]));
+    const showEnginesContainer = document.querySelector("#columnCheckboxContainer");
+    showEnginesContainer.innerHTML = "";
+    const showEnginesColumns = Object.fromEntries(
+        Object.keys(performanceData[kb]).map((engine) => [engine, capitalize(engine)])
+    );
+    showEnginesContainer.appendChild(getColumnVisibilityMultiSelectFragment(showEnginesColumns));
     document.querySelector("#showResultSize").checked = false;
     document.querySelector("#showMetrics").checked = false;
     let rowSelection = undefined;

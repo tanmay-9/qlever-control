@@ -75,7 +75,7 @@ def get_performance_data(result_data: dict[str, Any]) -> dict[str, Any]:
     return performance_data
 
 
-def create_json_data(yaml_dir: Path, title: str) -> dict | None:
+def create_json_data(yaml_dir: Path | None, title: str) -> dict | None:
     data = {
         "performance_data": None,
         "additional_data": {
@@ -84,7 +84,7 @@ def create_json_data(yaml_dir: Path, title: str) -> dict | None:
         },
     }
     performance_data = {}
-    if not yaml_dir.is_dir():
+    if not yaml_dir or not yaml_dir.is_dir():
         return None
     for yaml_file in yaml_dir.glob("*.results.yaml"):
         file_name_split = yaml_file.stem.split(".")
@@ -159,7 +159,7 @@ class ServeEvaluationAppCommand(QleverCommand):
     def should_have_qleverfile(self) -> bool:
         return False
 
-    def relevant_qleverfile_arguments(self) -> dict[str : list[str]]:
+    def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
         return {}
 
     def additional_arguments(self, subparser) -> None:

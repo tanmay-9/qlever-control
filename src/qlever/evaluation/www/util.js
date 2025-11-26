@@ -123,7 +123,7 @@ function pickSizeUnit(values) {
 
 function formatIndexStat(value, factor, unit) {
     if (value == null || typeof value !== "number") return null;
-    if (unit === 's') return `${(value / factor)} ${unit}`;
+    if (unit === "s") return `${value / factor} ${unit}`;
     return `${(value / factor).toFixed(1)} ${unit}`;
 }
 
@@ -489,6 +489,37 @@ function createTooltipContainer(params) {
     }
     container.appendChild(textDiv);
     return container;
+}
+
+/**
+ * Populate the checkbox container inside the accordion with column names.
+ * @param {string[]} columnNames - List of Ag Grid column field names
+ */
+function getColumnVisibilityMultiSelectFragment(columns, allChecked = true) {
+    const fragment = document.createDocumentFragment();
+    for (const [colKey, colValue] of Object.entries(columns)) {
+        const div = document.createElement("div");
+        div.classList.add("form-check");
+
+        const checkbox = document.createElement("input");
+        checkbox.className = "form-check-input";
+        checkbox.style.cursor = "pointer";
+        checkbox.type = "checkbox";
+        checkbox.id = colKey;
+        checkbox.value = colKey;
+        checkbox.checked = allChecked;
+
+        const label = document.createElement("label");
+        label.className = "form-check-label";
+        label.style.cursor = "pointer";
+        label.setAttribute("for", colKey);
+        label.textContent = colValue;
+
+        div.appendChild(checkbox);
+        div.appendChild(label);
+        fragment.appendChild(div);
+    }
+    return fragment;
 }
 
 function escapeLatex(str) {

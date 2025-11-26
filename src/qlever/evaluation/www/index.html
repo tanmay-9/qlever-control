@@ -160,37 +160,38 @@
                                 </p>
                                 <ul>
                                     <li>
-                                        <strong>Column headers</strong>: Hover over any header to see detailed explanations
-                                        of the metrics, including how failed queries are penalized.
+                                        <strong>Column headers</strong>: Hover over any header to see detailed
+                                        explanations of the metrics, including how failed queries are penalized.
                                     </li>
                                     <li>
                                         <strong>Sorting</strong>: Click a column header to sort by that metric. Hold
-                                        <kbd class="bg-info">Shift</kbd> and click multiple headers to sort by more than one
-                                        column in order.
+                                        <kbd class="bg-info">Shift</kbd> and click multiple headers to sort by more than
+                                        one column in order.
                                     </li>
                                     <li>
                                         <strong>Filtering</strong>: Each column has a built-in filter menu with powerful
                                         options to quickly narrow down the results.
                                     </li>
                                     <li>
-                                        <strong>Column resizing</strong>: Drag the edges of column headers to resize. Hold
-                                        <kbd class="bg-info">Shift</kbd> while resizing to change the column width without
-                                        shifting neighboring columns.
+                                        <strong>Column resizing</strong>: Drag the edges of column headers to resize.
+                                        Hold <kbd class="bg-info">Shift</kbd> while resizing to change the column width
+                                        without shifting neighboring columns.
                                     </li>
                                     <li>
-                                        <strong>Column reordering</strong>: Drag and drop column headers to reorder them.
+                                        <strong>Column reordering</strong>: Drag and drop column headers to reorder
+                                        them.
                                     </li>
                                     <li>
-                                        <strong>Engine rows</strong>: Click a row to view the individual query details for
-                                        that system on the given benchmark.
+                                        <strong>Engine rows</strong>: Click a row to view the individual query details
+                                        for that system on the given benchmark.
                                     </li>
                                     <li>
                                         <strong>Compare results</strong>: Use the compare button to see a per-query
                                         performance comparison of all systems.
                                     </li>
                                     <li>
-                                        <strong>Download</strong>: Export the table contents as <code>TSV</code> for offline
-                                        analysis or reporting.
+                                        <strong>Download</strong>: Export the table contents as <code>TSV</code> for
+                                        offline analysis or reporting.
                                     </li>
                                 </ul>
                             </div>
@@ -206,35 +207,16 @@
                         data-bs-toggle="dropdown"
                         aria-expanded="false"
                     >
-                        <i class="bi bi-funnel d-inline d-md-none"></i><span class="d-none d-md-inline">Show metric</span>
+                        <i class="bi bi-funnel d-inline d-md-none"></i
+                        ><span class="d-none d-md-inline">Show metric</span>
                     </button>
 
-                    <ul class="dropdown-menu p-2" aria-labelledby="columnVisibilityDropdown">
-                        <li>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" value="col1" id="col1" checked />
-                                <label class="form-check-label" for="col1">System</label>
-                            </div>
-                        </li>
-                        <li>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" value="col2" id="col2" checked />
-                                <label class="form-check-label" for="col2">Column 2</label>
-                            </div>
-                        </li>
-                        <li>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" value="col3" id="col3" checked />
-                                <label class="form-check-label" for="col3">Column 3</label>
-                            </div>
-                        </li>
-                        <li>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" value="col4" id="col4" checked />
-                                <label class="form-check-label" for="col4">Column 4</label>
-                            </div>
-                        </li>
-                    </ul>
+                    <div
+                        class="dropdown-menu p-2"
+                        aria-labelledby="columnVisibilityDropdown"
+                        id="showMetricsContainer"
+                        style="min-width: 200px"
+                    ></div>
                 </div>
             </div>
 

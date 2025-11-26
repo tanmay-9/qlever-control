@@ -1,4 +1,16 @@
 const mainGridApis = {};
+const engineMetrics = {
+    gmeanTime2: "Geom. Mean (P=2)",
+    gmeanTime10: "Geom. Mean (P=10)",
+    medianTime: "Median (P=2)",
+    ameanTime: "Arith. Mean (P=2)",
+    indexTime: "Index time",
+    indexSize: "Index size",
+    failed: "Failed",
+    under1s: "<= 1s",
+    between1to5s: "(1s, 5s]",
+    over5s: "> 5s",
+};
 
 /**
  * Given a knowledge base (kb), get all query stats for each engine to display
@@ -9,33 +21,37 @@ const mainGridApis = {};
  * @returns {Object<string, Array>} Object mapping metric keys and engine names to arrays of values
  */
 function getAllQueryStatsByKb(performanceData, kb) {
-    const query_stats_keys = [
-        "ameanTime",
-        "gmeanTime2",
-        "gmeanTime10",
-        "medianTime",
-        "under1s",
-        "between1to5s",
-        "over5s",
-        "failed",
-        "indexTime",
-        "indexSize",
-    ];
     const enginesDict = performanceData[kb];
     const enginesDictForTable = { engine_name: [] };
 
     // Initialize arrays for all metric keys
-    query_stats_keys.forEach((key) => {
+    Object.keys(engineMetrics).forEach((key) => {
         enginesDictForTable[key] = [];
     });
 
     for (const [engine, engineStats] of Object.entries(enginesDict)) {
         enginesDictForTable.engine_name.push(capitalize(engine));
-        for (const metricKey of query_stats_keys) {
+        for (const metricKey of Object.keys(engineMetrics)) {
             enginesDictForTable[metricKey].push(engineStats[metricKey]);
         }
     }
     return enginesDictForTable;
+}
+
+function setMainPageEvents() {
+    const showMetricsContainer = document.querySelector("#showMetricsContainer");
+    showMetricsContainer.addEventListener("change", (event) => {
+        if (event.target && event.target.matches('input[type="checkbox"]')) {
+            const metricsToDisplay = Array.from(
+                showMetricsContainer.querySelectorAll('input[type="checkbox"]:checked')
+            ).map((cb) => cb.value);
+            const metricsToHide = Object.keys(engineMetrics).filter((metric) => !metricsToDisplay.includes(metric));
+            for (const mainGridApi of Object.values(mainGridApis)) {
+                mainGridApi.setColumnsVisible(metricsToDisplay, true);
+                mainGridApi.setColumnsVisible(metricsToHide, false);
+            }
+        }
+    });
 }
 
 /**
@@ -180,6 +196,10 @@ function updateMainPage(performanceData, additionalData) {
             return nameA.localeCompare(nameB);
         })
         .map(([key, _kb]) => key);
+
+    const showMetricsContainer = document.querySelector("#showMetricsContainer");
+    showMetricsContainer.innerHTML = "";
+    showMetricsContainer.appendChild(getColumnVisibilityMultiSelectFragment(engineMetrics));
 
     // For each knowledge base (kb) key in performanceData
     for (const kb of sortedKbNames) {
@@ -467,6 +487,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         router.resolve();
 
+        setMainPageEvents();
         setDetailsPageEvents();
         setComparisonPageEvents();
         setCompareExecTreesEvents();
