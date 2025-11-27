@@ -1,35 +1,4 @@
 let gridApi;
-/**
- * Populate the checkbox container inside the accordion with column names.
- * @param {string[]} columnNames - List of Ag Grid column field names
- */
-function populateColumnCheckboxes(columnNames) {
-    const container = document.querySelector("#columnCheckboxContainer");
-    container.innerHTML = "";
-
-    columnNames.forEach((col) => {
-        const div = document.createElement("div");
-        div.classList.add("form-check");
-
-        const checkbox = document.createElement("input");
-        checkbox.className = "form-check-input";
-        checkbox.style.cursor = "pointer";
-        checkbox.type = "checkbox";
-        checkbox.id = `col-${col}`;
-        checkbox.value = col;
-        checkbox.checked = true;
-
-        const label = document.createElement("label");
-        label.className = "form-check-label";
-        label.style.cursor = "pointer";
-        label.setAttribute("for", `col-${col}`);
-        label.textContent = capitalize(col);
-
-        div.appendChild(checkbox);
-        div.appendChild(label);
-        container.appendChild(div);
-    });
-}
 
 function setComparisonPageEvents() {
     document.querySelector("#columnCheckboxContainer").addEventListener("change", (event) => {
@@ -308,7 +277,7 @@ class WarningCellRenderer {
                 container.appendChild(document.createTextNode(`${value}`));
             } else {
                 const unit = params.data.query === "Failed Queries" ? "%" : "s";
-                container.appendChild(document.createTextNode(`${value.toFixed(2)}${unit}`));
+                container.appendChild(document.createTextNode(`${value.toFixed(2)} ${unit}`));
             }
         } else if (params.column.getColId() === "query") {
             if (params.data.row_warning) {
@@ -322,7 +291,7 @@ class WarningCellRenderer {
             const timeout = performanceData[kb][engine].timeout;
             const engineStatsColumn = engine + "_stats";
             const engineStats = params.data[engineStatsColumn];
-            let cellValue = `${value}s`;
+            let cellValue = `${value} s`;
             if (engineStats && typeof engineStats === "object") {
                 if (engineStats.size_warning) {
                     container.appendChild(warning);
@@ -564,8 +533,8 @@ function updateComparisonPage(performanceData, kb, kbAdditionalData) {
     const lastKb = pageNode.dataset.kb;
     removeTitleInfoPill();
     const titleNode = document.querySelector("#main-page-header");
-    let title = `Performance comparison for ${capitalize(kb)}`;
-    if (kbAdditionalData.title) title = kbAdditionalData.title;
+    let kbHeader = kbAdditionalData?.name || capitalize(kb);
+    let title = `Performance Evaluation for ${kbHeader}`;
     let infoPill = null;
     if (kbAdditionalData.description) {
         infoPill = createBenchmarkDescriptionInfoPill(kbAdditionalData.description, "bottom");
@@ -579,7 +548,13 @@ function updateComparisonPage(performanceData, kb, kbAdditionalData) {
     pageNode.dataset.kb = kb;
     document.querySelector("#orderColumnsDropdown").selectedIndex = 0;
 
-    populateColumnCheckboxes(Object.keys(performanceData[kb]));
+    // populateColumnCheckboxes(Object.keys(performanceData[kb]));
+    const showEnginesContainer = document.querySelector("#columnCheckboxContainer");
+    showEnginesContainer.innerHTML = "";
+    const showEnginesColumns = Object.fromEntries(
+        Object.keys(performanceData[kb]).map((engine) => [engine, capitalize(engine)])
+    );
+    showEnginesContainer.appendChild(getColumnVisibilityMultiSelectFragment(showEnginesColumns));
     document.querySelector("#showResultSize").checked = false;
     document.querySelector("#showMetrics").checked = false;
     let rowSelection = undefined;

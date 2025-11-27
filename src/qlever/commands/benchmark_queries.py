@@ -15,7 +15,7 @@ import rdflib
 import yaml
 from termcolor import colored
 
-from qlever import engine_name, script_name
+from qlever import command_objects, script_name
 from qlever.command import QleverCommand
 from qlever.commands.clear_cache import ClearCacheCommand
 from qlever.commands.ui import dict_to_yaml
@@ -30,7 +30,7 @@ class BenchmarkQueriesCommand(QleverCommand):
     """
 
     def __init__(self):
-        self.benchmark_title = None
+        self.benchmark_name = None
         self.benchmark_description = None
 
     def description(self) -> str:
@@ -81,7 +81,7 @@ class BenchmarkQueriesCommand(QleverCommand):
             help=(
                 "Path to a YML file containing the benchmark queries. "
                 "The YAML must follow this structure ->"
-                "title: <benchmark title (str)>, "
+                "name: <benchmark name (str)>, "
                 "description: <benchmark description (str)>, "
                 "queries: <list[query]> where each query contains: "
                 "name: <short query name (mandatory)>, "
@@ -215,41 +215,27 @@ class BenchmarkQueriesCommand(QleverCommand):
             ),
         )
         subparser.add_argument(
-            "--title",
+            "--benchmark-name",
             type=str,
             default=None,
             help=(
-                "Benchmark title to be saved in result YML file (This will "
-                "override the 'title' field in --queries-yml file). This benchmark "
-                "title would be displayed as header title when comparing engines "
-                "on the evaluation web app for the given dataset. Only relevant "
+                "Benchmark name to be saved in result YML file (This will "
+                "override the 'name' field in --queries-yml file). This benchmark "
+                "name would be displayed as header title when comparing RDF Graph "
+                "Databases on the evaluation web app. Only relevant "
                 "when --result-file argument is passed."
             ),
         )
         subparser.add_argument(
-            "--description",
+            "--benchmark-description",
             type=str,
             default=None,
             help=(
-                "Benchmark description to be saved in result YML file. (This "
-                "will override the 'description' field in --queries-yml file) "
-                " This benchmark description would be displayed as additional "
-                "help text on the evaluation web app for the given dataset. "
+                "Benchmark description to be saved in result YML file (This "
+                "will override the 'description' field in --queries-yml file). "
+                "This benchmark description would be displayed as additional "
+                "help text on the evaluation web app for the given benchmark. "
                 "Only relevant when --result-file argument is passed."
-            ),
-        )
-        subparser.add_argument(
-            "--restart-on-hang",
-            action="store_true",
-            help=(
-                "Enable automatic server recovery during benchmarking. "
-                "If a query continues running for more than 30 seconds past the "
-                "configured timeout, the benchmark runner will assume the SPARQL "
-                "server is stuck. It will then stop and restart the server for "
-                "the current engine, and resume execution with the next query."
-                "NOTE: This only works if all the server parameters for start and "
-                "stop are configured in the Qleverfile and no arguments are needed "
-                f"for the {script_name} start and {script_name} stop commands."
             ),
         )
 
@@ -376,8 +362,8 @@ class BenchmarkQueriesCommand(QleverCommand):
             log.error("Error: 'queries' key in YML file must hold a list.")
             return []
 
-        if title := data.get("title"):
-            self.benchmark_title = title
+        if name := data.get("name"):
+            self.benchmark_name = name
         if description := data.get("description"):
             self.benchmark_description = description
 
@@ -510,40 +496,6 @@ class BenchmarkQueriesCommand(QleverCommand):
             pass
         return single_int_result
 
-    @staticmethod
-    def restart_on_hang(start_only: bool = False) -> bool:
-        """
-        Restart the SPARQL server after the server hangs i.e. doesn't return
-        results after timeout + 30s
-        Extremely useful for benchmarking oxigraph (doesn't have timeout implemented)
-        and blazegraph (doesn't terminate query execution often at timeout)
-        Only useful when Qleverfile in CWD and configured properly i.e. no command
-        line args needed to call stop and start commands
-        """
-        stop_cmd = f"{script_name} stop"
-        start_cmd = f"{script_name} start"
-        if not start_only:
-            try:
-                run_command(stop_cmd)
-                time.sleep(2)
-            except Exception as e:
-                log.warning(f"{script_name} process could not be stopped!: {e}")
-        try:
-            if script_name == "qvirtuoso":
-                Path("virtuoso.trx").unlink(missing_ok=True)
-            run_command(start_cmd)
-            time.sleep(5)
-            log.info(
-                f"Successfully restarted {engine_name} server after hang!"
-            )
-            return True
-        except Exception as e:
-            log.warning(
-                f"{script_name} server could not be restarted. This might affect "
-                f"the benchmark process!: {e}"
-            )
-            return False
-
     def execute(self, args) -> bool:
         # We can't have both `--remove-offset-and-limit` and `--limit`.
         if args.remove_offset_and_limit and args.limit:
@@ -573,9 +525,7 @@ class BenchmarkQueriesCommand(QleverCommand):
                 )
                 results_dir_path.mkdir(parents=True, exist_ok=True)
             dataset, engine = result_file_parts
-            self.benchmark_title = (
-                f"Performance Evaluation for {dataset.capitalize()}"
-            )
+            self.benchmark_name = dataset.capitalize()
             self.benchmark_description = (
                 f"{dataset.capitalize()} benchmark ran using {script_name} "
                 "benchmark-queries"
@@ -705,17 +655,23 @@ class BenchmarkQueriesCommand(QleverCommand):
         result_sizes = []
         if args.result_file:
             result_yml_query_records = {
-                "queries": [],
-                "title": self.benchmark_title,
+                "name": self.benchmark_name,
                 "description": self.benchmark_description,
+                "queries": [],
             }
             if timeout:
                 result_yml_query_records["timeout"] = timeout
-            # Override the title and description if provided as args
-            if args.title:
-                result_yml_query_records["title"] = args.title
-            if args.description:
-                result_yml_query_records["description"] = args.description
+            # Override the name and description if provided as args
+            if args.benchmark_name:
+                result_yml_query_records["name"] = args.benchmark_name
+            if args.benchmark_description:
+                result_yml_query_records["description"] = (
+                    args.benchmark_description
+                )
+
+            index_time, index_size = self.compute_index_stats(args)
+            result_yml_query_records["index_time"] = index_time
+            result_yml_query_records["index_size"] = index_size
 
         num_failed = 0
         for name, description, query in filtered_queries:
@@ -822,22 +778,18 @@ class BenchmarkQueriesCommand(QleverCommand):
                 f"qlever.example_queries.result.{abs(hash(curl_cmd))}.tmp"
             )
             start_time = time.time()
-            server_restarted = False
             try:
-                max_time = None
-                if args.restart_on_hang and timeout:
-                    max_time = timeout + 32
                 http_code = run_curl_command(
                     sparql_endpoint,
                     headers={"Accept": accept_header},
                     params={"query": query},
                     result_file=result_file,
-                    max_time=max_time,
                 ).strip()
-                time_seconds = time.time() - start_time
                 if http_code == "200":
+                    time_seconds = time.time() - start_time
                     error_msg = None
                 else:
+                    time_seconds = time.time() - start_time
                     error_msg = {
                         "short": f"HTTP code: {http_code}",
                         "long": re.sub(
@@ -846,16 +798,6 @@ class BenchmarkQueriesCommand(QleverCommand):
                     }
             except Exception as e:
                 time_seconds = time.time() - start_time
-                if (
-                    timeout
-                    and args.restart_on_hang
-                    and time_seconds > timeout + 30
-                ):
-                    server_restarted = self.restart_on_hang()
-                elif (
-                    "exit code 52" in str(e) or "exit code 7" in str(e)
-                ) and args.restart_on_hang:
-                    server_restarted = self.restart_on_hang(start_only=True)
                 if args.log_level == "DEBUG":
                     traceback.print_exc()
                 error_msg = {
@@ -901,7 +843,6 @@ class BenchmarkQueriesCommand(QleverCommand):
                     result_size=result_length,
                     max_result_size=args.max_results_output_file,
                     accept_header=accept_header,
-                    server_restarted=server_restarted,
                 )
                 result_yml_query_records["queries"].append(query_record)
 
@@ -1028,6 +969,29 @@ class BenchmarkQueriesCommand(QleverCommand):
         # Return success (has nothing to do with how many queries failed).
         return True
 
+    @staticmethod
+    def compute_index_stats(args) -> tuple[float | None, float | None]:
+        """
+        Compute the index size (Bytes) and time (seconds) if available
+        """
+        index_stats = command_objects["index-stats"]
+        # Set the args for index-stats command
+        args.time_unit = "s"
+        args.size_unit = "B"
+        args.ignore_text_index = False
+        index_time = index_size = None
+        index_log_file = next(Path.cwd().glob("*.index-log.txt"), None)
+        if index_log_file:
+            # index-stats needs args.name to get the text index filename
+            args.name = index_log_file.name.split(".")[0]
+            durations = index_stats.execute_time(args, index_log_file.name)
+            if len(durations) > 0 and "TOTAL time" in durations:
+                index_time = durations["TOTAL time"][0]
+        sizes = index_stats.execute_space(args)
+        if len(sizes) > 0 and "TOTAL size" in sizes:
+            index_size = sizes["TOTAL size"][0]
+        return index_time, index_size
+
     def get_result_yml_query_record(
         self,
         name: str,
@@ -1038,7 +1002,6 @@ class BenchmarkQueriesCommand(QleverCommand):
         result_size: int | None,
         max_result_size: int,
         accept_header: str,
-        server_restarted: bool,
     ) -> dict[str, Any]:
         """
         Construct a dictionary with query information for output result yaml file
@@ -1048,7 +1011,6 @@ class BenchmarkQueriesCommand(QleverCommand):
             "description": description,
             "query": query,
             "runtime_info": {},
-            "server_restarted": server_restarted,
         }
         if result_size is None:
             results = f"{result['short']}: {result['long']}"

@@ -1,4 +1,16 @@
 const mainGridApis = {};
+const engineMetrics = {
+    gmeanTime2: "Geom. Mean (P=2)",
+    gmeanTime10: "Geom. Mean (P=10)",
+    medianTime: "Median (P=2)",
+    ameanTime: "Arith. Mean (P=2)",
+    indexTime: "Index time",
+    indexSize: "Index size",
+    failed: "Failed",
+    under1s: "<= 1s",
+    between1to5s: "(1s, 5s]",
+    over5s: "> 5s",
+};
 
 /**
  * Given a knowledge base (kb), get all query stats for each engine to display
@@ -9,31 +21,37 @@ const mainGridApis = {};
  * @returns {Object<string, Array>} Object mapping metric keys and engine names to arrays of values
  */
 function getAllQueryStatsByKb(performanceData, kb) {
-    const query_stats_keys = [
-        "ameanTime",
-        "gmeanTime2",
-        "gmeanTime10",
-        "medianTime",
-        "under1s",
-        "between1to5s",
-        "over5s",
-        "failed",
-    ];
     const enginesDict = performanceData[kb];
     const enginesDictForTable = { engine_name: [] };
 
     // Initialize arrays for all metric keys
-    query_stats_keys.forEach((key) => {
+    Object.keys(engineMetrics).forEach((key) => {
         enginesDictForTable[key] = [];
     });
 
     for (const [engine, engineStats] of Object.entries(enginesDict)) {
         enginesDictForTable.engine_name.push(capitalize(engine));
-        for (const metricKey of query_stats_keys) {
+        for (const metricKey of Object.keys(engineMetrics)) {
             enginesDictForTable[metricKey].push(engineStats[metricKey]);
         }
     }
     return enginesDictForTable;
+}
+
+function setMainPageEvents() {
+    const showMetricsContainer = document.querySelector("#showMetricsContainer");
+    showMetricsContainer.addEventListener("change", (event) => {
+        if (event.target && event.target.matches('input[type="checkbox"]')) {
+            const metricsToDisplay = Array.from(
+                showMetricsContainer.querySelectorAll('input[type="checkbox"]:checked')
+            ).map((cb) => cb.value);
+            const metricsToHide = Object.keys(engineMetrics).filter((metric) => !metricsToDisplay.includes(metric));
+            for (const mainGridApi of Object.values(mainGridApis)) {
+                mainGridApi.setColumnsVisible(metricsToDisplay, true);
+                mainGridApi.setColumnsVisible(metricsToHide, false);
+            }
+        }
+    });
 }
 
 /**
@@ -52,34 +70,34 @@ function mainTableColumnDefs() {
             filter: "agTextColumnFilter",
             headerTooltip: "Name of the RDF graph database being benchmarked.",
             tooltipComponent: CustomDetailsTooltip,
-            flex: 1.25,
+            flex: 1.1,
         },
         {
             headerName: "Geom. Mean (P=2)",
             field: "gmeanTime2",
             filter: "agNumberColumnFilter",
             type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)} s` : "N/A"),
             headerTooltip: `Geometric mean of all query runtimes. Failed queries are penalized with a runtime of timeout × 2`,
             tooltipComponent: CustomDetailsTooltip,
-            flex: 1.3,
+            flex: 1.5,
         },
         {
             headerName: "Geom. Mean (P=10)",
             field: "gmeanTime10",
             filter: "agNumberColumnFilter",
             type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)} s` : "N/A"),
             headerTooltip: `Geometric mean of all query runtimes. Failed queries are penalized with a runtime of timeout × 10`,
             tooltipComponent: CustomDetailsTooltip,
-            flex: 1.3,
+            flex: 1.5,
         },
         {
             headerName: "Median (P=2)",
             field: "medianTime",
             filter: "agNumberColumnFilter",
             type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)} s` : "N/A"),
             headerTooltip: `Median runtime of all queries. Failed queries are penalized with a runtime of timeout × 2`,
             tooltipComponent: CustomDetailsTooltip,
             flex: 1.25,
@@ -89,17 +107,47 @@ function mainTableColumnDefs() {
             field: "ameanTime",
             filter: "agNumberColumnFilter",
             type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}s` : "N/A"),
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)} s` : "N/A"),
             headerTooltip: `Arithmetic mean of all query runtimes. Failed queries are penalized with a runtime of timeout × 2`,
             tooltipComponent: CustomDetailsTooltip,
-            flex: 1.3,
+            flex: 1.4,
+        },
+        {
+            headerName: "Index time",
+            field: "indexTime",
+            filter: "agNumberColumnFilter",
+            type: "numericColumn",
+            valueFormatter: ({ value }) => (value != null ? value : "N/A"),
+            headerTooltip: `Total indexing time for the system on the benchmark dataset`,
+            tooltipComponent: CustomDetailsTooltip,
+            flex: 1,
+        },
+        {
+            headerName: "Index size",
+            field: "indexSize",
+            filter: "agNumberColumnFilter",
+            type: "numericColumn",
+            valueFormatter: ({ value }) => (value != null ? value : "N/A"),
+            headerTooltip: `Total index size used by the system for the benchmark dataset`,
+            tooltipComponent: CustomDetailsTooltip,
+            flex: 1,
+        },
+        {
+            headerName: "Failed",
+            field: "failed",
+            filter: "agNumberColumnFilter",
+            type: "numericColumn",
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)} %` : "N/A"),
+            headerTooltip: "Percentage of queries that failed to return results.",
+            tooltipComponent: CustomDetailsTooltip,
+            flex: 1,
         },
         {
             headerName: "<= 1s",
             field: "under1s",
             filter: "agNumberColumnFilter",
             type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)} %` : "N/A"),
             headerTooltip: "Percentage of all queries that successfully finished in 1 second or less",
             tooltipComponent: CustomDetailsTooltip,
             flex: 1,
@@ -109,7 +157,7 @@ function mainTableColumnDefs() {
             field: "between1to5s",
             filter: "agNumberColumnFilter",
             type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)} %` : "N/A"),
             headerTooltip:
                 "Percentage of all queries that successfully completed in more than 1 second and up to 5 seconds",
             tooltipComponent: CustomDetailsTooltip,
@@ -120,18 +168,8 @@ function mainTableColumnDefs() {
             field: "over5s",
             filter: "agNumberColumnFilter",
             type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
+            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)} %` : "N/A"),
             headerTooltip: "Percentage of all queries that successfully completed in more than 5 seconds",
-            tooltipComponent: CustomDetailsTooltip,
-            flex: 1,
-        },
-        {
-            headerName: "Failed",
-            field: "failed",
-            filter: "agNumberColumnFilter",
-            type: "numericColumn",
-            valueFormatter: ({ value }) => (value != null ? `${value.toFixed(2)}%` : "N/A"),
-            headerTooltip: "Percentage of queries that failed to return results.",
             tooltipComponent: CustomDetailsTooltip,
             flex: 1,
         },
@@ -159,6 +197,10 @@ function updateMainPage(performanceData, additionalData) {
         })
         .map(([key, _kb]) => key);
 
+    const showMetricsContainer = document.querySelector("#showMetricsContainer");
+    showMetricsContainer.innerHTML = "";
+    showMetricsContainer.appendChild(getColumnVisibilityMultiSelectFragment(engineMetrics));
+
     // For each knowledge base (kb) key in performanceData
     for (const kb of sortedKbNames) {
         // Create section wrapper
@@ -167,7 +209,7 @@ function updateMainPage(performanceData, additionalData) {
 
         // Header with KB name and a compare button
         const header = document.createElement("div");
-        header.className = "kg-header";
+        header.className = "kg-header px-2 px-md-0";
 
         // const titleWrapper = document.createElement("div");
         // titleWrapper.className = "d-inline-flex align-items-center";
@@ -298,7 +340,7 @@ function initThemeManager() {
         themeToggleBtn.title = `Click to change to ${theme === "light" ? "dark" : "light"} mode!`;
 
         const grids = document.querySelectorAll(".ag-theme-balham, .ag-theme-balham-dark");
-        grids.forEach(grid => {
+        grids.forEach((grid) => {
             grid.classList.toggle("ag-theme-balham", theme === "light");
             grid.classList.toggle("ag-theme-balham-dark", theme === "dark");
         });
@@ -343,8 +385,18 @@ document.addEventListener("DOMContentLoaded", async () => {
         const additionalData = data.additional_data;
 
         for (const kb in performanceData) {
+            // Gather all index stats for this KB
+            const times = Object.values(performanceData[kb]).map((e) => e?.indexTime ?? null);
+            const sizes = Object.values(performanceData[kb]).map((e) => e?.indexSize ?? null);
+            const { unit: timeUnit, factor: timeFactor } = pickTimeUnit(times);
+            const { unit: sizeUnit, factor: sizeFactor } = pickSizeUnit(sizes);
+
             for (const engine in performanceData[kb]) {
-                const queries = performanceData[kb][engine].queries;
+                const engineObj = performanceData[kb][engine];
+                engineObj.indexTime = formatIndexStat(engineObj.indexTime, timeFactor, timeUnit);
+                engineObj.indexSize = formatIndexStat(engineObj.indexSize, sizeFactor, sizeUnit);
+
+                const queries = engineObj.queries;
                 if (Array.isArray(queries)) {
                     queries.forEach((query) => {
                         try {
@@ -377,7 +429,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                         );
                         return;
                     }
-                    updateDetailsPage(performanceData, kb, engine);
+                    updateDetailsPage(performanceData, kb, engine, additionalData.kbs[kb]);
                     showPage("details");
                 },
                 "/comparison": (params) => {
@@ -435,6 +487,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         router.resolve();
 
+        setMainPageEvents();
         setDetailsPageEvents();
         setComparisonPageEvents();
         setCompareExecTreesEvents();

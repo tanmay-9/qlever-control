@@ -126,7 +126,7 @@ function getQueryRuntimesColumnDefs() {
             type: "numericColumn",
             filter: "agNumberColumnFilter",
             flex: 1,
-            valueFormatter: (params) => (params.value != null ? `${params.value.toFixed(2)}s` : ""),
+            valueFormatter: (params) => (params.value != null ? `${params.value.toFixed(2)} s` : ""),
         },
     ];
     if (window.matchMedia("(min-width: 768px)").matches) {
@@ -259,13 +259,14 @@ function onRuntimeRowSelected(event, performanceData, kb, engine) {
     }
 }
 
-function updateDetailsPage(performanceData, kb, engine) {
+function updateDetailsPage(performanceData, kb, engine, kbAdditionalData) {
     const pageNode = document.querySelector("#page-details");
     removeTitleInfoPill();
-    let engine_header = capitalize(engine);
-    if (engine_header === "Qlever") engine_header = "QLever";
+    let engineHeader = capitalize(engine);
+    if (engineHeader === "Qlever") engineHeader = "QLever";
+    let kbHeader = kbAdditionalData?.name || capitalize(kb);
     const titleNode = document.querySelector("#main-page-header");
-    titleNode.innerHTML = `Details - ${engine_header} (${capitalize(kb)})`;
+    titleNode.innerHTML = `Per-query results for ${engineHeader} on ${kbHeader}`;
     if (pageNode.dataset.kb === kb && pageNode.dataset.engine === engine) return;
     pageNode.dataset.kb = kb;
     pageNode.dataset.engine = engine;

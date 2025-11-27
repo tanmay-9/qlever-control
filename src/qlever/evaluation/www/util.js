@@ -97,20 +97,50 @@ function getSingleResult(queryData) {
     return singleResult;
 }
 
+function pickTimeUnit(values) {
+    const valid = values.filter((v) => typeof v === "number");
+    if (valid.length === 0) return { unit: "s", factor: 1 };
+
+    const min = Math.min(...valid);
+
+    if (min < 200) return { unit: "s", factor: 1 };
+    if (min < 3600) return { unit: "min", factor: 60 };
+    return { unit: "h", factor: 3600 };
+}
+
+function pickSizeUnit(values) {
+    const valid = values.filter((v) => typeof v === "number");
+    if (valid.length === 0) return { unit: "B", factor: 1 };
+
+    const max = Math.max(...valid);
+
+    if (max < 1e3) return { unit: "B", factor: 1 };
+    if (max < 1e6) return { unit: "KB", factor: 1e3 };
+    if (max < 1e9) return { unit: "MB", factor: 1e6 };
+    if (max < 1e12) return { unit: "GB", factor: 1e9 };
+    return { unit: "TB", factor: 1e12 };
+}
+
+function formatIndexStat(value, factor, unit) {
+    if (value == null || typeof value !== "number") return null;
+    if (unit === "s") return `${value / factor} ${unit}`;
+    return `${(value / factor).toFixed(1)} ${unit}`;
+}
+
 /**
  * Displays the loading spinner by updating the relevant CSS classes.
  */
 function showSpinner() {
-  document.querySelector("#spinner").classList.remove("d-none", "d-flex");
-  document.querySelector("#spinner").classList.add("d-flex");
+    document.querySelector("#spinner").classList.remove("d-none", "d-flex");
+    document.querySelector("#spinner").classList.add("d-flex");
 }
 
 /**
  * Hides the loading spinner by updating the relevant CSS classes.
  */
 function hideSpinner() {
-  document.querySelector("#spinner").classList.remove("d-none", "d-flex");
-  document.querySelector("#spinner").classList.add("d-none");
+    document.querySelector("#spinner").classList.remove("d-none", "d-flex");
+    document.querySelector("#spinner").classList.add("d-none");
 }
 
 function addTextElementsToExecTreeForTreant(tree_node, is_ancestor_cached = false) {
@@ -407,11 +437,11 @@ function extractFirstUrl(text) {
 function createBenchmarkDescriptionInfoPill(indexDescription, tooltipPlacement = "right") {
     const infoPill = document.createElement("a");
     infoPill.setAttribute("tabindex", 0);
-    
+
     infoPill.className = "mx-2";
     infoPill.style.color = "var(--bs-body-color)";
     infoPill.style.cursor = "pointer";
-    
+
     const icon = document.createElement("i");
     icon.className = "bi bi-info-circle-fill";
     icon.style.fontSize = "0.8rem";
@@ -432,7 +462,6 @@ function createBenchmarkDescriptionInfoPill(indexDescription, tooltipPlacement =
 
     return infoPill;
 }
-
 
 function removeTitleInfoPill() {
     document.querySelector("#mainTitleWrapper a")?.remove();
@@ -460,6 +489,37 @@ function createTooltipContainer(params) {
     }
     container.appendChild(textDiv);
     return container;
+}
+
+/**
+ * Populate the checkbox container inside the accordion with column names.
+ * @param {string[]} columnNames - List of Ag Grid column field names
+ */
+function getColumnVisibilityMultiSelectFragment(columns, allChecked = true) {
+    const fragment = document.createDocumentFragment();
+    for (const [colKey, colValue] of Object.entries(columns)) {
+        const div = document.createElement("div");
+        div.classList.add("form-check");
+
+        const checkbox = document.createElement("input");
+        checkbox.className = "form-check-input";
+        checkbox.style.cursor = "pointer";
+        checkbox.type = "checkbox";
+        checkbox.id = colKey;
+        checkbox.value = colKey;
+        checkbox.checked = allChecked;
+
+        const label = document.createElement("label");
+        label.className = "form-check-label";
+        label.style.cursor = "pointer";
+        label.setAttribute("for", colKey);
+        label.textContent = colValue;
+
+        div.appendChild(checkbox);
+        div.appendChild(label);
+        fragment.appendChild(div);
+    }
+    return fragment;
 }
 
 function escapeLatex(str) {
