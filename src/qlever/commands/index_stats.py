@@ -23,7 +23,7 @@ class IndexStatsCommand(QleverCommand):
     def should_have_qleverfile(self) -> bool:
         return False
 
-    def relevant_qleverfile_arguments(self) -> dict[str : list[str]]:
+    def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
         return {"data": ["name"]}
 
     def additional_arguments(self, subparser) -> None:
@@ -75,8 +75,8 @@ class IndexStatsCommand(QleverCommand):
             return {}
         # If there is a separate `add-text-index-log.txt` file, append those
         # lines.
+        text_log_file_name = f"{args.name}.text-index-log.txt"
         try:
-            text_log_file_name = f"{args.name}.text-index-log.txt"
             if Path(text_log_file_name).exists():
                 with open(text_log_file_name, "r") as text_log_file:
                     lines.extend(text_log_file.readlines())
@@ -194,27 +194,17 @@ class IndexStatsCommand(QleverCommand):
                     diff_seconds += (end - start).total_seconds()
                     num_start_end_pairs += 1
             if num_start_end_pairs > 0:
-                if time_unit == "h":
-                    diff = diff_seconds / 3600
-                elif time_unit == "min":
-                    diff = diff_seconds / 60
-                else:
-                    diff = diff_seconds
+                diff = diff_seconds / self.get_time_unit_factor(time_unit)
                 return diff
             return None
             # log.info(f"{heading:<21} : {diff:>6.1f} {time_unit}")
 
         # Get the times of the various phases (hours or minutes, depending on
         # how long the first phase took).
-        time_unit = args.time_unit
-        if time_unit == "auto":
-            time_unit = "h"
-            if merge_begin and overall_begin:
-                parse_duration = (merge_begin - overall_begin).total_seconds()
-                if parse_duration < 200:
-                    time_unit = "s"
-                elif parse_duration < 3600:
-                    time_unit = "min"
+        parse_duration = None
+        if merge_begin and overall_begin:
+            parse_duration = (merge_begin - overall_begin).total_seconds()
+        time_unit = self.get_time_unit(args.time_unit, parse_duration)
 
         durations = {}
 
@@ -266,7 +256,29 @@ class IndexStatsCommand(QleverCommand):
             )
         return durations
 
-    def execute_space(self, args) -> dict[str, tuple[int, str]]:
+    @staticmethod
+    def get_time_unit(time_unit: str, parse_duration: float | None) -> str:
+        if time_unit != "auto":
+            return time_unit
+        time_unit = "h"
+        if parse_duration is not None:
+            if parse_duration < 200:
+                time_unit = "s"
+            elif parse_duration < 3600:
+                time_unit = "min"
+        return time_unit
+
+    @staticmethod
+    def get_time_unit_factor(time_unit: str) -> int:
+        unit_factor = {
+            "s": 1,
+            "min": 60,
+            "h": 3600,
+        }[time_unit]
+
+        return unit_factor
+
+    def execute_space(self, args) -> dict[str, tuple[float, str]]:
         """
         Part of `execute` that returns the space used by different types of
         index along with the unit.
@@ -280,23 +292,8 @@ class IndexStatsCommand(QleverCommand):
             sizes["text"] = 0
         sizes["total"] = sum(sizes.values())
 
-        # Determing the proper unit for the size.
-        size_unit = args.size_unit
-        if size_unit == "auto":
-            size_unit = "TB"
-            if sizes["total"] < 1e6:
-                size_unit = "B"
-            elif sizes["total"] < 1e9:
-                size_unit = "MB"
-            elif sizes["total"] < 1e12:
-                size_unit = "GB"
-
-        unit_factor = {
-            "B": 1,
-            "MB": 1e6,
-            "GB": 1e9,
-            "TB": 1e12,
-        }[size_unit]
+        size_unit = self.get_size_unit(args.size_unit, sizes["total"])
+        unit_factor = self.get_size_unit_factor(size_unit)
 
         for size_type in sizes:
             sizes[size_type] /= unit_factor
@@ -309,6 +306,30 @@ class IndexStatsCommand(QleverCommand):
             sizes_to_show["Files text.*"] = (sizes["text"], size_unit)
         sizes_to_show["TOTAL size"] = (sizes["total"], size_unit)
         return sizes_to_show
+
+    @staticmethod
+    def get_size_unit(size_unit: str, total_size: int) -> str:
+        if size_unit != "auto":
+            return size_unit
+        size_unit = "TB"
+        if total_size < 1e6:
+            size_unit = "B"
+        elif total_size < 1e9:
+            size_unit = "MB"
+        elif total_size < 1e12:
+            size_unit = "GB"
+        return size_unit
+
+    @staticmethod
+    def get_size_unit_factor(size_unit: str) -> int:
+        unit_factor = {
+            "B": 1,
+            "MB": 1e6,
+            "GB": 1e9,
+            "TB": 1e12,
+        }[size_unit]
+
+        return unit_factor
 
     def execute(self, args) -> bool:
         return_value = True
