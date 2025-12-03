@@ -182,7 +182,7 @@
                                         them.
                                     </li>
                                     <li>
-                                        <strong>Engine rows</strong>: Click a row to view the individual query details
+                                        <strong>Rows</strong>: Click a row to view the individual query details
                                         for that system on the given benchmark.
                                     </li>
                                     <li>
@@ -206,9 +206,10 @@
                         id="columnVisibilityDropdown"
                         data-bs-toggle="dropdown"
                         aria-expanded="false"
+                        title="Toggle which metrics are displayed in all the tables"
                     >
                         <i class="bi bi-funnel d-inline d-md-none"></i
-                        ><span class="d-none d-md-inline">Show metric</span>
+                        ><span class="d-none d-md-inline">Show metrics</span>
                     </button>
 
                     <div
@@ -428,7 +429,7 @@
                                 class="fw-bold"
                                 title="Toggle which systems are displayed in the table"
                                 style="cursor: pointer"
-                                >Show Engines:</label
+                                >Show Systems:</label
                             >
                             <div class="d-flex flex-wrap gap-3 mt-1" id="columnCheckboxContainer">
                                 <!-- Checkboxes will be added here dynamically -->
@@ -453,7 +454,7 @@
                         title="Change how the systems are ordered from left to right"
                         class="fw-bold"
                         style="cursor: pointer"
-                        >Order Engines:</label
+                        >Order Systems:</label
                     >
                     <select class="form-select form-select-sm" id="orderColumnsDropdown" style="max-width: 250px">
                         <option value="gmeanTime2-asc">Geometric Mean (P=2) ↑</option>
@@ -466,6 +467,10 @@
                         <option value="medianTime-desc">Median ↓</option>
                         <option value="ameanTime-asc">Arithmetic Mean ↑</option>
                         <option value="ameanTime-desc">Arithmetic Mean ↓</option>
+                        <option value="indexTime-asc">Index Time ↑</option>
+                        <option value="indexTime-desc">Index Time ↓</option>
+                        <option value="indexSize-asc">Index Size ↑</option>
+                        <option value="indexSize-desc">Index Size ↓</option>
                     </select>
                 </div>
 
