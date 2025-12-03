@@ -273,12 +273,14 @@ class WarningCellRenderer {
 
         if (params.node.rowPinned) {
             container.classList.add("fw-bold");
+            let textValue = "N/A";
             if (typeof value === "string") {
-                container.appendChild(document.createTextNode(`${value}`));
-            } else {
+                textValue = value;
+            } else if (typeof value === "number") {
                 const unit = params.data.query === "Failed Queries" ? "%" : "s";
-                container.appendChild(document.createTextNode(`${value.toFixed(2)} ${unit}`));
+                textValue = `${value.toFixed(2)} ${unit}`;
             }
+            container.appendChild(document.createTextNode(textValue));
         } else if (params.column.getColId() === "query") {
             if (params.data.row_warning) {
                 warning.title = "The result sizes for the engines do not match!";
@@ -455,6 +457,8 @@ function getPinnedMetricData(engines, kb) {
         failed: "Failed Queries",
         medianTime: "Median (P=2)",
         ameanTime: "Arithmetic Mean (P=2)",
+        indexTime: "Index Time",
+        indexSize: "Index Size",
     };
     for (const [metric, metricName] of Object.entries(metricKeyNameObj)) {
         let metricData = { query: metricName };
