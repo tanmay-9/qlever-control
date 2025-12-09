@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from qlever import script_name
 from qlever.command import QleverCommand
 from qlever.log import log
 from qlever.util import get_total_file_size
@@ -39,12 +40,13 @@ class IndexStatsCommand(QleverCommand):
             default=False,
             help="Show only the space used",
         )
-        subparser.add_argument(
-            "--ignore-text-index",
-            action="store_true",
-            default=False,
-            help="Ignore the text index",
-        )
+        if script_name == "qlever":
+            subparser.add_argument(
+                "--ignore-text-index",
+                action="store_true",
+                default=False,
+                help="Ignore the text index",
+            )
         subparser.add_argument(
             "--time-unit",
             choices=["s", "min", "h", "auto"],
@@ -345,12 +347,13 @@ class IndexStatsCommand(QleverCommand):
             )
             if not args.show:
                 durations = self.execute_time(args, log_file_name)
+                heading_length = max([len(heading) for heading in durations]) + 2
                 for heading, (duration, time_unit) in durations.items():
                     if duration is not None:
-                        if heading == "TOTAL time":
+                        if heading == "TOTAL time" and len(durations) > 1:
                             log.info("")
                         log.info(
-                            f"{heading:<21} : {duration:>6.1f} {time_unit}"
+                            f"{heading:<{heading_length}} : {duration:>6.1f} {time_unit}"
                         )
                 return_value &= len(durations) != 0
             if not args.only_time:
@@ -365,7 +368,7 @@ class IndexStatsCommand(QleverCommand):
             if not args.show:
                 sizes = self.execute_space(args)
                 for heading, (size, size_unit) in sizes.items():
-                    if heading == "TOTAL size":
+                    if heading == "TOTAL size" and len(sizes) > 1:
                         log.info("")
                     if size_unit == "B":
                         log.info(f"{heading:<21} :  {size:,} {size_unit}")

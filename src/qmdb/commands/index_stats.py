@@ -6,7 +6,7 @@ from qlever.commands.index_stats import (
     IndexStatsCommand as QleverIndexStatsCommand,
 )
 from qlever.log import log
-from qlever.util import get_total_file_size, run_command
+from qlever.util import get_total_file_size
 
 
 class IndexStatsCommand(QleverIndexStatsCommand):
@@ -24,32 +24,37 @@ class IndexStatsCommand(QleverIndexStatsCommand):
 
         # Read the content of `log_file_name` into a list of lines.
         try:
-            log_text = run_command(
-                f"tail -n 20 {log_file_name}", return_output=True
-            )
+            with open(log_file_name, "r") as log_file:
+                lines = log_file.readlines()
         except Exception as e:
             log.error(f"Problem reading index log file {log_file_name}: {e}")
             return {}
 
         stats = {}
         # Pattern: "<label> = <number> seconds"
-        pattern = re.compile(r"INFO\s+(.*?)\s*=\s*([\d.]+)\s+seconds")
-        # Pattern for the overall line in seconds
-        overall_pattern = re.compile(r"INFO\s+Overall\s+(\d+)\s+seconds")
+        pattern = re.compile(
+            r"^(.*?)\s*duration:\s*([\d.]+)\s*(milliseconds|seconds|minutes|hours)",
+            re.IGNORECASE
+        )
 
-        for line in log_text.splitlines():
-            label = raw_value = None
-            overall_match = overall_pattern.search(line)
-            if overall_match:
-                label = "TOTAL time"
-                raw_value = overall_match.group(1)
-            else:
-                match = pattern.search(line)
-                if match:
-                    label = match.group(1).strip()
-                    raw_value = match.group(2)
+        unit_to_seconds = {
+            "milliseconds": 1 / 1000,
+            "seconds":      1,
+            "minutes":      60,
+            "hours":        3600,
+        }
 
-            if raw_value is None:
+        for line in lines:
+            label = raw_value = mdb_time_unit = None
+            match = pattern.search(line)
+            if match:
+                label = match.group(1).strip()
+                if label.lower() == "total import":
+                    label = "TOTAL time"
+                raw_value = match.group(2)
+                mdb_time_unit = match.group(3).lower()
+
+            if raw_value is None or mdb_time_unit is None:
                 continue
 
             try:
@@ -57,14 +62,17 @@ class IndexStatsCommand(QleverIndexStatsCommand):
             except (ValueError, TypeError):
                 continue
 
-            time_unit = self.get_time_unit(args.time_unit, value)
+            factor = unit_to_seconds.get(mdb_time_unit)
+            if factor is None:
+                continue
+
+            value_s = value * factor
+
+            time_unit = self.get_time_unit(args.time_unit, value_s)
             unit_factor = self.get_time_unit_factor(time_unit)
 
             normalized_value = value / unit_factor
             stats[label] = (normalized_value, time_unit)
-
-            if overall_match:
-                break
 
         return stats
 
@@ -73,7 +81,7 @@ class IndexStatsCommand(QleverIndexStatsCommand):
         Part of `execute` that returns the space used by different types of
         index along with the unit.
         """
-        index_size = get_total_file_size(["index/Data-0001/*"])
+        index_size = get_total_file_size([f"{args.name}_index/*"])
 
         size_unit = self.get_size_unit(args.size_unit, index_size)
         unit_factor = self.get_size_unit_factor(size_unit)

@@ -1,5 +1,5 @@
 # Use an official OpenJDK runtime as a parent image
-FROM docker.io/library/openjdk:21-jdk-slim
+FROM docker.io/library/openjdk:26-ea-21-jdk-slim
 
 RUN apt-get update && apt-get install -y wget gzip coreutils curl unzip
 
