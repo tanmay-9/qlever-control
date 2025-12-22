@@ -43,12 +43,15 @@ class Qleverfile:
         "service-max-redirects",
         "service-max-value-rows",
         "sort-estimate-cancellation-factor",
+        "sparql-results-json-with-time",
         "spatial-join-prefilter-max-size",
         "spatial-join-max-num-threads",
+        "strip-columns",
         "syntax-test-mode",
         "throw-on-unbound-variables",
         "treat-default-graph-as-named-graph",
         "use-binsearch-transitive-path",
+        "websocket-updates-enabled",
     ]
 
     @staticmethod
@@ -203,6 +206,13 @@ class Qleverfile:
             "processing of queries like SELECT ?p (COUNT(DISTINCT ?s) AS ?c) "
             "WHERE { ?s ?p [] ... } GROUP BY ?p",
         )
+        index_args["add_has_word_triples"] = arg(
+            "--add-has-word-triples",
+            action="store_true",
+            default=False,
+            help="Whether to add `ql:has-word` triples for text literals "
+            "(which can then be used for custom text search queries)",
+        )
         index_args["text_index"] = arg(
             "--text-index",
             choices=[
@@ -240,7 +250,6 @@ class Qleverfile:
         server_args["host_name"] = arg(
             "--host-name",
             type=str,
-            default="localhost",
             help="The name of the host on which the server listens for "
             "requests",
         )
@@ -482,7 +491,8 @@ class Qleverfile:
 
         # Add other non-trivial default values.
         try:
-            config["server"]["host_name"] = socket.gethostname()
+            if config["server"].get("host_name") is None:
+                config["server"]["host_name"] = socket.gethostname()
         except Exception:
             log.warning(
                 "Could not get the hostname, using `localhost` as default"
