@@ -317,7 +317,7 @@ class StartCommand(QleverCommand):
         if not args.run_in_foreground:
             log.info("")
             args.detailed = False
-            args.server_url = None
+            args.sparql_endpoint = None
             CacheStatsCommand().execute(args)
 
         # Apply settings if any.

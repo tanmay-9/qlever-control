@@ -38,17 +38,19 @@ class ClearCacheCommand(QleverCommand):
         )
 
     def execute(self, args) -> bool:
+        # Determine SPARQL endpoint.
+        sparql_endpoint = (
+            args.sparql_endpoint
+            if args.sparql_endpoint
+            else (f"{args.host_name}:{args.port}")
+        )
+
         # Construct command line and show it.
-        clear_cache_cmd = "curl -s"
-        if args.server_url:
-            clear_cache_cmd += f" {args.server_url}"
-        else:
-            clear_cache_cmd += f" {args.host_name}:{args.port}"
-        cmd_val = "clear-cache-complete" if args.complete else "clear-cache"
-        clear_cache_cmd += f' --data-urlencode "cmd={cmd_val}"'
+        clear_cache_cmd = f"curl -s {sparql_endpoint} -d cmd=clear-cache"
         if args.complete:
             clear_cache_cmd += (
-                f" --data-urlencode access-token=" f'"{args.access_token}"'
+                f"-complete"
+                f' --data-urlencode access-token="{args.access_token}"'
             )
         self.show(clear_cache_cmd, only_show=args.show)
         if args.show:
