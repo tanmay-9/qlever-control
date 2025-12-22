@@ -395,6 +395,20 @@ def get_container_image_id(system: str, image: str) -> str:
     return image_id
 
 
+def get_ini_sed_cmd(
+    section: str, option: str, new_value: str, is_suffix: bool = False
+) -> str:
+    """
+    Generates a cross-platform sed command to update the value of a 
+    key = value pair or append to one (by using is_suffix = True) in an INI file.
+    """
+    if is_suffix:
+        pattern = f"s/(^{option}.*)/\\1{new_value}/"
+    else:
+        pattern = f"s/(^{option}[[:space:]]*=[[:space:]]*).*/\\1{new_value}/"
+    return f"sed -E '/^\\[{section}\\]/,/^\\[/ {pattern}'"
+
+
 def parse_memory(value: str) -> str:
     """
     Validate memory size string like '4G'.
