@@ -9,11 +9,13 @@ import socket
 import string
 import subprocess
 from datetime import date, datetime
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any, Optional
 
 import psutil
 
+from qlever import script_name
 from qlever.log import log
 
 
@@ -328,3 +330,25 @@ def is_server_alive(url: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def get_binary_version_string(binary_name: str) -> str:
+    if not shutil.which(binary_name):
+        return f"{binary_name}: NOT FOUND on PATH"
+    try:
+        binary_version_str = run_command(
+            f"{binary_name} --version", return_output=True
+        )
+        if not binary_version_str.startswith(f"QLever {binary_name}"):
+            return f"{binary_name}: VERSION information not available!"
+        return binary_version_str.strip()
+    except Exception as e:
+        return f"{binary_name}: ERROR in determining version - {e}"
+
+
+def build_version_string() -> str:
+    parts = []
+    parts.append(f"{script_name}: {version(script_name)}\n")
+    for binary in ["IndexBuilderMain", "ServerMain"]:
+        parts.append(get_binary_version_string(binary))
+    return "\n".join(parts)
