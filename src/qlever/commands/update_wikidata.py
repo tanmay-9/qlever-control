@@ -256,8 +256,7 @@ class UpdateWikidataCommand(QleverCommand):
         # Initialize all the statistics variables.
         batch_count = 0
         total_num_messages = 0
-        total_num_ops = 0
-        total_time_s = 0
+        total_update_time = 0
         start_time = time.perf_counter()
         wait_before_next_batch = False
         event_id_for_next_batch = (
@@ -905,10 +904,17 @@ class UpdateWikidataCommand(QleverCommand):
                     value = 0
                 return value
 
-            # If the batch ended due to a delete operation, we have two
-            # operations (and two statistics), otherwise only one.
-            for i, stats in enumerate(result):
-                # Show statistics of the update operation.
+            # Check for old JSON format (no `operations` or `time` on top level).
+            old_json_message_template = (
+                "Result JSON does not contain `{}` field, you are "
+                "probably using an old version of QLever"
+            )
+            for field in ["operations", "time"]:
+                if field not in result:
+                    raise RuntimeError(old_json_message_template.format(field))
+
+            # Get the per-operation statistics.
+            for i, stats in enumerate(result["operations"]):
                 try:
                     ins_after = stats["delta-triples"]["after"]["inserted"]
                     del_after = stats["delta-triples"]["after"]["deleted"]
@@ -920,9 +926,11 @@ class UpdateWikidataCommand(QleverCommand):
                         stats["delta-triples"]["operation"]["deleted"]
                     )
                     num_ops = int(stats["delta-triples"]["operation"]["total"])
-                    time_ms = get_time_ms(stats, "total")
+                    time_op_total = get_time_ms(stats, "total")
                     time_us_per_op = (
-                        int(1000 * time_ms / num_ops) if num_ops > 0 else 0
+                        int(1000 * time_op_total / num_ops)
+                        if num_ops > 0
+                        else 0
                     )
                     if args.verbose == "yes":
                         log.info(
@@ -930,55 +938,31 @@ class UpdateWikidataCommand(QleverCommand):
                                 f"TRIPLES: {num_ops:+10,} -> {ops_after:10,}, "
                                 f"INS: {num_ins:+10,} -> {ins_after:10,}, "
                                 f"DEL: {num_del:+10,} -> {del_after:10,}, "
-                                f"TIME: {time_ms:7,}ms, "
+                                f"TIME: {time_op_total:7,}ms, "
                                 f"TIME/TRIPLE: {time_us_per_op:6,}µs",
                                 attrs=["bold"],
                             )
                         )
 
-                    # Also show a detailed breakdown of the total time.
-                    time_parsing = (
-                        get_time_ms(
-                            stats,
-                            "parsing",
-                            failure_mode=FailureMode.SILENTLY_RETURN_ZERO,
-                        )
-                        if i == 0
-                        else 0
-                    )
                     time_planning = get_time_ms(stats, "planning")
-                    try:
-                        time_preparation = get_time_ms(
-                            stats,
-                            "execution",
-                            "processUpdateImpl",
-                            "preparation",
-                            "total",
-                            failure_mode=FailureMode.THROW_EXCEPTION,
-                        )
-                    except Exception:
-                        time_preparation = get_time_ms(
-                            stats,
-                            "execution",
-                            "processUpdateImpl",
-                            "preparation",
-                        )
+                    time_compute_ids = get_time_ms(
+                        stats,
+                        "execution",
+                        "computeIds",
+                        "total",
+                    )
                     time_where = get_time_ms(
                         stats,
                         "execution",
-                        "processUpdateImpl",
-                        "materializeResult",
+                        "evaluateWhere",
                     )
                     time_metadata = get_time_ms(
                         stats,
-                        "execution",
                         "updateMetadata",
-                        failure_mode=FailureMode.SILENTLY_RETURN_ZERO,
                     )
                     time_insert = get_time_ms(
                         stats,
                         "execution",
-                        "processUpdateImpl",
                         "insertTriples",
                         "total",
                         failure_mode=FailureMode.SILENTLY_RETURN_ZERO,
@@ -986,47 +970,28 @@ class UpdateWikidataCommand(QleverCommand):
                     time_delete = get_time_ms(
                         stats,
                         "execution",
-                        "processUpdateImpl",
                         "deleteTriples",
                         "total",
                         failure_mode=FailureMode.SILENTLY_RETURN_ZERO,
                     )
-                    time_snapshot = get_time_ms(
-                        stats, "execution", "snapshotCreation"
-                    )
-                    time_writeback = get_time_ms(
-                        stats, "execution", "diskWriteback"
-                    )
-                    time_unaccounted = time_ms - (
-                        time_parsing
-                        + time_planning
-                        + time_preparation
+                    time_unaccounted = time_op_total - (
+                        time_planning
+                        + time_compute_ids
                         + time_where
                         + time_metadata
                         + time_delete
                         + time_insert
-                        + time_snapshot
-                        + time_writeback
                     )
                     if args.verbose == "yes":
                         log.info(
-                            f"PARSING: {100 * time_parsing / time_ms:2.0f}%, "
-                            f"PLANNING: {100 * time_planning / time_ms:2.0f}%, "
-                            f"PREPARATION: {100 * time_preparation / time_ms:2.0f}%, "
-                            f"WHERE: {100 * time_where / time_ms:2.0f}%, "
-                            f"DELETE: {100 * time_delete / time_ms:2.0f}%, "
-                            f"INSERT: {100 * time_insert / time_ms:2.0f}%, "
-                            f"METADATA: {100 * time_metadata / time_ms:2.0f}%, "
-                            f"SNAPSHOT: {100 * time_snapshot / time_ms:2.0f}%, "
-                            f"WRITEBACK: {100 * time_writeback / time_ms:2.0f}%, "
-                            f"UNACCOUNTED: {100 * time_unaccounted / time_ms:2.0f}%",
+                            f"METADATA: {100 * time_metadata / time_op_total:2.0f}%, "
+                            f"PLANNING: {100 * time_planning / time_op_total:2.0f}%, "
+                            f"WHERE: {100 * time_where / time_op_total:2.0f}%, "
+                            f"IDS: {100 * time_compute_ids / time_op_total:2.0f}%, "
+                            f"DELETE: {100 * time_delete / time_op_total:2.0f}%, "
+                            f"INSERT: {100 * time_insert / time_op_total:2.0f}%, "
+                            f"UNACCOUNTED: {100 * time_unaccounted / time_op_total:2.0f}%",
                         )
-
-                    # Update the totals.
-                    total_num_ops += num_ops
-                    total_time_s += time_ms / 1000.0
-                    elapsed_time_s = time.perf_counter() - start_time
-                    time_us_per_op = int(1e6 * total_time_s / total_num_ops)
 
                 except Exception as e:
                     log.warn(
@@ -1040,16 +1005,60 @@ class UpdateWikidataCommand(QleverCommand):
                     log.info("")
                     continue
 
+            # Get times for the whole request (not per operation).
+            time_parsing = get_time_ms(
+                result,
+                "parsing",
+            )
+            time_metadata = get_time_ms(
+                result,
+                "metadataUpdateForSnapshot",
+            )
+            time_snapshot = get_time_ms(
+                result,
+                "snapshotCreation",
+            )
+            time_writeback = get_time_ms(
+                result,
+                "diskWriteback",
+            )
+            time_operations = get_time_ms(
+                result,
+                "operations",
+            )
+            time_total = get_time_ms(
+                result,
+                "total",
+            )
+            time_unaccounted = time_total - (
+                time_parsing
+                + time_metadata
+                + time_snapshot
+                + time_writeback
+                + time_operations
+            )
+
+            # Update the totals.
+            total_update_time += time_total / 1000.0
+            total_elapsed_time = time.perf_counter() - start_time
+
             # Show statistics for the completed batch.
             if args.verbose == "yes":
                 log.info(
                     colored(
-                        f"TOTAL TRIPLES SO FAR: {total_num_ops:10,}, "
-                        f"TOTAL UPDATE TIME SO FAR: {total_time_s:4.0f}s, "
-                        f"ELAPSED TIME SO FAR: {elapsed_time_s:4.0f}s, "
-                        f"AVG TIME/TRIPLE SO FAR: {time_us_per_op:,}µs",
+                        f"TOTAL UPDATE TIME SO FAR: {total_update_time:4.0f}s, "
+                        f"TOTAL ELAPSED TIME SO FAR: {total_elapsed_time:4.0f}s, "
+                        f"TOTAL TIME FOR THIS UPDATE REQUEST: {time_total:7,}ms, ",
                         attrs=["bold"],
                     )
+                )
+                log.info(
+                    f"PARSING: {100 * time_parsing / time_total:2.0f}%, "
+                    f"OPERATIONS: {100 * time_operations / time_total:2.0f}%, "
+                    f"METADATA: {100 * time_metadata / time_total:2.0f}%, "
+                    f"SNAPSHOT: {100 * time_snapshot / time_total:2.0f}%, "
+                    f"WRITEBACK: {100 * time_writeback / time_total:2.0f}%, "
+                    f"UNACCOUNTED: {100 * time_unaccounted / time_total:2.0f}%",
                 )
                 log.info("")
 
@@ -1073,23 +1082,10 @@ class UpdateWikidataCommand(QleverCommand):
             ):
                 break
 
-        # Final statistics after all batches have been processed.
-        elapsed_time_s = time.perf_counter() - start_time
-        time_us_per_op = (
-            int(1e6 * total_time_s / total_num_ops) if total_num_ops > 0 else 0
-        )
+        # Final message after all batches have been processed.
         log.info(
             f"Processed {batch_count} "
             f"{'batches' if batch_count > 1 else 'batch'} "
             f"terminating update command"
-        )
-        log.info(
-            colored(
-                f"TOTAL TRIPLES: {total_num_ops:10,}, "
-                f"TOTAL TIME: {total_time_s:4.0f}s, "
-                f"ELAPSED TIME: {elapsed_time_s:4.0f}s, "
-                f"AVG TIME/TRIPLE: {time_us_per_op:,}µs",
-                attrs=["bold"],
-            )
         )
         return True
