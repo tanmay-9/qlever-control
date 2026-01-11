@@ -30,6 +30,79 @@ def custom_cast_lexical_to_python(lexical, datatype):
 rdflib.term._castLexicalToPython = custom_cast_lexical_to_python
 
 
+def retry_with_backoff(operation, operation_name, max_retries, log):
+    """
+    Retry an operation with exponential backoff, see backoff intervals below
+    (in seconds). Returns the result of the operation if successful, or raises
+    the last exception.
+    """
+    backoff_intervals = [5, 10, 30, 60, 300, 900, 1800, 3600]
+
+    for attempt in range(max_retries):
+        try:
+            return operation()
+        except Exception as e:
+            if attempt < max_retries - 1:
+                # Use the appropriate backoff interval (once we get to the end
+                # of the list, keep using the last interval).
+                retry_delay = (
+                    backoff_intervals[attempt]
+                    if attempt < len(backoff_intervals)
+                    else backoff_intervals[-1]
+                )
+                # Show the delay as seconds, minutes, or hours.
+                if retry_delay >= 3600:
+                    delay_str = f"{retry_delay // 3600}h"
+                elif retry_delay >= 60:
+                    delay_str = f"{retry_delay // 60}min"
+                else:
+                    delay_str = f"{retry_delay}s"
+                log.warn(
+                    f"{operation_name} failed (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {delay_str} ..."
+                )
+                time.sleep(retry_delay)
+            else:
+                # If this was the last attempt, re-raise the exception.
+                raise
+
+
+def connect_to_sse_stream(sse_stream_url, since=None, event_id=None):
+    """
+    Connect to the SSE stream and return the connected EventSource.
+
+    Args:
+        sse_stream_url: URL of the SSE stream
+        since: ISO date string to start from (mutually exclusive with event_id)
+        event_id: Event ID to resume from (mutually exclusive with since)
+
+    Returns:
+        The connected EventSource object
+    """
+    if event_id:
+        event_id_json = json.dumps(event_id)
+        source = requests_sse.EventSource(
+            sse_stream_url,
+            headers={
+                "Accept": "text/event-stream",
+                "User-Agent": "qlever update-wikidata",
+                "Last-Event-ID": event_id_json,
+            },
+        )
+    else:
+        source = requests_sse.EventSource(
+            sse_stream_url,
+            params={"since": since} if since else {},
+            headers={
+                "Accept": "text/event-stream",
+                "User-Agent": "qlever update-wikidata",
+            },
+        )
+
+    source.connect()
+    return source
+
+
 class UpdateWikidataCommand(QleverCommand):
     """
     Class for executing the `update` command.
@@ -167,6 +240,13 @@ class UpdateWikidataCommand(QleverCommand):
             help="Before each batch, verify that the stream offset matches the "
             "stored offset in the knowledge base (default: yes)",
         )
+        subparser.add_argument(
+            "--num-retries",
+            type=int,
+            default=10,
+            help="Number of retries for offset verification queries when they fail "
+            "(default: 10)",
+        )
 
     # Handle Ctrl+C gracefully by finishing the current batch and then exiting.
     def handle_ctrl_c(self, signal_received, frame):
@@ -224,31 +304,69 @@ class UpdateWikidataCommand(QleverCommand):
         log.warn("Press Ctrl+C to finish and exit gracefully")
         log.info("")
 
-        # If --offset is not provided, determine the offset by reading a single
+        # If --offset is not provided, first try to get the stored offset from
+        # the knowledge base. Only fall back to date-based approach if no
+        # offset is stored.
+        if not args.offset:
+            try:
+                sparql_query_stored_offset = (
+                    "PREFIX wikibase: <http://wikiba.se/ontology#> "
+                    "SELECT (MAX(?offset) AS ?maxOffset) WHERE { "
+                    "<http://wikiba.se/ontology#Dump> "
+                    "wikibase:updateStreamNextOffset ?offset "
+                    "}"
+                )
+                curl_cmd_get_stored_offset = (
+                    f"curl -s {sparql_endpoint}"
+                    f' -H "Accept: text/csv"'
+                    f' -H "Content-type: application/sparql-query"'
+                    f' --data "{sparql_query_stored_offset}"'
+                )
+                result = run_command(
+                    f"{curl_cmd_get_stored_offset} | sed 1d",
+                    return_output=True,
+                ).strip()
+                if result and result != '""':
+                    args.offset = int(result.strip('"'))
+                    log.info(
+                        f"Resuming from stored offset in knowledge base: "
+                        f"{args.offset}"
+                    )
+            except Exception as e:
+                log.debug(
+                    f"Could not retrieve stored offset from knowledge base: {e}. "
+                    f"Will determine offset from date instead."
+                )
+
+        # If --offset is still not set, determine it by reading a single
         # message from the SSE stream using the `since` date.
         if not args.offset:
             try:
-                source = requests_sse.EventSource(
-                    args.sse_stream_url,
-                    params={"since": since},
-                    headers={
-                        "Accept": "text/event-stream",
-                        "User-Agent": "qlever update-wikidata",
-                    },
+                source = retry_with_backoff(
+                    lambda: connect_to_sse_stream(
+                        args.sse_stream_url, since=since
+                    ),
+                    "SSE stream connection",
+                    args.num_retries,
+                    log,
                 )
-                source.connect()
+                offset = None
                 for event in source:
                     if event.type == "message" and event.data:
                         event_data = json.loads(event.data)
-                        topic = event_data.get("meta").get("topic")
-                        if topic == args.topic:
-                            args.offset = event_data.get("meta").get("offset")
+                        event_topic = event_data.get("meta").get("topic")
+                        if event_topic == args.topic:
+                            offset = event_data.get("meta").get("offset")
                             log.debug(
-                                f"Determined offset from date: "
-                                f"{since} -> {args.offset}"
+                                f"Determined offset from date: {since} -> {offset}"
                             )
                             break
                 source.close()
+                if offset is None:
+                    raise Exception(
+                        f"No event with topic {args.topic} found in stream"
+                    )
+                args.offset = offset
             except Exception as e:
                 log.error(f"Error determining offset from stream: {e}")
                 return False
@@ -310,14 +428,6 @@ class UpdateWikidataCommand(QleverCommand):
                             attrs=["dark"],
                         )
                     )
-                source = requests_sse.EventSource(
-                    args.sse_stream_url,
-                    headers={
-                        "Accept": "text/event-stream",
-                        "User-Agent": "qlever update-wikidata",
-                        "Last-Event-ID": event_id_json,
-                    },
-                )
             else:
                 if args.verbose == "yes":
                     log.info(
@@ -326,34 +436,24 @@ class UpdateWikidataCommand(QleverCommand):
                             attrs=["dark"],
                         )
                     )
-                source = requests_sse.EventSource(
-                    args.sse_stream_url,
-                    params={"since": since},
-                    headers={
-                        "Accept": "text/event-stream",
-                        "User-Agent": "qlever update-wikidata",
-                    },
+
+            # Connect to the SSE stream with retry logic
+            try:
+                source = retry_with_backoff(
+                    lambda: connect_to_sse_stream(
+                        args.sse_stream_url,
+                        since=since if not event_id_for_next_batch else None,
+                        event_id=event_id_for_next_batch,
+                    ),
+                    "SSE stream connection for batch processing",
+                    args.num_retries,
+                    log,
                 )
-            # Try 10 times to connect to the source, with exponential backoff.
-            # If we cannot connect after that, give up.
-            wait_between_connect_attempts_s = 1
-            source_connected = False
-            while True:
-                try:
-                    source.connect()
-                    source_connected = True
-                    break
-                except Exception:
-                    log.error(
-                        f"Error connecting to stream, waiting "
-                        f"{wait_between_connect_attempts_s}s before retrying"
-                    )
-                    time.sleep(wait_between_connect_attempts_s)
-                    wait_between_connect_attempts_s *= 2
-                    if wait_between_connect_attempts_s > 512:
-                        log.error("Giving up connecting to SSE source, exit")
-                        break
-            if not source_connected:
+            except Exception as e:
+                log.error(
+                    f"Failed to connect to SSE stream after "
+                    f"{args.num_retries} retry attempts, last error: {e}"
+                )
                 break
 
             # Next comes the inner loop, which processes exactly one "batch" of
@@ -395,11 +495,17 @@ class UpdateWikidataCommand(QleverCommand):
                     f' -H "Content-type: application/sparql-query"'
                     f' --data "{sparql_query_offset}"'
                 )
+                # Verify offset with retry logic
                 try:
-                    result = run_command(
-                        f"{curl_cmd_check_offset} | sed 1d",
-                        return_output=True,
-                    ).strip()
+                    result = retry_with_backoff(
+                        lambda: run_command(
+                            f"{curl_cmd_check_offset} | sed 1d",
+                            return_output=True,
+                        ).strip(),
+                        "Offset verification",
+                        args.num_retries,
+                        log,
+                    )
                     if not result:
                         log.error(
                             "Failed to retrieve stored offset from knowledge base: "
@@ -418,8 +524,9 @@ class UpdateWikidataCommand(QleverCommand):
                         return False
                 except Exception as e:
                     log.error(
-                        f"Failed to retrieve or verify stored offset from knowledge base: {e}. "
-                        f"Cannot safely proceed with updates."
+                        f"Failed to retrieve or verify stored offset from "
+                        f"SPARQL endpoint after {args.num_retries} retry; "
+                        f"last error: {e}"
                     )
                     return False
 
@@ -846,28 +953,34 @@ class UpdateWikidataCommand(QleverCommand):
                 log.info(colored(curl_cmd, "blue"))
 
             # Run it (using `curl` for batch size up to 1000, otherwise
-            # `requests`).
+            # `requests`) with retry logic.
             try:
-                result = run_command(curl_cmd, return_output=True)
+                result = retry_with_backoff(
+                    lambda: run_command(curl_cmd, return_output=True),
+                    "UPDATE request",
+                    args.num_retries,
+                    log,
+                )
                 result_file_name = f"update.{first_offset_in_batch}.{current_batch_size}.result"
                 with open(result_file_name, "w") as f:
                     f.write(result)
             except Exception as e:
-                log.warn(f"Error running `curl` command: {e}")
-                log.info("")
-                continue
+                log.error(
+                    f"Failed to execute UPDATE request after "
+                    f"{args.num_retries} retry attempts, last error: "
+                    f"{e}"
+                )
+                return False
 
             # Results should be a JSON, parse it.
             try:
                 result = json.loads(result)
             except Exception as e:
                 log.error(
-                    f"Error parsing JSON result: {e}"
-                    f", the first 1000 characters are:"
+                    f"Error parsing JSON result: {e}. "
+                    f"The first 1000 characters are: {result[:1000]}"
                 )
-                log.info(result[:1000])
-                log.info("")
-                continue
+                return False
 
             # Check if the result contains a QLever exception.
             if "exception" in result:
