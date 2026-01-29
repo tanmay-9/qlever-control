@@ -42,12 +42,15 @@ class Qleverfile:
         "service-max-redirects",
         "service-max-value-rows",
         "sort-estimate-cancellation-factor",
+        "sparql-results-json-with-time",
         "spatial-join-prefilter-max-size",
         "spatial-join-max-num-threads",
+        "strip-columns",
         "syntax-test-mode",
         "throw-on-unbound-variables",
         "treat-default-graph-as-named-graph",
         "use-binsearch-transitive-path",
+        "websocket-updates-enabled",
     ]
 
     @staticmethod
@@ -162,7 +165,7 @@ class Qleverfile:
         index_args["index_binary"] = arg(
             "--index-binary",
             type=str,
-            default="IndexBuilderMain",
+            default="qlever-index",
             help="The binary for building the index (this requires "
             "that you have compiled QLever on your machine)",
         )
@@ -202,6 +205,13 @@ class Qleverfile:
             "processing of queries like SELECT ?p (COUNT(DISTINCT ?s) AS ?c) "
             "WHERE { ?s ?p [] ... } GROUP BY ?p",
         )
+        index_args["add_has_word_triples"] = arg(
+            "--add-has-word-triples",
+            action="store_true",
+            default=False,
+            help="Whether to add `ql:has-word` triples for text literals "
+            "(which can then be used for custom text search queries)",
+        )
         index_args["text_index"] = arg(
             "--text-index",
             choices=[
@@ -232,14 +242,13 @@ class Qleverfile:
         server_args["server_binary"] = arg(
             "--server-binary",
             type=str,
-            default="ServerMain",
+            default="qlever-server",
             help="The binary for starting the server (this requires "
             "that you have compiled QLever on your machine)",
         )
         server_args["host_name"] = arg(
             "--host-name",
             type=str,
-            default="localhost",
             help="The name of the host on which the server listens for "
             "requests",
         )
@@ -474,7 +483,8 @@ class Qleverfile:
 
         # Add other non-trivial default values.
         try:
-            config["server"]["host_name"] = socket.gethostname()
+            if config["server"].get("host_name") is None:
+                config["server"]["host_name"] = socket.gethostname()
         except Exception:
             log.warning(
                 "Could not get the hostname, using `localhost` as default"

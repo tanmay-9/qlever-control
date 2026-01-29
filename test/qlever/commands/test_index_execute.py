@@ -35,6 +35,7 @@ class TestIndexCommand(unittest.TestCase):
         args.only_pso_and_pos_permutations = False
         args.use_patterns = True
         args.parallel_parsing = False
+        args.add_has_word_triples = False
         args.text_index = "Test Index"
         args.stxxl_memory = False
         args.system = "native"
@@ -64,7 +65,7 @@ class TestIndexCommand(unittest.TestCase):
             f"{args.cat_input_files} | {args.index_binary}"
             f" -i {args.name} -s {args.name}.settings.json"
             f" --vocabulary-type {args.vocabulary_type}"
-            f" -F {args.format} -f - | tee"
+            f" -F {args.format} -f - 2>&1 | tee"
             f" {args.name}.index-log.txt"
         )
         index_cmd_call = call(expected_index_cmd, show_output=True)
@@ -116,6 +117,7 @@ class TestIndexCommand(unittest.TestCase):
         args.input_files = "*.nt"
         args.only_pso_and_pos_permutations = False
         args.use_patterns = True
+        args.add_has_word_triples = False
         args.text_index = None
         args.stxxl_memory = None
         args.system = "native"
@@ -177,6 +179,7 @@ class TestIndexCommand(unittest.TestCase):
         args.input_files = "*.nt"
         args.only_pso_and_pos_permutations = False
         args.use_patterns = True
+        args.add_has_word_triples = False
         args.text_index = None
         args.stxxl_memory = None
         args.system = "native"
@@ -241,6 +244,7 @@ class TestIndexCommand(unittest.TestCase):
         args.only_pso_and_pos_permutations = False
         args.use_patterns = True
         args.parallel_parsing = False
+        args.add_has_word_triples = False
         args.text_index = None
         args.stxxl_memory = None
         args.system = "native"
@@ -271,7 +275,7 @@ class TestIndexCommand(unittest.TestCase):
             f" -i {args.name} -s {args.name}.settings.json"
             f" --vocabulary-type {args.vocabulary_type}"
             f" -F {args.format} -f -"
-            f" | tee {args.name}.index-log.txt"
+            f" 2>&1 | tee {args.name}.index-log.txt"
         )
         mock_util_run_command.assert_called_once_with(
             f"{args.index_binary} --help"
@@ -351,6 +355,7 @@ class TestIndexCommand(unittest.TestCase):
         args.cat_input_files = False
         args.only_pso_and_pos_permutations = True
         args.use_patterns = "no"
+        args.add_has_word_triples = False
         args.text_index = "from_text_records_and_literals"
         args.stxxl_memory = True
         args.input_files = "*.nt"
@@ -379,7 +384,7 @@ class TestIndexCommand(unittest.TestCase):
             f" -d {args.name}.docsfile.tsv"
             f" --text-words-from-literals"
             f" --stxxl-memory {args.stxxl_memory}"
-            f" | tee {args.name}.index-log.txt"
+            f" 2>&1 | tee {args.name}.index-log.txt"
         )
         settings_json_cmd = (
             f"echo {shlex.quote(args.settings_json)} "
