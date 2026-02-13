@@ -9,6 +9,7 @@ import time
 import traceback
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import rdflib
@@ -254,7 +255,7 @@ class BenchmarkQueriesCommand(QleverCommand):
             )
             return query_pretty_printed.rstrip()
         except Exception as e:
-            log.error(
+            log.debug(
                 f"Failed to pretty-print query, returning original query: {e}"
             )
             return query.rstrip()
@@ -653,12 +654,12 @@ class BenchmarkQueriesCommand(QleverCommand):
         # processing time (seconds).
         query_times = []
         result_sizes = []
+        result_yml_query_records = {
+            "name": self.benchmark_name,
+            "description": self.benchmark_description,
+            "queries": [],
+        }
         if args.result_file:
-            result_yml_query_records = {
-                "name": self.benchmark_name,
-                "description": self.benchmark_description,
-                "queries": [],
-            }
             if timeout:
                 result_yml_query_records["timeout"] = timeout
             # Override the name and description if provided as args
@@ -777,6 +778,8 @@ class BenchmarkQueriesCommand(QleverCommand):
             result_file = (
                 f"qlever.example_queries.result.{abs(hash(curl_cmd))}.tmp"
             )
+            result_size = 0
+            single_int_result = None
             start_time = time.time()
             try:
                 http_code = run_curl_command(
@@ -814,7 +817,6 @@ class BenchmarkQueriesCommand(QleverCommand):
                     accept_header,
                     result_file,
                 )
-                single_int_result = None
                 if (
                     result_size == 1
                     and accept_header == "application/sparql-results+json"
@@ -975,21 +977,25 @@ class BenchmarkQueriesCommand(QleverCommand):
         Compute the index size (Bytes) and time (seconds) if available
         """
         index_stats = command_objects["index-stats"]
-        # Set the args for index-stats command
-        args.time_unit = "s"
-        args.size_unit = "B"
-        args.ignore_text_index = False
         index_time = index_size = None
         index_log_file = next(Path.cwd().glob("*.index-log.txt"), None)
+
         if index_log_file:
-            # index-stats needs args.name to get the text index filename
-            args.name = index_log_file.name.split(".")[0]
-            durations = index_stats.execute_time(args, index_log_file.name)
+            index_args = SimpleNamespace(
+                time_unit="s",
+                size_unit="B",
+                ignore_text_index=False,
+                name=index_log_file.name.split(".")[0],
+            )
+            durations = index_stats.execute_time(
+                index_args, index_log_file.name
+            )
             if len(durations) > 0 and "TOTAL time" in durations:
                 index_time = durations["TOTAL time"][0]
-        sizes = index_stats.execute_space(args)
-        if len(sizes) > 0 and "TOTAL size" in sizes:
-            index_size = sizes["TOTAL size"][0]
+            sizes = index_stats.execute_space(index_args)
+            if len(sizes) > 0 and "TOTAL size" in sizes:
+                index_size = sizes["TOTAL size"][0]
+
         return index_time, index_size
 
     def get_result_yml_query_record(

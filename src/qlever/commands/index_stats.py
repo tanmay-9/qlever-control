@@ -241,7 +241,6 @@ class IndexStatsCommand(QleverCommand):
             time_unit,
         )
         if text_begin and text_end:
-            log.info("")
             durations["TOTAL time"] = (
                 duration(
                     [(overall_begin, normal_end), (text_begin, text_end)]
@@ -249,7 +248,6 @@ class IndexStatsCommand(QleverCommand):
                 time_unit,
             )
         elif normal_end:
-            log.info("")
             durations["TOTAL time"] = (
                 duration([(overall_begin, normal_end)]),
                 time_unit,
@@ -321,7 +319,7 @@ class IndexStatsCommand(QleverCommand):
         return size_unit
 
     @staticmethod
-    def get_size_unit_factor(size_unit: str) -> int:
+    def get_size_unit_factor(size_unit: str) -> int | float:
         unit_factor = {
             "B": 1,
             "MB": 1e6,
