@@ -474,8 +474,10 @@ function getFontSizeForDepth(fontSize, depth) {
  * @param {boolean} available - Whether exec tree comparison is available
  */
 function setCompareExecTreesBtnState(btn, available) {
+    const title = "Compare query execution trees for 2 QLever instances"
     const disabledTitle =
-        "Requires at least 2 QLever instances for this benchmark with accept header: application/qlever-results+json";
+        `Requires at least 2 QLever instances for this benchmark with query execution tree information 
+        (accept header: application/qlever-results+json)`;
 
     // Dispose existing tooltip if any
     const existingTooltip = bootstrap.Tooltip.getInstance(btn);
@@ -483,8 +485,7 @@ function setCompareExecTreesBtnState(btn, available) {
 
     if (available) {
         btn.disabled = false;
-        btn.removeAttribute("data-bs-toggle");
-        btn.removeAttribute("title");
+        btn.setAttribute("title", title);
     } else {
         btn.disabled = true;
         btn.setAttribute("data-bs-toggle", "tooltip");

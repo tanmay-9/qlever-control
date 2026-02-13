@@ -369,8 +369,9 @@ function initThemeManager() {
         applyTheme(newTheme);
     }
 
-    // Initialize with user's preferred theme
+    // Initialize with user's preferred theme and listen for system changes
     applyPreferredTheme();
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyPreferredTheme);
 
     // Attach click listener to toggle button
     themeToggleBtn.addEventListener("click", toggleTheme);
