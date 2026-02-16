@@ -4,7 +4,7 @@ from qoxigraph.commands.query import QueryCommand as QoxigraphQueryCommand
 
 
 class QueryCommand(QoxigraphQueryCommand):
-    def relevant_qleverfile_arguments(self) -> dict[str : list[str]]:
+    def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
         return {
             "data": ["name"],
             "server": ["port", "host_name", "access_token"],
@@ -15,4 +15,4 @@ class QueryCommand(QoxigraphQueryCommand):
             args.sparql_endpoint = (
                 f"{args.host_name}:{args.port}/{args.name}/query"
             )
-        super().execute(args)
+        return super().execute(args)

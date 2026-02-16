@@ -10,7 +10,7 @@ class LogCommand(QleverLogCommand):
     def __init__(self):
         self.script_name = "qoxigraph"
 
-    def relevant_qleverfile_arguments(self) -> dict[str : list[str]]:
+    def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
         return {
             "data": ["name"],
             "runtime": [
