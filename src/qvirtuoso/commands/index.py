@@ -228,7 +228,7 @@ class IndexCommand(QleverCommand):
         run_cmd = separator.join(run_cmds)
 
         run_cmd_to_show = "\n".join(run_cmds)
-        cmd_to_show = ""
+        image_id = build_cmd = cmd_to_show = ""
         if args.system != "native":
             start_cmd, ld_dir_cmd, run_cmd = self.wrap_cmd_in_container(
                 args, start_cmd, ld_dir_cmd, run_cmds
@@ -335,6 +335,10 @@ class IndexCommand(QleverCommand):
 
         # Run the index command.
         try:
+            # Delete any existing old log files for a fresh index so that the
+            # index time computation is not affected
+            if not args.extend_existing_index:
+                Path(f"{args.name}.index-log.txt").unlink(missing_ok=True)
             # Run the index container in detached mode
             util.run_command(start_cmd)
             log.info("Waiting for Virtuoso server to be online...")
