@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+import time
 from pathlib import Path
 
 import qlever.util as util
@@ -19,7 +20,7 @@ class IndexCommand(QleverCommand):
     def should_have_qleverfile(self) -> bool:
         return True
 
-    def relevant_qleverfile_arguments(self) -> dict[str : list[str]]:
+    def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
         return {
             "data": ["name", "format"],
             "index": [
@@ -121,9 +122,17 @@ class IndexCommand(QleverCommand):
             log.info("Aborting the index operation...")
             return False
 
-        # Run the index command.
+        # Run the index command and record the elapsed time in the log
+        # file. Oxigraph's progress output is unreliable (may not print a 
+        # final summary line when loading multiple files), so we measure 
+        # the time externally.
+        log_file_name = f"{args.name}.index-log.txt"
         try:
+            start_time = time.time()
             util.run_command(index_cmd, show_output=True, show_stderr=True)
+            elapsed_s = time.time() - start_time
+            with open(log_file_name, "a") as f:
+                f.write(f"Total elapsed time: {elapsed_s:.0f}s\n")
         except Exception as e:
             log.error(f"Building the index failed: {e}")
             return False
@@ -132,8 +141,9 @@ class IndexCommand(QleverCommand):
             try:
                 log.info("")
                 log.info(
-                    f"Optimizing read-only database storage: {optimize_cmd}"
+                    "Optimizing read-only database storage:"
                 )
+                self.show(optimize_cmd)
                 util.run_command(
                     optimize_cmd, show_output=True, show_stderr=True
                 )
