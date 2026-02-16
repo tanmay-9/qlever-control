@@ -88,6 +88,7 @@ def run_curl_command(
     headers: dict[str, str] = {},
     params: dict[str, str] = {},
     result_file: Optional[str] = None,
+    max_time: int | None = None,
 ) -> str:
     """
     Run `curl` with the given `url`, `headers`, and `params`. If `result_file`
@@ -109,6 +110,8 @@ def run_curl_command(
             ]
         )
     )
+    if max_time is not None:
+        curl_cmd += f" --max-time {int(max_time)}"
     result = subprocess.run(
         curl_cmd,
         shell=True,
@@ -329,10 +332,10 @@ def binary_exists(binary: str, cmd_arg: str) -> bool:
         if binary == "qlever-index" or binary == "qlever-server":
             log.info("")
             log.warning(
-                f"This might be because you are using a newer version of "
-                f"the `qlever` command-line tool together with an older "
-                f"Docker image; in that case update with "
-                f"`docker pull adfreiburg/qlever` "
+                "This might be because you are using a newer version of "
+                "the `qlever` command-line tool together with an older "
+                "Docker image; in that case update with "
+                "`docker pull adfreiburg/qlever` "
             )
         return False
 
