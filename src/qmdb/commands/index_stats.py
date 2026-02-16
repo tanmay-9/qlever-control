@@ -71,7 +71,7 @@ class IndexStatsCommand(QleverIndexStatsCommand):
             time_unit = self.get_time_unit(args.time_unit, value_s)
             unit_factor = self.get_time_unit_factor(time_unit)
 
-            normalized_value = value / unit_factor
+            normalized_value = value_s / unit_factor
             stats[label] = (normalized_value, time_unit)
 
         return stats

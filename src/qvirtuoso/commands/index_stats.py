@@ -31,17 +31,33 @@ class IndexStatsCommand(QleverIndexStatsCommand):
         #   "Loader has finished".
         #
         # State switching: IDLE -> LOADING -> WAITING_CHECKPOINT -> IDLE
+        #
+        # The log has date headers ("\t\tMon Feb 16 2026") followed by
+        # timestamped lines ("HH:MM:SS ..."). We track the current date
+        # so that timestamps spanning midnight are handled correctly.
         timestamp_pattern = re.compile(r"^(\d{2}:\d{2}:\d{2})\s")
+        date_pattern = re.compile(r"^\t\t\w+ (\w+ \d+ \d{4})")
         IDLE, LOADING, WAITING_CHECKPOINT = range(3)
         state = IDLE
+        current_date = None
         start_time = None
         run_seconds = []
 
         for line in lines:
-            ts_match = timestamp_pattern.match(line)
-            if not ts_match:
+            date_match = date_pattern.match(line)
+            if date_match:
+                current_date = datetime.strptime(
+                    date_match.group(1), "%b %d %Y"
+                ).date()
                 continue
-            ts = datetime.strptime(ts_match.group(1), "%H:%M:%S")
+
+            ts_match = timestamp_pattern.match(line)
+            if not ts_match or current_date is None:
+                continue
+            ts = datetime.combine(
+                current_date,
+                datetime.strptime(ts_match.group(1), "%H:%M:%S").time(),
+            )
 
             if state == IDLE and "Loader started" in line:
                 start_time = ts
