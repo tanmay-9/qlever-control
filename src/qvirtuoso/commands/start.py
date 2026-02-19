@@ -10,6 +10,7 @@ from qlever.containerize import Containerize
 from qlever.log import log
 from qlever.util import is_server_alive, run_command
 from qvirtuoso.commands.index import (
+    get_update_ini_cmd,
     log_virtuoso_ini_changes,
     update_virtuoso_ini,
     virtuoso_ini_help_msg,
@@ -17,6 +18,13 @@ from qvirtuoso.commands.index import (
 
 
 class StartCommand(QleverCommand):
+    """
+    Start the Virtuoso server (virtuoso-t) for an already-indexed dataset.
+    Before starting, updates virtuoso.ini with Qleverfile settings (ports,
+    timeouts, query memory, SPARQL limits). Supports both native and
+    containerized execution, with an option to run in the foreground.
+    """
+
     def __init__(self):
         self.script_name = "qvirtuoso"
 
@@ -83,12 +91,13 @@ class StartCommand(QleverCommand):
         config_dict["HTTPServer"]["ServerPort"] = http_port
         config_dict["Database"]["ErrorLogFile"] = f"{args.name}.server-log.txt"
         config_dict["SPARQL"]["MaxQueryCostEstimationTime"] = "-1"
-        config_dict["SPARQL"]["MaxConstructTriples"] = "0"
+        config_dict["SPARQL"]["ResultSetMaxRows"] = "1048576"
         config_dict["SPARQL"]["MaxQueryExecutionTime"] = str(timeout_s)
         return config_dict
 
     @staticmethod
     def wrap_cmd_in_container(args, cmd: str) -> str:
+        """Wrap the server start command in a container with restart policy."""
         run_subcommand = "run --restart=unless-stopped"
         if not args.run_in_foreground:
             run_subcommand += " -d"
@@ -121,7 +130,8 @@ class StartCommand(QleverCommand):
             )
 
         virtuoso_ini_config_dict = self.config_dict_for_update_ini(args)
-        log_virtuoso_ini_changes(args.name, virtuoso_ini_config_dict)
+        update_ini_cmd = get_update_ini_cmd(args.name, virtuoso_ini_config_dict)
+        log_virtuoso_ini_changes(args.name, virtuoso_ini_config_dict, update_ini_cmd)
         # Show the command line.
         self.show(start_cmd, only_show=args.show)
         if args.show:
@@ -170,7 +180,7 @@ class StartCommand(QleverCommand):
                 )
                 return False
 
-        if not update_virtuoso_ini(args.name, virtuoso_ini_config_dict):
+        if not update_virtuoso_ini(args.name, update_ini_cmd):
             return False
 
         try:

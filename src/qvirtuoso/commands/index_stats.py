@@ -12,12 +12,19 @@ from qlever.util import get_total_file_size
 
 class IndexStatsCommand(QleverIndexStatsCommand):
     """
-    Class for executing the `index-stats` command.
+    Show index build time and disk space for a Virtuoso index.
     """
 
     def execute_time(
         self, args, log_file_name: str
     ) -> dict[str, tuple[float | None, str]]:
+        """
+        Parse the Virtuoso index log to compute build time. Handles multiple
+        loading runs (initial + extend) by tracking state transitions:
+        IDLE -> LOADING (on "Loader started") -> WAITING_CHECKPOINT
+        (on "Loader has finished") -> IDLE (on "Checkpoint finished").
+        Each completed cycle is one measured run.
+        """
         try:
             with open(log_file_name, "r") as f:
                 lines = f.readlines()

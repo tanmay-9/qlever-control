@@ -11,84 +11,70 @@ from qlever.log import log
 from qvirtuoso.commands.stop import StopCommand
 
 
-def construct_ini_sed_cmd(
-    arg_name: str, section: str, option: str, new_value: str
+def get_update_ini_cmd(
+    arg_name: str, config_params: dict[str, dict[str, str]]
 ) -> str:
     """
-    Get the sed command that would either overwrite an option in virtuoso.ini
-    if it exists or append the new option with the value right after the
-    section header.
+    Build a cross-platform sed pipeline that updates key=value pairs in
+    virtuoso.ini. Writes to a temporary file first and then replaces the
+    original to avoid truncation from reading and writing the same file
+    in a single pipeline.
     """
-    sed_cmd = (
-        # First: check if the option exists anywhere in the file
-        rf"grep -q '{option}' {arg_name}.virtuoso.ini && "
-        # If the option exists:
-        #   - 'sed -i' edits the file in place.
-        #   - '/^\[{section}\]/,/^\[/' limits the search range to the given section:
-        #         from the line with "[section]" until the next line starting with '['.
-        #   - 's/^\({option}[[:space:]]*=[[:space:]]*\)[a-zA-Z0-9:.-]*/\1{new_value}/'
-        #         This substitution does:
-        #         • ^({option}[[:space:]]*=[[:space:]]*) → capture "option =" at the
-        #           start of the line, allowing spaces around '='.
-        #         • [a-zA-Z0-9:.-]* → match the old value (alphanumeric, colon, dot, dash).
-        #         • Replace with \1{new_value} → keep "option =" (the captured group) and
-        #           replace the old value with the new one.
-        rf"sed -i '/^\[{section}\]/,/^\[/ s/^\({option}[[:space:]]*=[[:space:]]*\)"
-        rf"[a-zA-Z0-9:.-]*/\1{new_value}/' {arg_name}.virtuoso.ini || "
-        # If the option does NOT exist:
-        #   - '/^\[{section}\]/a {option} = {new_value}' appends the line
-        #     "option = new_value" right after the section header line [section].
-        rf"sed -i '/^\[{section}\]/a {option} = {new_value}' {arg_name}.virtuoso.ini"
-    )
-    return sed_cmd
+    ini_file = f"{arg_name}.virtuoso.ini"
+    sed_pipeline = f"cat {ini_file}"
+    for section, option_dict in config_params.items():
+        for option, new_value in option_dict.items():
+            sed_pipeline += (
+                f" | {util.get_ini_sed_cmd(section, option, new_value)}"
+            )
+    sed_pipeline += f" > {ini_file}.tmp && mv {ini_file}.tmp {ini_file}"
+    return sed_pipeline
 
 
-def update_virtuoso_ini(
-    arg_name: str, config_params: dict[str, dict[str, str]]
-) -> bool:
+def update_virtuoso_ini(arg_name: str, update_ini_cmd: str) -> bool:
     """
-    Update all the necessary sections and options of virtuoso.ini
+    Execute the sed pipeline command to update virtuoso.ini options.
     """
     try:
-        for section, option_dict in config_params.items():
-            for option, new_value in option_dict.items():
-                sed_cmd = construct_ini_sed_cmd(
-                    arg_name, section, option, new_value
-                )
-                log.debug(sed_cmd)
-                util.run_command(sed_cmd)
+        log.debug(update_ini_cmd)
+        util.run_command(update_ini_cmd)
         return True
     except Exception as e:
         log.error(
-            "Couldn't replace the necessary sections in "
+            f"Couldn't replace the necessary sections in "
             f"{arg_name}.virtuoso.ini: {e}"
         )
         return False
 
 
 def log_virtuoso_ini_changes(
-    arg_name: str, virtuoso_ini_config_dict: dict[str, dict[str, str]]
+    arg_name: str,
+    virtuoso_ini_config_dict: dict[str, dict[str, str]],
+    update_ini_cmd: str,
 ):
     """
-    Show all the options of the virtuoso.ini that will be updated before the
-    process is executed
+    Log the sed command and the section/option values that will be written
+    to virtuoso.ini. Called before execution so the user can review what
+    will change (also visible with --show).
     """
     log.info(
         f"Following options of {arg_name}.virtuoso.ini will be updated "
-        "with the values from Qleverfile as shown below:"
+        "with the values from Qleverfile using the following sed command:"
     )
+    IndexCommand.show(f"\n{update_ini_cmd}")
     for section, option_dict in virtuoso_ini_config_dict.items():
-        log.info(f"\n[{section}]")
+        log_values = [f"[{section}]"]
         for option, new_value in option_dict.items():
-            log.info(f"{option}  =  {new_value}")
-
-    log.info("")
+            log_values.append(f"{option}  =  {new_value}")
+        log.info("\n".join(log_values))
+        log.info("")
 
 
 def virtuoso_ini_help_msg(script_name: str, args, ini_files: list[str]) -> str:
     """
-    Log message to show based on presence of (0 or 1 or multiple) virtuoso.ini
-    file in the current working directory
+    Return a help message depending on how many .ini files are present in the
+    current directory: none (suggest setup-config), exactly one (will be
+    renamed), or multiple (ambiguous, user must resolve).
     """
     ini_msg = (
         "No .ini configfile present. Did you call "
@@ -109,6 +95,19 @@ def virtuoso_ini_help_msg(script_name: str, args, ini_files: list[str]) -> str:
 
 
 class IndexCommand(QleverCommand):
+    """
+    Build a Virtuoso index for an RDF dataset. The indexing workflow is:
+    1. Update virtuoso.ini with Qleverfile settings (ports, memory buffers)
+    2. Start the Virtuoso server (virtuoso-t)
+    3. Register input files via isql ld_dir()
+    4. Load data via rdf_loader_run() (optionally with parallel loaders)
+    5. Checkpoint and stop the server
+
+    When using a container system, the Docker image is built from the local
+    Dockerfile if not already present (or if --rebuild-image is passed).
+    """
+
+    # Virtuoso buffer tuning constants (per GB of free memory)
     NUM_BUFFERS_PER_GB = 85_000
     MAX_DIRTY_BUFFERS_PER_GB = 65_000
 
@@ -194,7 +193,9 @@ class IndexCommand(QleverCommand):
         args, start_cmd: str, ld_dir_cmd: str, run_cmds: list[str]
     ) -> tuple[str, str, str]:
         """
-        Given start_cmd, ld_dir_cmd, run_cmds, wrap them in a containerized command
+        Wrap the three indexing phases (start server, register files, load
+        data) into container commands. The server runs detached, while
+        ld_dir and rdf_loader_run are executed via `docker exec`.
         """
         start_cmd = Containerize().containerize_command(
             cmd=f"{start_cmd} -f",
@@ -258,7 +259,8 @@ class IndexCommand(QleverCommand):
             )
 
         virtuoso_ini_config_dict = self.config_dict_for_update_ini(args)
-        log_virtuoso_ini_changes(args.name, virtuoso_ini_config_dict)
+        update_ini_cmd = get_update_ini_cmd(args.name, virtuoso_ini_config_dict)
+        log_virtuoso_ini_changes(args.name, virtuoso_ini_config_dict, update_ini_cmd)
 
         cmd_to_show += f"{start_cmd}\n\n{ld_dir_cmd}\n{run_cmd_to_show}"
 
@@ -336,7 +338,7 @@ class IndexCommand(QleverCommand):
                 )
                 return False
 
-        if not update_virtuoso_ini(args.name, virtuoso_ini_config_dict):
+        if not update_virtuoso_ini(args.name, update_ini_cmd):
             return False
 
         # Run the index command.

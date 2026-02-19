@@ -9,6 +9,13 @@ from qoxigraph.commands.setup_config import (
 
 
 class SetupConfigCommand(QoxigraphSetupConfigCommand):
+    """
+    Generate a Qleverfile and download the default virtuoso.ini configuration
+    file. Extends the base setup-config with Virtuoso-specific memory budget
+    options (--total-index-memory, --total-server-memory) that are used to
+    auto-generate sensible Qleverfile defaults.
+    """
+
     IMAGE = "adfreiburg/virtuoso-opensource-7"
     VIRTUOSO_INI_URL = (
         "https://raw.githubusercontent.com/openlink/virtuoso-opensource/"
@@ -21,6 +28,10 @@ class SetupConfigCommand(QoxigraphSetupConfigCommand):
 
     @staticmethod
     def construct_engine_specific_params(args) -> dict[str, dict[str, str]]:
+        """
+        Derive Virtuoso-specific Qleverfile parameters from the memory budget.
+        Allocates 1/5 of server memory (min 2G) to the query processor.
+        """
         index_params = {
             "ISQL_PORT": 1111,
             "FREE_MEMORY_GB": args.total_index_memory,
@@ -35,6 +46,10 @@ class SetupConfigCommand(QoxigraphSetupConfigCommand):
         return {"index": index_params, "server": server_params}
 
     def execute(self, args) -> bool:
+        """
+        Create the Qleverfile via the parent class, then download the default
+        virtuoso.ini into the current working directory.
+        """
         qleverfile_successfully_created = super().execute(args)
         if not qleverfile_successfully_created:
             return False
