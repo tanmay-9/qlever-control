@@ -44,6 +44,12 @@ class IndexCommand(QleverCommand):
                 "on your machine)"
             ),
         )
+        subparser.add_argument(
+            "--rebuild-image",
+            action="store_true",
+            default=False,
+            help="Rebuild the Docker image to get the latest updates",
+        )
 
     @staticmethod
     def wrap_cmd_in_container(args, cmd: str) -> str:
@@ -87,6 +93,7 @@ class IndexCommand(QleverCommand):
             index_cmd += f" {args.extra_args}"
         index_cmd += f" | tee {args.name}.index-log.txt"
 
+        image_id = build_cmd = ""
         if args.system == "native":
             cmd_to_show = index_cmd
         else:
@@ -97,7 +104,9 @@ class IndexCommand(QleverCommand):
             image_id = util.get_container_image_id(system, args.image)
 
             cmd_to_show = (
-                f"{build_cmd}\n\n{index_cmd}" if not image_id else index_cmd
+                f"{build_cmd}\n\n{index_cmd}"
+                if not image_id or args.rebuild_image
+                else index_cmd
             )
 
         # Show the command line.
@@ -132,7 +141,7 @@ class IndexCommand(QleverCommand):
                 return False
 
             # Build the docker image if not found on the system
-            if not image_id:
+            if not image_id or args.rebuild_image:
                 build_successful = util.build_image(
                     build_cmd, system, args.image
                 )

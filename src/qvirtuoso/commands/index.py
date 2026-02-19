@@ -147,6 +147,12 @@ class IndexCommand(QleverCommand):
                 "large datasets to prevent total data loss in case of failure."
             ),
         )
+        subparser.add_argument(
+            "--rebuild-image",
+            action="store_true",
+            default=False,
+            help="Rebuild the Docker image to get the latest updates",
+        )
 
     def config_dict_for_update_ini(self, args) -> dict[str, dict[str, str]]:
         """
@@ -241,7 +247,7 @@ class IndexCommand(QleverCommand):
                 f"UID=$(id -u) --build-arg GID=$(id -g) {dockerfile_dir}"
             )
             image_id = util.get_container_image_id(args.system, args.image)
-            if not image_id:
+            if not image_id or args.rebuild_image:
                 cmd_to_show = f"{build_cmd}\n\n"
 
         ini_files = [str(ini) for ini in Path(".").glob("*.ini")]
@@ -286,7 +292,7 @@ class IndexCommand(QleverCommand):
                 )
                 return False
 
-            if not image_id:
+            if not image_id or args.rebuild_image:
                 build_successful = util.build_image(
                     build_cmd, args.system, args.image
                 )
