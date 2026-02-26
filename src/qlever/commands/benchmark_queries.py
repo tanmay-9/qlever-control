@@ -136,6 +136,48 @@ def parse_queries_tsv(queries_cmd: str) -> list[tuple[str, str, str]]:
         return []
 
 
+def parse_queries_yml(
+    queries_file: str,
+) -> tuple[str | None, str | None, list[tuple[str, str, str]]]:
+    """
+    Parse a YML file, validate its structure and return a tuple of
+    (benchmark_name, benchmark_description, queries) where queries is a
+    list of tuple(query_name, query_description, full_sparql_query).
+    """
+    with open(queries_file, "r", encoding="utf-8") as q_file:
+        try:
+            data = yaml.safe_load(q_file)
+        except yaml.YAMLError as exc:
+            log.error(f"Error parsing {queries_file} file: {exc}")
+            return None, None, []
+
+    # Validate the structure
+    if not isinstance(data, dict) or "queries" not in data:
+        log.error("Error: YAML file must contain a top-level 'queries' key")
+        return None, None, []
+
+    if not isinstance(data["queries"], list):
+        log.error("Error: 'queries' key in YML file must hold a list.")
+        return None, None, []
+
+    queries = []
+    for query in data["queries"]:
+        if (
+            not isinstance(query, dict)
+            or "query" not in query
+            or "name" not in query
+        ):
+            log.error(
+                "Error: Each item in 'queries' must contain "
+                "'name' and 'query' keys."
+            )
+            return None, None, []
+        queries.append(
+            (query["name"], query.get("description") or "", query["query"])
+        )
+    return data.get("name"), data.get("description"), queries
+
+
 def get_result_size(
     count_only: bool,
     query_type: str,
@@ -437,8 +479,7 @@ class BenchmarkQueriesCommand(QleverCommand):
     """
 
     def __init__(self):
-        self.benchmark_name = None
-        self.benchmark_description = None
+        pass
 
     def description(self) -> str:
         return (
@@ -661,53 +702,6 @@ class BenchmarkQueriesCommand(QleverCommand):
             ),
         )
 
-    def parse_queries_yml(
-        self, queries_file: str
-    ) -> list[tuple[str, str, str]]:
-        """
-        Parse a YML file, validate its structure and return a list of
-        queries i.e. tuple(query_name, query_description, full_sparql_query)
-        """
-        with open(queries_file, "r", encoding="utf-8") as q_file:
-            try:
-                data = yaml.safe_load(q_file)  # Load YAML safely
-            except yaml.YAMLError as exc:
-                log.error(f"Error parsing {queries_file} file: {exc}")
-                return []
-
-        # Validate the structure
-        if not isinstance(data, dict) or "queries" not in data:
-            log.error(
-                "Error: YAML file must contain a top-level 'queries' key"
-            )
-            return []
-
-        if not isinstance(data["queries"], list):
-            log.error("Error: 'queries' key in YML file must hold a list.")
-            return []
-
-        if name := data.get("name"):
-            self.benchmark_name = name
-        if description := data.get("description"):
-            self.benchmark_description = description
-
-        queries = []
-        for query in data["queries"]:
-            if (
-                not isinstance(query, dict)
-                or "query" not in query
-                or "name" not in query
-            ):
-                log.error(
-                    "Error: Each item in 'queries' must contain "
-                    "'name' and 'query' keys."
-                )
-                return []
-            queries.append(
-                (query["name"], query.get("description") or "", query["query"])
-            )
-        return queries
-
     def execute(self, args) -> bool:
         # We can't have both `--remove-offset-and-limit` and `--limit`.
         if args.remove_offset_and_limit and args.limit:
@@ -737,11 +731,6 @@ class BenchmarkQueriesCommand(QleverCommand):
                 )
                 results_dir_path.mkdir(parents=True, exist_ok=True)
             dataset, engine = result_file_parts
-            self.benchmark_name = dataset.capitalize()
-            self.benchmark_description = (
-                f"{dataset.capitalize()} benchmark ran using {script_name} "
-                "benchmark-queries"
-            )
 
         # If `args.accept` is `application/sparql-results+json` or
         # `application/qlever-results+json` or `AUTO`, we need `jq`.
@@ -834,8 +823,12 @@ class BenchmarkQueriesCommand(QleverCommand):
         if args.show:
             return True
 
+        # Parse queries and extract benchmark name/description from YML.
+        yml_name = yml_description = None
         if args.queries_yml:
-            queries = self.parse_queries_yml(args.queries_yml)
+            yml_name, yml_description, queries = parse_queries_yml(
+                args.queries_yml
+            )
         elif args.queries_tsv:
             queries = parse_queries_tsv(f"cat {args.queries_tsv}")
         else:
@@ -860,26 +853,37 @@ class BenchmarkQueriesCommand(QleverCommand):
         except ValueError:
             timeout = None
 
+        # Determine benchmark name and description from:
+        # 1. CLI args (highest priority)
+        # 2. YML file fields
+        # 3. Default values
+        dataset_name = dataset.capitalize() if dataset else None
+        default_description = (
+            f"{dataset_name} benchmark ran using {script_name} "
+            "benchmark-queries"
+            if dataset_name
+            else None
+        )
+        benchmark_name = args.benchmark_name or yml_name or dataset_name
+        benchmark_description = (
+            args.benchmark_description
+            or yml_description
+            or default_description
+        )
+
         # Launch the queries one after the other and for each print: the
         # description, the result size (number of rows), and the query
         # processing time (seconds).
         query_times = []
         result_sizes = []
         result_yml_query_records = {
-            "name": self.benchmark_name,
-            "description": self.benchmark_description,
+            "name": benchmark_name,
+            "description": benchmark_description,
             "queries": [],
         }
         if args.result_file:
             if timeout:
                 result_yml_query_records["timeout"] = timeout
-            # Override the name and description if provided as args
-            if args.benchmark_name:
-                result_yml_query_records["name"] = args.benchmark_name
-            if args.benchmark_description:
-                result_yml_query_records["description"] = (
-                    args.benchmark_description
-                )
 
             index_time, index_size = compute_index_stats()
             result_yml_query_records["index_time"] = index_time
