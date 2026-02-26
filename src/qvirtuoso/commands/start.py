@@ -15,6 +15,7 @@ from qvirtuoso.commands.index import (
     update_virtuoso_ini,
     virtuoso_ini_help_msg,
 )
+from qvirtuoso.commands.stop import StopCommand
 
 
 class StartCommand(QleverCommand):
@@ -206,7 +207,10 @@ class StartCommand(QleverCommand):
                 " (Ctrl-C stops following the log, but NOT the server)"
             )
         log.info("")
-        log_cmd = f"exec tail -f {args.name}.server-log.txt"
+        log_file = Path(f"{args.name}.server-log.txt")
+        while not log_file.exists():
+            time.sleep(0.1)
+        log_cmd = f"exec tail -f {log_file}"
         log_proc = subprocess.Popen(log_cmd, shell=True)
         while not is_server_alive(endpoint_url):
             time.sleep(1)
@@ -227,6 +231,10 @@ class StartCommand(QleverCommand):
                 process.wait()
             except KeyboardInterrupt:
                 process.terminate()
+                # Remove the container if the user stops the server process
+                if args.system in Containerize.supported_systems():
+                    args.cmdline_regex = StopCommand.DEFAULT_REGEX
+                    StopCommand().execute(args)
             log_proc.terminate()
 
         return True

@@ -8,6 +8,7 @@ from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
 from qlever.util import binary_exists, is_server_alive, run_command
+from qoxigraph.commands.stop import StopCommand
 
 
 class StartCommand(QleverCommand):
@@ -113,11 +114,9 @@ class StartCommand(QleverCommand):
         )
 
         if args.system == "native":
-            start_cmd = f"{args.server_binary} {start_cmd}"
+            start_cmd = f"{args.server_binary} {start_cmd} > {args.name}.server-log.txt 2>&1"
             if not args.run_in_foreground:
-                start_cmd = (
-                    f"nohup {start_cmd} > {args.name}.server-log.txt 2>&1 &"
-                )
+                start_cmd = f"nohup {start_cmd} &"
         else:
             start_cmd = self.wrap_cmd_in_container(args, start_cmd)
 
@@ -177,7 +176,10 @@ class StartCommand(QleverCommand):
             )
         log.info("")
         if args.system == "native":
-            log_cmd = f"exec tail -f {args.name}.server-log.txt"
+            log_file = Path(f"{args.name}.server-log.txt")
+            while not log_file.exists():
+                time.sleep(0.1)
+            log_cmd = f"exec tail -f {log_file}"
         else:
             time.sleep(2)
             log_cmd = f"exec {args.system} logs -f {args.server_container}"
@@ -201,6 +203,9 @@ class StartCommand(QleverCommand):
                 process.wait()
             except KeyboardInterrupt:
                 process.terminate()
+                if args.system in Containerize.supported_systems():
+                    args.cmdline_regex = StopCommand.DEFAULT_REGEX
+                    StopCommand().execute(args)
             log_proc.terminate()
 
         return True
