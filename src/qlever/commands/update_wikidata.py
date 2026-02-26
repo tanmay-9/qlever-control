@@ -32,7 +32,7 @@ def custom_cast_lexical_to_python(lexical, datatype):
 rdflib.term._castLexicalToPython = custom_cast_lexical_to_python
 
 
-def retry_with_backoff(operation, operation_name, max_retries, log):
+def retry_with_backoff(operation, operation_name, max_retries):
     """
     Retry an operation with exponential backoff, see backoff intervals below
     (in seconds). Returns the result of the operation if successful, or raises
@@ -103,6 +103,45 @@ def connect_to_sse_stream(sse_stream_url, since=None, event_id=None):
 
     source.connect()
     return source
+
+
+def get_next_offset_from_endpoint(sparql_endpoint, num_retries):
+    """Query the endpoint for the next stream offset.
+
+    Args:
+        sparql_endpoint: URL of the SPARQL endpoint
+        num_retries: Number of retries for the query
+
+    Returns:
+        int: The offset value from the endpoint
+
+    Raises:
+        Exception: If the query fails or returns no results
+    """
+    sparql_query_offset = (
+        "PREFIX wikibase: <http://wikiba.se/ontology#> "
+        "SELECT (MAX(?offset) AS ?maxOffset) WHERE { "
+        "<http://wikiba.se/ontology#Dump> "
+        "wikibase:updateStreamNextOffset ?offset "
+        "}"
+    )
+    curl_cmd_check_offset = (
+        f"curl -s {sparql_endpoint}"
+        f' -H "Accept: text/csv"'
+        f' -H "Content-type: application/sparql-query"'
+        f' --data "{sparql_query_offset}"'
+    )
+    result = retry_with_backoff(
+        lambda: run_command(
+            f"{curl_cmd_check_offset} | sed 1d",
+            return_output=True,
+        ).strip(),
+        "Offset verification",
+        num_retries,
+    )
+    if not result:
+        raise Exception("Query returned no results")
+    return int(result.strip('"'))
 
 
 class UpdateWikidataCommand(QleverCommand):
@@ -315,41 +354,23 @@ class UpdateWikidataCommand(QleverCommand):
         log.warn("Press Ctrl+C to finish and exit gracefully")
         log.info("")
 
-        # If --offset is not provided, first try to get the offset from
-        # the endpoint. Only fall back to date-based approach if no
-        # offset is available.
+        # If no `--offset` is provided, try to get the offset from
+        # the endpoint.
         if not args.offset:
             try:
-                sparql_query_stored_offset = (
-                    "PREFIX wikibase: <http://wikiba.se/ontology#> "
-                    "SELECT (MAX(?offset) AS ?maxOffset) WHERE { "
-                    "<http://wikiba.se/ontology#Dump> "
-                    "wikibase:updateStreamNextOffset ?offset "
-                    "}"
+                args.offset = get_next_offset_from_endpoint(
+                    sparql_endpoint, args.num_retries
                 )
-                curl_cmd_get_stored_offset = (
-                    f"curl -s {sparql_endpoint}"
-                    f' -H "Accept: text/csv"'
-                    f' -H "Content-type: application/sparql-query"'
-                    f' --data "{sparql_query_stored_offset}"'
-                )
-                result = run_command(
-                    f"{curl_cmd_get_stored_offset} | sed 1d",
-                    return_output=True,
-                ).strip()
-                if result and result != '""':
-                    args.offset = int(result.strip('"'))
-                    log.info(
-                        f"Resuming from offset from endpoint: {args.offset}"
-                    )
+                log.info(f"Resuming from offset from endpoint: {args.offset}")
             except Exception as e:
                 log.debug(
                     f"Could not retrieve offset from endpoint: {e}. "
                     f"Will determine offset from date instead."
                 )
 
-        # If --offset is still not set, determine it by reading a single
-        # message from the SSE stream using the `since` date.
+        # If the offset was neither provided via `--offset` nor could
+        # be retrieved from the endpoint, determine it by reading a
+        # single message from the SSE stream at the `since` date.
         if not args.offset:
             try:
                 source = retry_with_backoff(
@@ -358,7 +379,6 @@ class UpdateWikidataCommand(QleverCommand):
                     ),
                     "SSE stream connection",
                     args.num_retries,
-                    log,
                 )
                 offset = None
                 for event in source:
@@ -457,7 +477,6 @@ class UpdateWikidataCommand(QleverCommand):
                     ),
                     "SSE stream connection for batch processing",
                     args.num_retries,
-                    log,
                 )
             except Exception as e:
                 log.error(
@@ -485,88 +504,62 @@ class UpdateWikidataCommand(QleverCommand):
                 # before starting, but keep as fallback
                 first_offset_in_batch = None
 
-            # Check that the stream offset matches the offset from the endpoint
-            # Skip this check on the first batch (when using --offset to resume)
+            # Check that the stream offset matches the offset from the
+            # endpoint, unless disabled or this is the first batch.
             if (
                 args.check_offset_before_each_batch == "yes"
                 and not first_batch
                 and first_offset_in_batch is not None
             ):
-                sparql_query_offset = (
-                    "PREFIX wikibase: <http://wikiba.se/ontology#> "
-                    "SELECT (MAX(?offset) AS ?maxOffset) WHERE { "
-                    "<http://wikiba.se/ontology#Dump> "
-                    "wikibase:updateStreamNextOffset ?offset "
-                    "}"
-                )
-                curl_cmd_check_offset = (
-                    f"curl -s {sparql_endpoint}"
-                    f' -H "Accept: text/csv"'
-                    f' -H "Content-type: application/sparql-query"'
-                    f' --data "{sparql_query_offset}"'
-                )
                 # Verify offset with retry logic
                 try:
-                    result = retry_with_backoff(
-                        lambda: run_command(
-                            f"{curl_cmd_check_offset} | sed 1d",
-                            return_output=True,
-                        ).strip(),
-                        "Offset verification",
-                        args.num_retries,
-                        log,
+                    endpoint_offset = get_next_offset_from_endpoint(
+                        sparql_endpoint, args.num_retries
                     )
-                    if not result:
-                        log.error(
-                            "Failed to retrieve offset from endpoint: "
-                            "query returned no results; this might be the first update, "
-                            "or the offset triple is missing"
-                        )
-                        return False
-                    endpoint_offset = int(result.strip('"'))
-                    if endpoint_offset < first_offset_in_batch:
-                        # Stream offset is LATER than endpoint offset
-                        if args.rewind_to_earlier_offset == "yes":
-                            log.info(
-                                colored(
-                                    f"Stream offset {first_offset_in_batch} is later "
-                                    f"than offset {endpoint_offset} from endpoint; "
-                                    f"this can happen after a server restart; "
-                                    f"rewinding to offset {endpoint_offset} from endpoint",
-                                    "cyan",
-                                )
-                            )
-                            log.info("")
-                            # Reconnect from the endpoint offset
-                            event_id_for_next_batch = [
-                                {
-                                    "topic": args.topic,
-                                    "partition": args.partition,
-                                    "offset": endpoint_offset,
-                                }
-                            ]
-                            continue  # Skip this batch and reconnect
-                        else:
-                            log.error(
-                                f"Offset mismatch: stream offset {first_offset_in_batch} "
-                                f"is later than offset {endpoint_offset} from endpoint; "
-                                f"rewind disabled by --rewind-to-earlier-offset=no"
-                            )
-                            return False
-                    elif endpoint_offset > first_offset_in_batch:
-                        # Stream offset is EARLIER than endpoint offset - this is bad
-                        log.error(
-                            f"Offset mismatch: stream offset {first_offset_in_batch} "
-                            f"is earlier than offset {endpoint_offset} from endpoint; "
-                            f"this indicates that updates may have been applied "
-                            f"out of order or some updates are missing"
-                        )
-                        return False
                 except Exception as e:
                     log.error(
-                        f"Failed to retrieve or verify offset from "
-                        f"endpoint after {args.num_retries} retries; "
-                        f"last error: {e}"
+                        f"Failed to retrieve offset from endpoint "
+                        f"after {args.num_retries} retries: {e}. "
+                        f"This might be the first update, or the offset triple is missing."
+                    )
+                    return False
+
+                if endpoint_offset < first_offset_in_batch:
+                    # Stream offset is LATER than endpoint offset
+                    if args.rewind_to_earlier_offset == "yes":
+                        log.info(
+                            colored(
+                                f"Stream offset {first_offset_in_batch} is later "
+                                f"than offset {endpoint_offset} from endpoint; "
+                                f"this can happen after a server restart; "
+                                f"rewinding to offset {endpoint_offset} from endpoint",
+                                "cyan",
+                            )
+                        )
+                        log.info("")
+                        # Reconnect from the endpoint offset
+                        event_id_for_next_batch = [
+                            {
+                                "topic": args.topic,
+                                "partition": args.partition,
+                                "offset": endpoint_offset,
+                            }
+                        ]
+                        continue  # Skip this batch and reconnect
+                    else:
+                        log.error(
+                            f"Offset mismatch: stream offset {first_offset_in_batch} "
+                            f"is later than offset {endpoint_offset} from endpoint; "
+                            f"rewind disabled by --rewind-to-earlier-offset=no"
+                        )
+                        return False
+                elif endpoint_offset > first_offset_in_batch:
+                    # Stream offset is EARLIER than endpoint offset - this is bad
+                    log.error(
+                        f"Offset mismatch: stream offset {first_offset_in_batch} "
+                        f"is earlier than offset {endpoint_offset} from endpoint; "
+                        f"this indicates that updates may have been applied "
+                        f"out of order or some updates are missing"
                     )
                     return False
 
@@ -988,7 +981,6 @@ class UpdateWikidataCommand(QleverCommand):
                     lambda: run_command(curl_cmd, return_output=True),
                     "UPDATE request",
                     args.num_retries,
-                    log,
                 )
                 result_file_name = f"update.{first_offset_in_batch}.{current_batch_size}.result"
                 with open(result_file_name, "w") as f:
