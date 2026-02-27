@@ -71,9 +71,9 @@ def filter_queries(
     queries: list[tuple[str, str, str]], query_ids: str, query_regex: str
 ) -> list[tuple[str, str, str]]:
     """
-    Given a list of queries (tuple of query desc and full sparql query),
+    Given a list of queries (tuple of query name, desc and full sparql query),
     filter them and keep the ones which are a part of query_ids
-    or match with query_regex
+    and match with query_regex (if provided).
     """
     # Get the list of query indices to keep
     total_queries = len(queries)
@@ -119,7 +119,7 @@ def parse_queries_tsv(queries_cmd: str) -> list[tuple[str, str, str]]:
     Execute the given bash command to fetch tsv queries and return a
     list of queries i.e. tuple(query_name, "", full_sparql_query)
     Note: query_description is returned as empty to match the return
-    structure of parse_queries_yml and for backward compatibility
+    structure of parse_queries_yml.
     """
     try:
         tsv_queries_str = run_command(queries_cmd, return_output=True)
@@ -173,7 +173,7 @@ def parse_queries_yml(
             )
             return None, None, []
         queries.append(
-            (query["name"], query.get("description") or "", query["query"])
+            (query["name"], query.get("description", ""), query["query"])
         )
     return data.get("name"), data.get("description"), queries
 
@@ -428,7 +428,7 @@ def get_result_yml_query_record(
         "runtime_info": {},
         "server_restarted": server_restarted,
     }
-    if result_size is None:
+    if result_size is None and isinstance(result, dict):
         results = f"{result['short']}: {result['long']}"
         headers = []
     else:
@@ -529,7 +529,7 @@ class BenchmarkQueriesCommand(QleverCommand):
             default=None,
             help=(
                 "Path to a YML file containing the benchmark queries. "
-                "The YAML must follow this structure ->"
+                "The YML file must follow this structure -> "
                 "name: <benchmark name (str)>, "
                 "description: <benchmark description (str)>, "
                 "queries: <list[query]> where each query contains: "
@@ -718,6 +718,10 @@ class BenchmarkQueriesCommand(QleverCommand):
                     "`<dataset>.<engine>`, e.g., `wikidata.qlever`"
                 )
                 return False
+            dataset, engine = result_file_parts
+
+            # Make sure results_dir is a directory path and if it doesn't
+            # exist, create the directory
             results_dir_path = Path(args.results_dir)
             if results_dir_path.exists():
                 if not results_dir_path.is_dir():
@@ -730,7 +734,6 @@ class BenchmarkQueriesCommand(QleverCommand):
                     f"Creating results directory: {results_dir_path.absolute()}"
                 )
                 results_dir_path.mkdir(parents=True, exist_ok=True)
-            dataset, engine = result_file_parts
 
         # If `args.accept` is `application/sparql-results+json` or
         # `application/qlever-results+json` or `AUTO`, we need `jq`.
@@ -751,6 +754,7 @@ class BenchmarkQueriesCommand(QleverCommand):
                 log.error(f"Please install `jq` for {args.accept} ({e})")
                 return False
 
+        # Ensure unique source for benchmark queries
         if not any((args.queries_tsv, args.queries_yml, args.example_queries)):
             log.error(
                 "No benchmark or example queries to read! Either pass benchmark "
@@ -806,9 +810,7 @@ class BenchmarkQueriesCommand(QleverCommand):
             f"curl -sv https://qlever.dev/api/examples/{args.ui_config}"
         )
         sparql_endpoint = (
-            args.sparql_endpoint
-            if args.sparql_endpoint
-            else f"{args.host_name}:{args.port}"
+            args.sparql_endpoint or f"{args.host_name}:{args.port}"
         )
 
         self.show(

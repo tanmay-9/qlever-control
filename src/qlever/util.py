@@ -332,10 +332,10 @@ def binary_exists(binary: str, cmd_arg: str) -> bool:
         if binary == "qlever-index" or binary == "qlever-server":
             log.info("")
             log.warning(
-                "This might be because you are using a newer version of "
-                "the `qlever` command-line tool together with an older "
-                "Docker image; in that case update with "
-                "`docker pull adfreiburg/qlever` "
+                f"This might be because you are using a newer version of "
+                f"the `qlever` command-line tool together with an older "
+                f"Docker image; in that case update with "
+                f"`docker pull adfreiburg/qlever` "
             )
         return False
 
