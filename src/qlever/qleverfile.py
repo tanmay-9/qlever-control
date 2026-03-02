@@ -39,6 +39,7 @@ class Qleverfile:
         "lazy-result-max-cache-size",
         "query-planning-budget",
         "request-body-limit",
+        "service-allowed-iri-prefixes",
         "service-max-redirects",
         "service-max-value-rows",
         "sort-estimate-cancellation-factor",
