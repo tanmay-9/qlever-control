@@ -169,7 +169,13 @@ def compute_durations(
             if perm_info
             else f"#{i + 1}"
         )
-        durations[f"Permutation {perm_info_text}"] = (
+        perm_key = f"Permutation {perm_info_text}"
+        if perm_key in durations:
+            suffix = 2
+            while f"{perm_key} ({suffix})" in durations:
+                suffix += 1
+            perm_key = f"{perm_key} ({suffix})"
+        durations[perm_key] = (
             duration([(perm_begin, perm_end)]),
             resolved_time_unit,
         )
@@ -378,7 +384,7 @@ class IndexStatsCommand(QleverCommand):
                         if heading == "TOTAL time":
                             log.info("")
                         log.info(
-                            f"{heading:<21} : {duration:>6.1f} {time_unit}"
+                            f"{heading:<25} : {duration:>6.1f} {time_unit}"
                         )
                 return_value &= len(durations) != 0
             if not args.only_time:
@@ -397,9 +403,9 @@ class IndexStatsCommand(QleverCommand):
                     if heading == "TOTAL size":
                         log.info("")
                     if size_unit == "B":
-                        log.info(f"{heading:<21} :  {size:,} {size_unit}")
+                        log.info(f"{heading:<25} :  {size:,} {size_unit}")
                     else:
-                        log.info(f"{heading:<21} : {size:>6.1f} {size_unit}")
+                        log.info(f"{heading:<25} : {size:>6.1f} {size_unit}")
                 return_value &= len(sizes) != 0
 
         return return_value
