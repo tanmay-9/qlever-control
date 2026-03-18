@@ -47,7 +47,7 @@ def pretty_printed_query(
         )
         return query_pretty_printed.rstrip()
     except Exception as e:
-        log.error(
+        log.debug(
             f"Failed to pretty-print query, returning original query: {e}"
         )
         return query.rstrip()
@@ -75,26 +75,42 @@ def filter_queries(
     filter them and keep the ones which are a part of query_ids
     and match with query_regex (if provided).
     """
-    # Get the list of query indices to keep
+    # Parse query_ids into a list of indices
     total_queries = len(queries)
     query_indices = []
     for part in query_ids.split(","):
-        if "-" in part:
-            start, end = part.split("-")
-            if end == "$":
-                end = total_queries
-            query_indices.extend(range(int(start) - 1, int(end)))
-        else:
-            idx = int(part) if part != "$" else total_queries
-            query_indices.append(idx - 1)
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            if "-" in part:
+                start, end = part.split("-", 1)
+                if end == "$":
+                    end = total_queries
+                query_indices.extend(range(int(start) - 1, int(end)))
+            else:
+                idx = (int(part) if part != "$" else total_queries) - 1
+                query_indices.append(idx)
+        except ValueError as exc:
+            log.error(f"Invalid query ID '{part}': {exc}")
+            return []
 
+    # Check for duplicate indices
+    seen = set()
+    for idx in query_indices:
+        if idx in seen:
+            log.error(f"Duplicate query ID {idx + 1} in '{query_ids}'")
+            return []
+        seen.add(idx)
+
+    # Filter by regex and collect results
     try:
         filtered_queries = []
         pattern = (
             re.compile(query_regex, re.IGNORECASE) if query_regex else None
         )
         for query_idx in query_indices:
-            if query_idx >= total_queries:
+            if query_idx < 0 or query_idx >= total_queries:
                 continue
 
             name, description, query = queries[query_idx]
@@ -316,6 +332,32 @@ def restart_server(start_only: bool = False) -> bool:
             f"the benchmark process!: {e}"
         )
         return False
+
+
+def resolve_benchmark_metadata(
+    cli_name: str | None,
+    cli_description: str | None,
+    yml_name: str | None,
+    yml_description: str | None,
+    dataset: str | None,
+) -> tuple[str | None, str | None]:
+    """
+    Resolve benchmark name and description using priority:
+    1. CLI args (highest priority)
+    2. YML file fields
+    3. Default values derived from dataset name
+    """
+    dataset_name = dataset.capitalize() if dataset else None
+    default_description = (
+        f"{dataset_name} benchmark ran using {script_name} benchmark-queries"
+        if dataset_name
+        else None
+    )
+    benchmark_name = cli_name or yml_name or dataset_name
+    benchmark_description = (
+        cli_description or yml_description or default_description
+    )
+    return benchmark_name, benchmark_description
 
 
 def compute_index_stats() -> tuple[float | None, float | None]:
@@ -855,22 +897,12 @@ class BenchmarkQueriesCommand(QleverCommand):
         except ValueError:
             timeout = None
 
-        # Determine benchmark name and description from:
-        # 1. CLI args (highest priority)
-        # 2. YML file fields
-        # 3. Default values
-        dataset_name = dataset.capitalize() if dataset else None
-        default_description = (
-            f"{dataset_name} benchmark ran using {script_name} "
-            "benchmark-queries"
-            if dataset_name
-            else None
-        )
-        benchmark_name = args.benchmark_name or yml_name or dataset_name
-        benchmark_description = (
-            args.benchmark_description
-            or yml_description
-            or default_description
+        benchmark_name, benchmark_description = resolve_benchmark_metadata(
+            args.benchmark_name,
+            args.benchmark_description,
+            yml_name,
+            yml_description,
+            dataset,
         )
 
         # Launch the queries one after the other and for each print: the
