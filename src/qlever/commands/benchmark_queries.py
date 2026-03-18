@@ -47,7 +47,7 @@ def pretty_printed_query(
         )
         return query_pretty_printed.rstrip()
     except Exception as e:
-        log.error(
+        log.debug(
             f"Failed to pretty-print query, returning original query: {e}"
         )
         return query.rstrip()

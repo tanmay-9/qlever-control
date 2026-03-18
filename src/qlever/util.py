@@ -14,7 +14,6 @@ from typing import Any, Optional
 
 import psutil
 
-from qlever.containerize import Containerize
 from qlever.log import log
 
 
@@ -320,6 +319,8 @@ def binary_exists(binary: str, cmd_arg: str, args) -> bool:
     Check if the binary exists on the user's system. If running inside a
     container, check if the binary exists inside the container system.
     """
+    from qlever.containerize import Containerize
+
     is_containerized = args.system in Containerize.supported_systems()
     cmd = f"{binary} --help"
     if is_containerized:
