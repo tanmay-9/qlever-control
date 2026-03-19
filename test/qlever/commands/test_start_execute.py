@@ -93,6 +93,7 @@ def test_wrap_command_in_container(mock_containerize_command):
     args.port = 1234
     args.system = "native"
     args.image = None
+    args.run_in_foreground = False
 
     # Mock wrap_command_in_container
     mock_containerize_command.return_value = "Test_Container_Command"
@@ -106,7 +107,7 @@ def test_wrap_command_in_container(mock_containerize_command):
     mock_containerize_command.assert_called_once_with(
         start_cmd,
         args.system,
-        "run -d --restart=unless-stopped",
+        "run --restart=unless-stopped -d",
         args.image,
         args.server_container,
         volumes=[("$(pwd)", "/index")],
@@ -302,10 +303,12 @@ class TestStartCommand(unittest.TestCase):
     @patch("qlever.commands.start.is_qlever_server_alive")
     @patch("subprocess.Popen")
     @patch("qlever.commands.start.Containerize")
+    @patch("qlever.commands.start.Path")
     # Tests if killing existing server and restarting a new one works.
     # Also checks the start_command for all the extra options enabled.
     def test_execute_kills_existing_server_on_same_port(
         self,
+        mock_path_cls,
         mock_containerize,
         mock_popen,
         mock_is_qlever_server_alive,
@@ -335,6 +338,13 @@ class TestStartCommand(unittest.TestCase):
         args.only_pso_and_pos_permutations = True
         args.use_patterns = "no"
         args.use_text_index = "yes"
+
+        # Configure Path mock so the log file wait loop is skipped
+        mock_log_file = mock_path_cls.return_value
+        mock_log_file.exists.return_value = True
+        mock_log_file.__str__ = MagicMock(
+            return_value=f"{args.name}.server-log.txt"
+        )
 
         # Mock CacheStatsCommand
         mock_cache_stats_command.return_value = None
@@ -442,8 +452,10 @@ class TestStartCommand(unittest.TestCase):
     @patch("subprocess.Popen")
     @patch("qlever.commands.start.Containerize")
     @patch("time.sleep")
+    @patch("qlever.commands.start.Path")
     def test_execute_successful_server_start(
         self,
+        mock_path_cls,
         mock_sleep,
         mock_containerize,
         mock_popen,
@@ -466,6 +478,13 @@ class TestStartCommand(unittest.TestCase):
         args.system = "native"
         args.show = False
         args.no_warmup = True
+
+        # Configure Path mock so the log file wait loop is skipped
+        mock_log_file = mock_path_cls.return_value
+        mock_log_file.exists.return_value = True
+        mock_log_file.__str__ = MagicMock(
+            return_value=f"{args.name}.server-log.txt"
+        )
 
         # Mock server is not alive initially, then alive after starting
         mock_is_qlever_server_alive.side_effect = [False, True]
@@ -504,8 +523,10 @@ class TestStartCommand(unittest.TestCase):
     @patch("subprocess.Popen")
     @patch("subprocess.run")
     @patch("qlever.commands.start.Containerize")
+    @patch("qlever.commands.start.Path")
     def test_execute_server_with_warmup(
         self,
+        mock_path_cls,
         mock_containerize,
         mock_run,
         mock_popen,
@@ -529,6 +550,13 @@ class TestStartCommand(unittest.TestCase):
         args.show = False
         args.warmup_cmd = "test_warmup_command"
         args.no_warmup = False
+
+        # Configure Path mock so the log file wait loop is skipped
+        mock_log_file = mock_path_cls.return_value
+        mock_log_file.exists.return_value = True
+        mock_log_file.__str__ = MagicMock(
+            return_value=f"{args.name}.server-log.txt"
+        )
 
         # Mock Popen
         mock_popen.return_value = MagicMock()
@@ -574,8 +602,10 @@ class TestStartCommand(unittest.TestCase):
     @patch("qlever.commands.start.wrap_command_in_container")
     @patch("qlever.commands.start.construct_command")
     @patch("qlever.commands.start.binary_exists")
+    @patch("qlever.commands.start.Path")
     def test_execute_containerize_and_description(
         self,
+        mock_path_cls,
         mock_binary_exists,
         mock_construct_cl,
         mock_run_containerize,
