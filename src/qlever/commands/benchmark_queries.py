@@ -470,10 +470,11 @@ def get_result_yml_query_record(
         "runtime_info": {},
         "server_restarted": server_restarted,
     }
+    headers = results = []
     if result_size is None and isinstance(result, dict):
         results = f"{result['short']}: {result['long']}"
         headers = []
-    else:
+    if result_size and isinstance(result, str):
         record["result_size"] = result_size
         result_size = (
             max_result_size if result_size > max_result_size else result_size
