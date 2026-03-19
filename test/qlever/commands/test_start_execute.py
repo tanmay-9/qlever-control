@@ -131,7 +131,9 @@ def test_check_binary_success(mock_run_cmd):
     mock_run_cmd.return_value = "Command works"
 
     # Execute the function
-    result = qlever.util.binary_exists(args.server_binary, "server-binary", args)
+    result = qlever.util.binary_exists(
+        args.server_binary, "server-binary", args
+    )
     # check if run_cmd was called once with
     mock_run_cmd.assert_called_once_with(f"{args.server_binary} --help")
     assert result
@@ -151,7 +153,9 @@ def test_check_binary_exception(mock_log, mock_run_cmd):
     mock_run_cmd.side_effect = Exception("Mocked command failure")
 
     # Execute the function
-    result = qlever.util.binary_exists(args.server_binary, "server-binary", args)
+    result = qlever.util.binary_exists(
+        args.server_binary, "server-binary", args
+    )
 
     # check if run_cmd was called once with
     mock_run_cmd.assert_called_once_with(f"{args.server_binary} --help")
@@ -296,6 +300,14 @@ def test_set_text_description_exception(mock_log, mock_run_cmd):
 
 
 class TestStartCommand(unittest.TestCase):
+    @staticmethod
+    def _mock_log_file(mock_path_cls, name):
+        mock_log_file = mock_path_cls.return_value
+        mock_log_file.exists.return_value = True
+        mock_log_file.__str__ = MagicMock(
+            return_value=f"{name}.server-log.txt"
+        )
+
     @patch("qlever.commands.start.CacheStatsCommand.execute")
     @patch("qlever.commands.stop.StopCommand.execute", return_value=True)
     @patch("qlever.util.run_command")
@@ -340,11 +352,7 @@ class TestStartCommand(unittest.TestCase):
         args.use_text_index = "yes"
 
         # Configure Path mock so the log file wait loop is skipped
-        mock_log_file = mock_path_cls.return_value
-        mock_log_file.exists.return_value = True
-        mock_log_file.__str__ = MagicMock(
-            return_value=f"{args.name}.server-log.txt"
-        )
+        self._mock_log_file(mock_path_cls, args.name)
 
         # Mock CacheStatsCommand
         mock_cache_stats_command.return_value = None
@@ -480,11 +488,7 @@ class TestStartCommand(unittest.TestCase):
         args.no_warmup = True
 
         # Configure Path mock so the log file wait loop is skipped
-        mock_log_file = mock_path_cls.return_value
-        mock_log_file.exists.return_value = True
-        mock_log_file.__str__ = MagicMock(
-            return_value=f"{args.name}.server-log.txt"
-        )
+        self._mock_log_file(mock_path_cls, args.name)
 
         # Mock server is not alive initially, then alive after starting
         mock_is_qlever_server_alive.side_effect = [False, True]
@@ -552,11 +556,7 @@ class TestStartCommand(unittest.TestCase):
         args.no_warmup = False
 
         # Configure Path mock so the log file wait loop is skipped
-        mock_log_file = mock_path_cls.return_value
-        mock_log_file.exists.return_value = True
-        mock_log_file.__str__ = MagicMock(
-            return_value=f"{args.name}.server-log.txt"
-        )
+        self._mock_log_file(mock_path_cls, args.name)
 
         # Mock Popen
         mock_popen.return_value = MagicMock()
