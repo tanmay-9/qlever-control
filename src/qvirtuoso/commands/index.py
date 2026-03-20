@@ -352,18 +352,31 @@ class IndexCommand(QleverCommand):
             log.info("Waiting for Virtuoso server to be online...")
             start_time = time.time()
             timeout = 60
-            # Wait until the Virtuoso server is online
+            log_file = Path(f"{args.name}.index-log.txt")
+            log_proc = None
+            # Wait until the Virtuoso server is online, and start tailing
+            # the index log file as soon as it exists (note that the `exec`
+            # is important to make sure that the tail process is killed and
+            # not just the bash process).
             while not util.is_server_alive(
                 f"http://{args.host_name}:{args.port}/sparql"
             ):
                 if time.time() - start_time > timeout:
                     log.error("Timed out waiting for Virtuoso to be online.")
                     return False
+                if log_proc is None and log_file.exists():
+                    log_proc = util.run_command(
+                        f"exec tail -n +1 -f {log_file}",
+                        use_popen=True,
+                        show_output=True,
+                    )
                 time.sleep(1)
             # Execute the ld_dir and rdf_loader_run commands
             log.info("Virtuoso server online! Loading data into Virtuoso...\n")
-            util.run_command(ld_dir_cmd, show_output=True)
-            util.run_command(run_cmd, show_output=True)
+            util.run_command(ld_dir_cmd)
+            util.run_command(run_cmd)
+            if log_proc is not None:
+                log_proc.terminate()
             log.info("")
             log.info("Data loading has finished!")
 
