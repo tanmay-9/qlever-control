@@ -6,6 +6,12 @@ from datetime import datetime
 from qlever.commands.index_stats import (
     IndexStatsCommand as QleverIndexStatsCommand,
 )
+from qlever.commands.index_stats import (
+    get_size_unit,
+    get_size_unit_factor,
+    get_time_unit,
+    get_time_unit_factor,
+)
 from qlever.log import log
 from qlever.util import get_total_file_size
 
@@ -83,13 +89,16 @@ class IndexStatsCommand(QleverIndexStatsCommand):
             return {}
 
         total_seconds = sum(run_seconds)
-        time_unit = self.get_time_unit(args.time_unit, total_seconds)
-        unit_factor = self.get_time_unit_factor(time_unit)
+        time_unit = get_time_unit(args.time_unit, total_seconds)
+        unit_factor = get_time_unit_factor(time_unit)
 
         stats = {}
         if len(run_seconds) > 1:
             for i, seconds in enumerate(run_seconds):
-                stats[f"Index build {i + 1}"] = (seconds / unit_factor, time_unit)
+                stats[f"Index build {i + 1}"] = (
+                    seconds / unit_factor,
+                    time_unit,
+                )
         stats["TOTAL time"] = (total_seconds / unit_factor, time_unit)
 
         return stats
@@ -101,8 +110,8 @@ class IndexStatsCommand(QleverIndexStatsCommand):
         """
         index_size = get_total_file_size(["virtuoso.db"])
 
-        size_unit = self.get_size_unit(args.size_unit, index_size)
-        unit_factor = self.get_size_unit_factor(size_unit)
+        size_unit = get_size_unit(args.size_unit, index_size)
+        unit_factor = get_size_unit_factor(size_unit)
 
         index_size /= unit_factor
 
