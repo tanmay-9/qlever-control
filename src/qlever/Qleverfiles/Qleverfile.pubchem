@@ -24,7 +24,7 @@ ONTOLOGIES_DIR      = RDF.ontologies
 PUBCHEM_DIR         = RDF.pubchem
 ONTOLOGIES_CSV      = ontologies.csv
 CHECK_REQUIREMENTS  = for CMD in docker parallel; do $$CMD --version >/dev/null 2>&1 || (echo "Requires \"$$CMD\", please install it"; false); done
-GET_DATA_CMD_1      = mkdir -p ${ONTOLOGIES_DIR} && cd ${ONTOLOGIES_DIR} && cat ${ONTOLOGIES_CSV} | parallel --colsep "," 'FILE={2} && URL={3} && ERRFILE=$${FILE%.*}.jena-stderr; echo "Processing $$URL ($$FILE) ..." && curl -sLRo $$FILE $$URL && docker run --rm -v $$(pwd):/data stain/jena riot --output=NT /data/$$FILE 2> $$ERRFILE | gzip -c > $${FILE%.*}.nt.gz && rm -f $$FILE; if [ -s $$ERRFILE ]; then grep -q "ERROR *riot" $$ERRFILE && echo "riot ERRORs in $$FILE, check $$ERRFILE"; else rm $$ERRFILE; fi'
+GET_DATA_CMD_1      = mkdir -p ${ONTOLOGIES_DIR} && (cd ${ONTOLOGIES_DIR} && cat ${ONTOLOGIES_CSV} | parallel --colsep "," 'FILE={2} && URL={3} && ERRFILE=$${FILE%.*}.jena-stderr; echo "Processing $$URL ($$FILE) ..." && curl -sLRo $$FILE $$URL && docker run --rm -v $$(pwd):/data stain/jena riot --output=NT /data/$$FILE 2> $$ERRFILE | gzip -c > $${FILE%.*}.nt.gz && rm -f $$FILE; if [ -s $$ERRFILE ]; then grep -q "ERROR *riot" $$ERRFILE && echo "riot ERRORs in $$FILE, check $$ERRFILE"; else rm $$ERRFILE; fi')
 GET_DATA_CMD_2      = mkdir -p ${PUBCHEM_DIR} && wget -r -nv -nH --cut-dirs=2 --no-parent -P ${PUBCHEM_DIR} ${GET_DATA_URL}
 GET_DATA_CMD        = ${CHECK_REQUIREMENTS} && ${GET_DATA_CMD_1} 2>&1 | tee pubchem.get-data-log.txt; ${GET_DATA_CMD_2} 2>&1 | tee -a pubchem.get-data-log.txt
 VERSION             = $$(date -r void.ttl +%d.%m.%Y || echo "NO_DATE")
