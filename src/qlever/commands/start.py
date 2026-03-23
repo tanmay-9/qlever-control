@@ -260,6 +260,11 @@ class StartCommand(QleverCommand):
         #                   f" (use `lsof -i :{port}` to find out which one)")
         #         return False
 
+        # Remove old log file so that the wait loop below correctly
+        # waits for the server to create a fresh one.
+        log_file = Path(f"{args.name}.server-log.txt")
+        log_file.unlink(missing_ok=True)
+
         # Execute the command line.
         try:
             process = run_command(
@@ -284,7 +289,6 @@ class StartCommand(QleverCommand):
                 f" (Ctrl-C stops following the log, but NOT the server)"
             )
         log.info("")
-        log_file = Path(f"{args.name}.server-log.txt")
         # Wait for the log file to be created before reading from it
         max_wait_seconds = 30
         waited = 0.0
@@ -297,7 +301,7 @@ class StartCommand(QleverCommand):
                 return False
             time.sleep(0.1)
             waited += 0.1
-        tail_cmd = f"exec tail -f {log_file}"
+        tail_cmd = f"exec tail -n +1 -f {log_file}"
         tail_proc = subprocess.Popen(tail_cmd, shell=True)
         while not is_qlever_server_alive(args.endpoint_url):
             time.sleep(1)
