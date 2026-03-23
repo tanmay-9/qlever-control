@@ -6,8 +6,16 @@ from pathlib import Path
 
 import qlever.util as util
 from qlever.command import QleverCommand
-from qlever.containerize import Containerize
 from qlever.log import log
+
+# Arguments that can be overridden when generating a Qleverfile,
+# as (section, arg_name) pairs.
+OVERRIDE_ARGS = [
+    ("server", "port"),
+    ("server", "timeout"),
+    ("server", "num_threads"),
+    ("runtime", "system"),
+]
 
 
 class SetupConfigCommand(QleverCommand):
@@ -29,7 +37,10 @@ class SetupConfigCommand(QleverCommand):
         return False
 
     def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
-        return {}
+        result = {}
+        for section, arg_name in OVERRIDE_ARGS:
+            result.setdefault(section, []).append(arg_name)
+        return result
 
     def additional_arguments(self, subparser) -> None:
         subparser.add_argument(
@@ -37,34 +48,6 @@ class SetupConfigCommand(QleverCommand):
             type=str,
             choices=self.qleverfile_names,
             help="The name of the pre-configured Qleverfile to create",
-        )
-        subparser.add_argument(
-            "--port",
-            type=int,
-            default=None,
-            help=(
-                "Override the default PORT value in the [server] section of "
-                "the generated Qleverfile"
-            ),
-        )
-        subparser.add_argument(
-            "--timeout",
-            type=str,
-            default=None,
-            help=(
-                "Override the default TIMEOUT value in the [server] section of "
-                "the generated Qleverfile"
-            ),
-        )
-        subparser.add_argument(
-            "--system",
-            type=str,
-            choices=Containerize.supported_systems() + ["native"],
-            default=None,
-            help=(
-                "Override the default SYSTEM value in the [runtime] section of "
-                "the generated Qleverfile"
-            ),
         )
 
     def execute(self, args) -> bool:
@@ -96,15 +79,9 @@ class SetupConfigCommand(QleverCommand):
                 f" | {util.get_ini_sed_cmd('runtime', 'SYSTEM', 'native')}"
             )
         else:
-            for section, override_arg in [
-                ("server", "port"),
-                ("server", "timeout"),
-                ("runtime", "system"),
-            ]:
-                if arg_value := getattr(args, override_arg):
-                    setup_config_cmd += (
-                        f" | {util.get_ini_sed_cmd(section, override_arg.upper(), arg_value)}"
-                    )
+            for section, arg_name in OVERRIDE_ARGS:
+                if arg_value := getattr(args, arg_name, None):
+                    setup_config_cmd += f" | {util.get_ini_sed_cmd(section, arg_name.upper(), arg_value)}"
 
         setup_config_cmd += "> Qleverfile"
         self.show(setup_config_cmd, only_show=args.show)
