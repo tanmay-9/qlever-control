@@ -58,7 +58,7 @@ class IndexCommand(QleverCommand):
     def execute(self, args) -> bool:
         cmds_to_execute = []
         index_cmd = (
-            f"load {'--lenient ' if args.lenient else ''}"
+            f"load {'--lenient ' if args.lenient == 'yes' else ''}"
             f"--location {args.name}_index/ --file {args.input_files} "
             f"{args.extra_args} |& tee {args.name}.index-log.txt"
         )
