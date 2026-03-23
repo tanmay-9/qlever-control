@@ -522,7 +522,9 @@ function sortEngines(engines, kb, metric, order) {
     return engines.slice().sort((a, b) => {
         const left = order === "asc" ? a : b;
         const right = order === "asc" ? b : a;
-        return performanceData[kb][left][metric] - performanceData[kb][right][metric];
+        const valL = performanceData[kb][left][metric];
+        const valR = performanceData[kb][right][metric];
+        return (valL != null ? parseFloat(valL) : -1) - (valR != null ? parseFloat(valR) : -1);
     });
 }
 

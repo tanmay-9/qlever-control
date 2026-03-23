@@ -276,21 +276,33 @@ function renderCompareExecTrees() {
     const select2Value = document.querySelector("#select2").value;
     if (!select1Value || !select2Value || !engineStatForQuery) return;
 
-    for (const [engine, treeIdx] of [
-        [select1Value, "1"],
-        [select2Value, "2"],
-    ]) {
-        const stats = engineStatForQuery[engine];
+    // Show a brief loading indicator on both tree panels so the user
+    // notices the change even when rendering is near-instant.
+    for (const treeIdx of ["1", "2"]) {
         const treeDiv = document.querySelector(`#tree${treeIdx}`);
-        const metaDiv = document.querySelector(`#meta-info-${treeIdx}`);
-        if (!stats || !stats.runtime_info || !stats.runtime_info.query_execution_tree) {
-            metaDiv.innerHTML = "";
-            const errorMsg = stats?.results || "Query failed";
-            treeDiv.innerHTML = `<div class="alert alert-danger m-2 m-md-5">${errorMsg}</div>`;
-        } else {
-            renderExecTree(stats.runtime_info, `#tree${treeIdx}`, `#meta-info-${treeIdx}`);
-        }
+        treeDiv.style.opacity = "0.3";
     }
+
+    setTimeout(() => {
+        for (const [engine, treeIdx] of [
+            [select1Value, "1"],
+            [select2Value, "2"],
+        ]) {
+            const stats = engineStatForQuery[engine];
+            const treeDiv = document.querySelector(`#tree${treeIdx}`);
+            const metaDiv = document.querySelector(`#meta-info-${treeIdx}`);
+            if (!stats || !stats.runtime_info || !stats.runtime_info.query_execution_tree) {
+                metaDiv.innerHTML = "";
+                const errorMsg = typeof stats?.results === "string" && stats.results
+                    ? stats.results
+                    : "No execution tree available for this query";
+                treeDiv.innerHTML = `<div class="alert alert-danger m-2 m-md-5">${errorMsg}</div>`;
+            } else {
+                renderExecTree(stats.runtime_info, `#tree${treeIdx}`, `#meta-info-${treeIdx}`);
+            }
+            treeDiv.style.opacity = "1";
+        }
+    }, 150);
 }
 
 // ============================================================================
