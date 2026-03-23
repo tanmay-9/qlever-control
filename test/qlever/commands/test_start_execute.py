@@ -578,7 +578,7 @@ class TestStartCommand(unittest.TestCase):
 
         # Check that Popen was called
         mock_popen.assert_called_once_with(
-            f"exec tail -f {args.name}.server-log.txt", shell=True
+            f"exec tail -n +1 -f {args.name}.server-log.txt", shell=True
         )
 
         # Check warmup was called
