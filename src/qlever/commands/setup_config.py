@@ -8,15 +8,6 @@ import qlever.util as util
 from qlever.command import QleverCommand
 from qlever.log import log
 
-# Arguments that can be overridden when generating a Qleverfile,
-# as (section, arg_name) pairs.
-OVERRIDE_ARGS = [
-    ("server", "port"),
-    ("server", "timeout"),
-    ("server", "num_threads"),
-    ("runtime", "system"),
-]
-
 
 class SetupConfigCommand(QleverCommand):
     """
@@ -24,10 +15,19 @@ class SetupConfigCommand(QleverCommand):
     """
 
     def __init__(self):
-        self.qleverfiles_path = Path(__file__).parent.parent / "Qleverfiles"
+        self.qleverfiles_path = (
+            Path(__file__).parent.parent.parent / "qlever/Qleverfiles"
+        )
         self.qleverfile_names = [
             p.name.split(".")[1]
             for p in self.qleverfiles_path.glob("Qleverfile.*")
+        ]
+        # Arguments that can be overridden when generating a Qleverfile,
+        # as (section, arg_name) pairs.
+        self.override_args = [
+            ("server", "port"),
+            ("server", "timeout"),
+            ("runtime", "system"),
         ]
 
     def description(self) -> str:
@@ -38,7 +38,7 @@ class SetupConfigCommand(QleverCommand):
 
     def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
         result = {}
-        for section, arg_name in OVERRIDE_ARGS:
+        for section, arg_name in self.override_args:
             result.setdefault(section, []).append(arg_name)
         return result
 
@@ -49,6 +49,19 @@ class SetupConfigCommand(QleverCommand):
             choices=self.qleverfile_names,
             help="The name of the pre-configured Qleverfile to create",
         )
+
+    def check_qleverfile_exists(self) -> bool:
+        """Return True if a Qleverfile already exists (and log an error)."""
+        if Path("Qleverfile").exists():
+            log.error("`Qleverfile` already exists in current directory")
+            log.info("")
+            log.info(
+                "If you want to create a new Qleverfile using "
+                "`qlever setup-config`, delete the existing Qleverfile "
+                "first"
+            )
+            return True
+        return False
 
     def execute(self, args) -> bool:
         # Show a warning if `QLEVER_OVERRIDE_SYSTEM_NATIVE` is set.
@@ -79,7 +92,7 @@ class SetupConfigCommand(QleverCommand):
                 f" | {util.get_ini_sed_cmd('runtime', 'SYSTEM', 'native')}"
             )
         else:
-            for section, arg_name in OVERRIDE_ARGS:
+            for section, arg_name in self.override_args:
                 if arg_value := getattr(args, arg_name, None):
                     setup_config_cmd += f" | {util.get_ini_sed_cmd(section, arg_name.upper(), arg_value)}"
 
@@ -88,16 +101,7 @@ class SetupConfigCommand(QleverCommand):
         if args.show:
             return True
 
-        # If there is already a Qleverfile in the current directory, exit.
-        qleverfile_path = Path("Qleverfile")
-        if qleverfile_path.exists():
-            log.error("`Qleverfile` already exists in current directory")
-            log.info("")
-            log.info(
-                "If you want to create a new Qleverfile using "
-                "`qlever setup-config`, delete the existing Qleverfile "
-                "first"
-            )
+        if self.check_qleverfile_exists():
             return False
 
         # Copy the Qleverfile to the current directory.
@@ -115,7 +119,6 @@ class SetupConfigCommand(QleverCommand):
             )
             return False
 
-        # If we get here, everything went well.
         log.info(
             f'Created Qleverfile for config "{args.config_name}"'
             f" in current directory"
