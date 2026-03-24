@@ -442,7 +442,7 @@ def get_ini_sed_cmd(
     section: str, option: str, new_value: str, is_suffix: bool = False
 ) -> str:
     """
-    Generates a cross-platform sed command to update the value of a 
+    Generates a cross-platform sed command to update the value of a
     key = value pair or append to one (by using is_suffix = True) in an INI file.
     """
     if is_suffix:

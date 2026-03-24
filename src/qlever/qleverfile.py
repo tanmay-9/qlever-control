@@ -418,8 +418,9 @@ class Qleverfile:
 
         engine_args_module_path = f"{script_name}.qleverfile"
         try:
-            module = import_module(engine_args_module_path)
-            module.qleverfile_args(all_args)
+            if script_name != "qlever":
+                module = import_module(engine_args_module_path)
+                module.qleverfile_args(all_args)
         except (ImportError, AttributeError) as e:
             log.debug(f"Could not import module {engine_args_module_path}: {e}")
 
