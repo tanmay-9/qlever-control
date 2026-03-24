@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 import json
 import logging
 import os
@@ -8,6 +9,8 @@ import signal
 import time
 from datetime import datetime, timezone
 from enum import Enum, auto
+from pathlib import Path
+from threading import Event
 
 import rdflib.term
 import requests_sse
@@ -28,6 +31,76 @@ def custom_cast_lexical_to_python(lexical, datatype):
 
 
 rdflib.term._castLexicalToPython = custom_cast_lexical_to_python
+
+
+def connect_to_sse_stream(sse_stream_url, since=None, event_id=None):
+    """
+    Connect to the SSE stream and return the connected EventSource.
+
+    Args:
+        sse_stream_url: URL of the SSE stream
+        since: ISO date string to start from (mutually exclusive with event_id)
+        event_id: Event ID to resume from (mutually exclusive with since)
+
+    Returns:
+        The connected EventSource object
+    """
+    if event_id:
+        event_id_json = json.dumps(event_id)
+        source = requests_sse.EventSource(
+            sse_stream_url,
+            headers={
+                "Accept": "text/event-stream",
+                "User-Agent": "qlever update-wikidata",
+                "Last-Event-ID": event_id_json,
+            },
+        )
+    else:
+        source = requests_sse.EventSource(
+            sse_stream_url,
+            params={"since": since} if since else {},
+            headers={
+                "Accept": "text/event-stream",
+                "User-Agent": "qlever update-wikidata",
+            },
+        )
+
+    source.connect()
+    return source
+
+
+def get_next_offset_from_endpoint(sparql_endpoint):
+    """Query the endpoint for the next stream offset.
+
+    Args:
+        sparql_endpoint: URL of the SPARQL endpoint
+
+    Returns:
+        int: The offset value from the endpoint
+
+    Raises:
+        Exception: If the query fails or returns no results
+    """
+    sparql_query_offset = (
+        "PREFIX wikibase: <http://wikiba.se/ontology#> "
+        "SELECT (MAX(?offset) AS ?maxOffset) WHERE { "
+        "<http://wikiba.se/ontology#Dump> "
+        "wikibase:updateStreamNextOffset ?offset "
+        "}"
+    )
+    curl_cmd_check_offset = (
+        f"curl -s {sparql_endpoint}"
+        f' -H "Accept: text/csv"'
+        f' -H "Content-type: application/sparql-query"'
+        f' --data "{sparql_query_offset}"'
+    )
+    result = run_command(
+        f"{curl_cmd_check_offset} | sed 1d",
+        return_output=True,
+    ).strip()
+    if not result:
+        raise Exception("Query returned no results")
+    return int(result.strip('"'))
 
 
 class UpdateWikidataCommand(QleverCommand):
@@ -53,7 +126,7 @@ class UpdateWikidataCommand(QleverCommand):
             "stream/rdf-streaming-updater.mutation.v2"
         )
         # Remember if Ctrl+C was pressed, so we can handle it gracefully.
-        self.ctrl_c_pressed = False
+        self.ctrl_c_pressed = Event()
         # Set to `True` when finished.
         self.finished = False
 
@@ -113,10 +186,6 @@ class UpdateWikidataCommand(QleverCommand):
         subparser.add_argument(
             "--topic",
             type=str,
-            choices=[
-                "eqiad.rdf-streaming-updater.mutation",
-                "codfw.rdf-streaming-updater.mutation",
-            ],
             default="eqiad.rdf-streaming-updater.mutation",
             help="The topic to consume from the SSE stream (default: "
             "eqiad.rdf-streaming-updater.mutation)",
@@ -128,19 +197,12 @@ class UpdateWikidataCommand(QleverCommand):
             help="The partition to consume from the SSE stream (default: 0)",
         )
         subparser.add_argument(
-            "--min-or-max-date",
-            choices=["min", "max"],
-            default="max",
-            help="Use the minimum or maximum date of the batch for the "
-            "`updatesCompleteUntil` property (default: maximum)",
-        )
-        subparser.add_argument(
             "--wait-between-batches",
             type=int,
-            default=300,
+            default=5,
             help="Wait this many seconds between batches that were "
             "finished due to a message that is within `lag_seconds` of "
-            "the current time (default: 300s)",
+            "the current time (default: 5 seconds)",
         )
         subparser.add_argument(
             "--num-messages",
@@ -165,15 +227,115 @@ class UpdateWikidataCommand(QleverCommand):
             choices=["yes", "no"],
             default="yes",
             help="Before each batch, verify that the stream offset matches the "
-            "stored offset in the knowledge base (default: yes)",
+            "offset from the endpoint (default: yes)",
         )
+        subparser.add_argument(
+            "--rewind-to-earlier-offset",
+            choices=["yes", "no"],
+            default="yes",
+            help="When the stream offset is later than the offset from the "
+            "endpoint (e.g., after a server restart), rewind to the endpoint "
+            "offset and reprocess messages (default: yes)",
+        )
+        subparser.add_argument(
+            "--num-retries",
+            type=int,
+            default=10,
+            help="Number of retries for offset verification queries when they fail "
+            "(default: 10)",
+        )
+        subparser.add_argument(
+            "--keep-update-requests",
+            choices=["none", "all", "last", "last-three"],
+            default="last",
+            help="Which update request files (update.*.{sparql,meta,result}) to keep: "
+            "none (delete all), all (keep all), last (keep only the most recent), "
+            "last-three (keep the three most recent) (default: last)",
+        )
+
+    def retry_with_backoff(self, operation, operation_name, max_retries):
+        """
+        Retry an operation with exponential backoff, see backoff intervals below
+        (in seconds). Returns the result of the operation if successful, or raises
+        the last exception.
+        """
+        backoff_intervals = [5, 10, 30, 60, 300, 900, 1800, 3600]
+
+        for attempt in range(max_retries):
+            try:
+                return operation()
+            except Exception as e:
+                if self.ctrl_c_pressed.is_set():
+                    raise KeyboardInterrupt()
+                if attempt < max_retries - 1:
+                    # Use the appropriate backoff interval (once we get to the end
+                    # of the list, keep using the last interval).
+                    retry_delay = (
+                        backoff_intervals[attempt]
+                        if attempt < len(backoff_intervals)
+                        else backoff_intervals[-1]
+                    )
+                    # Show the delay as seconds, minutes, or hours.
+                    if retry_delay >= 3600:
+                        delay_str = f"{retry_delay // 3600}h"
+                    elif retry_delay >= 60:
+                        delay_str = f"{retry_delay // 60}min"
+                    else:
+                        delay_str = f"{retry_delay}s"
+                    log.warn(
+                        f"{operation_name} failed (attempt {attempt + 1}/{max_retries}): {e}. "
+                        f"Retrying in {delay_str} ..."
+                    )
+                    # Returns true if the wait ended because of the flag being set.
+                    if self.ctrl_c_pressed.wait(timeout=retry_delay):
+                        raise KeyboardInterrupt()
+                else:
+                    # If this was the last attempt, re-raise the exception.
+                    raise
 
     # Handle Ctrl+C gracefully by finishing the current batch and then exiting.
     def handle_ctrl_c(self, signal_received, frame):
-        if self.ctrl_c_pressed:
-            log.warn("\rCtrl+C pressed again, watch your blood pressure")
+        if self.ctrl_c_pressed.is_set():
+            pass
+            # log.warn("\rCtrl+C pressed again, watch your blood pressure")
         else:
-            self.ctrl_c_pressed = True
+            self.ctrl_c_pressed.set()
+
+    def determine_batch_size_for_cached_update(self, offset: int, batch_size: int) -> int | None:
+        options = list(Path.cwd().glob(f"update.{offset}.*.sparql"))
+        if len(options) == 0:
+            log.warn(f"Found no cached SPARQL update. Continuing with update stream.")
+            return None
+        elif len(options) > 1:
+            log.warn(f"Found {len(options)} candidates for cached SPARQL update. Using {options[0].name}.")
+        return int(re.search(r"update\.\d+\.(\d+)\.sparql", options[0].name).group(1))
+
+    def determine_next_cached_update(self, first_offset_in_batch: int, batch_size: int) -> tuple[str, int] | None:
+        batch_size = self.determine_batch_size_for_cached_update(first_offset_in_batch, batch_size)
+        if batch_size is None:
+            return None
+        cached_file_name = (
+            f"update.{first_offset_in_batch}.{batch_size}.sparql"
+        )
+        cached_meta_file_name = (
+            f"update.{first_offset_in_batch}.{batch_size}.meta"
+        )
+
+        # Try to read metadata file for date range
+        cached_date_range = None
+        if os.path.exists(cached_meta_file_name):
+            try:
+                with open(cached_meta_file_name, "r") as f:
+                    cached_date_range = f.read().strip()
+            except Exception:
+                pass
+
+        log_msg = f"Using cached SPARQL query file: {cached_file_name}"
+        if cached_date_range:
+            log_msg += f" [date range: {cached_date_range}]"
+        log.debug(colored(log_msg, "cyan"))
+
+        return cached_file_name, batch_size
 
     def execute(self, args) -> bool:
         # cURL command to get the date until which the updates of the
@@ -224,31 +386,52 @@ class UpdateWikidataCommand(QleverCommand):
         log.warn("Press Ctrl+C to finish and exit gracefully")
         log.info("")
 
-        # If --offset is not provided, determine the offset by reading a single
-        # message from the SSE stream using the `since` date.
-        if not args.offset:
+        # If no `--offset` is provided, try to get the offset from
+        # the endpoint.
+        if args.offset is None:
             try:
-                source = requests_sse.EventSource(
-                    args.sse_stream_url,
-                    params={"since": since},
-                    headers={
-                        "Accept": "text/event-stream",
-                        "User-Agent": "qlever update-wikidata",
-                    },
+                args.offset = get_next_offset_from_endpoint(sparql_endpoint)
+                log.info(f"Resuming from offset from endpoint: {args.offset}")
+            except Exception as e:
+                log.debug(
+                    f"Could not retrieve offset from endpoint: {e}. "
+                    f"Will determine offset from date instead."
                 )
-                source.connect()
+
+        # If the offset was neither provided via `--offset` nor could
+        # be retrieved from the endpoint, determine it by reading a
+        # single message from the SSE stream at the `since` date.
+        if args.offset is None:
+            try:
+                source = self.retry_with_backoff(
+                    lambda: connect_to_sse_stream(
+                        args.sse_stream_url, since=since
+                    ),
+                    "SSE stream connection",
+                    args.num_retries,
+                )
+                offset = None
                 for event in source:
                     if event.type == "message" and event.data:
                         event_data = json.loads(event.data)
-                        topic = event_data.get("meta").get("topic")
-                        if topic == args.topic:
-                            args.offset = event_data.get("meta").get("offset")
+                        event_topic = event_data.get("meta").get("topic")
+                        if event_topic == args.topic:
+                            offset = event_data.get("meta").get("offset")
                             log.debug(
-                                f"Determined offset from date: "
-                                f"{since} -> {args.offset}"
+                                f"Determined offset from date: {since} -> {offset}"
                             )
                             break
                 source.close()
+                if offset is None:
+                    raise Exception(
+                        f"No event with topic {args.topic} found in stream"
+                    )
+                args.offset = offset
+            except KeyboardInterrupt:
+                log.warn(
+                    "\rCtrl+C pressed while determine current state, exiting"
+                )
+                return True
             except Exception as e:
                 log.error(f"Error determining offset from stream: {e}")
                 return False
@@ -256,8 +439,7 @@ class UpdateWikidataCommand(QleverCommand):
         # Initialize all the statistics variables.
         batch_count = 0
         total_num_messages = 0
-        total_num_ops = 0
-        total_time_s = 0
+        total_update_time = 0
         start_time = time.perf_counter()
         wait_before_next_batch = False
         event_id_for_next_batch = (
@@ -268,7 +450,7 @@ class UpdateWikidataCommand(QleverCommand):
                     "offset": args.offset,
                 }
             ]
-            if args.offset
+            if args.offset is not None
             else None
         )
 
@@ -289,11 +471,8 @@ class UpdateWikidataCommand(QleverCommand):
                 )
                 log.info("")
                 wait_before_next_batch = False
-                for _ in range(args.wait_between_batches):
-                    if self.ctrl_c_pressed:
-                        break
-                    time.sleep(1)
-            if self.ctrl_c_pressed:
+                self.ctrl_c_pressed.wait(args.wait_between_batches)
+            if self.ctrl_c_pressed.is_set():
                 log.warn(
                     "\rCtrl+C pressed while waiting in between batches, "
                     "exiting"
@@ -311,14 +490,6 @@ class UpdateWikidataCommand(QleverCommand):
                             attrs=["dark"],
                         )
                     )
-                source = requests_sse.EventSource(
-                    args.sse_stream_url,
-                    headers={
-                        "Accept": "text/event-stream",
-                        "User-Agent": "qlever update-wikidata",
-                        "Last-Event-ID": event_id_json,
-                    },
-                )
             else:
                 if args.verbose == "yes":
                     log.info(
@@ -327,34 +498,29 @@ class UpdateWikidataCommand(QleverCommand):
                             attrs=["dark"],
                         )
                     )
-                source = requests_sse.EventSource(
-                    args.sse_stream_url,
-                    params={"since": since},
-                    headers={
-                        "Accept": "text/event-stream",
-                        "User-Agent": "qlever update-wikidata",
-                    },
+
+            # Connect to the SSE stream with retry logic
+            try:
+                source = self.retry_with_backoff(
+                    lambda: connect_to_sse_stream(
+                        args.sse_stream_url,
+                        since=since if not event_id_for_next_batch else None,
+                        event_id=event_id_for_next_batch,
+                    ),
+                    "SSE stream connection for batch processing",
+                    args.num_retries,
                 )
-            # Try 10 times to connect to the source, with exponential backoff.
-            # If we cannot connect after that, give up.
-            wait_between_connect_attempts_s = 1
-            source_connected = False
-            while True:
-                try:
-                    source.connect()
-                    source_connected = True
-                    break
-                except Exception:
-                    log.error(
-                        f"Error connecting to stream, waiting "
-                        f"{wait_between_connect_attempts_s}s before retrying"
-                    )
-                    time.sleep(wait_between_connect_attempts_s)
-                    wait_between_connect_attempts_s *= 2
-                    if wait_between_connect_attempts_s > 512:
-                        log.error("Giving up connecting to SSE source, exit")
-                        break
-            if not source_connected:
+            except KeyboardInterrupt:
+                log.warn(
+                    "\rCtrl+C pressed while while connecting to stream, "
+                    "exiting"
+                )
+                break
+            except Exception as e:
+                log.error(
+                    f"Failed to connect to SSE stream after "
+                    f"{args.num_retries} retry attempts, last error: {e}"
+                )
                 break
 
             # Next comes the inner loop, which processes exactly one "batch" of
@@ -376,51 +542,69 @@ class UpdateWikidataCommand(QleverCommand):
                 # before starting, but keep as fallback
                 first_offset_in_batch = None
 
-            # Check that the stream offset matches the stored offset in the KB
-            # Skip this check on the first batch (when using --offset to resume)
+            # Check that the stream offset matches the offset from the
+            # endpoint, unless disabled or this is the first batch.
             if (
                 args.check_offset_before_each_batch == "yes"
                 and not first_batch
                 and first_offset_in_batch is not None
             ):
-                sparql_query_offset = (
-                    "PREFIX wikibase: <http://wikiba.se/ontology#> "
-                    "SELECT (MAX(?offset) AS ?maxOffset) WHERE { "
-                    "<http://wikiba.se/ontology#Dump> "
-                    "wikibase:updateStreamNextOffset ?offset "
-                    "}"
-                )
-                curl_cmd_check_offset = (
-                    f"curl -s {sparql_endpoint}"
-                    f' -H "Accept: text/csv"'
-                    f' -H "Content-type: application/sparql-query"'
-                    f' --data "{sparql_query_offset}"'
-                )
+                # Verify offset with retry logic
                 try:
-                    result = run_command(
-                        f"{curl_cmd_check_offset} | sed 1d",
-                        return_output=True,
-                    ).strip()
-                    if not result:
-                        log.error(
-                            "Failed to retrieve stored offset from knowledge base: "
-                            "query returned no results. This might be the first update, "
-                            "or the offset triple is missing."
-                        )
-                        return False
-                    stored_offset = int(result.strip('"'))
-                    if stored_offset != first_offset_in_batch:
-                        log.error(
-                            f"Offset mismatch: stream offset is {first_offset_in_batch}, "
-                            f"but stored offset in knowledge base is {stored_offset}. "
-                            f"This indicates that updates may have been applied "
-                            f"out of order or some updates are missing."
-                        )
-                        return False
+                    endpoint_offset = self.retry_with_backoff(
+                        lambda: get_next_offset_from_endpoint(sparql_endpoint),
+                        "Offset verification",
+                        args.num_retries,
+                    )
+                except KeyboardInterrupt:
+                    log.warn(
+                        "\rCtrl+C pressed while while verifying state, exiting"
+                    )
+                    break
                 except Exception as e:
                     log.error(
-                        f"Failed to retrieve or verify stored offset from knowledge base: {e}. "
-                        f"Cannot safely proceed with updates."
+                        f"Failed to retrieve offset from endpoint "
+                        f"after {args.num_retries} retries: {e}. "
+                        f"This might be the first update, or the offset triple is missing."
+                    )
+                    return False
+
+                if endpoint_offset < first_offset_in_batch:
+                    # Stream offset is LATER than endpoint offset
+                    if args.rewind_to_earlier_offset == "yes":
+                        log.info(
+                            colored(
+                                f"Stream offset {first_offset_in_batch} is later "
+                                f"than offset {endpoint_offset} from endpoint; "
+                                f"this can happen after a server restart; "
+                                f"rewinding to offset {endpoint_offset} from endpoint",
+                                "cyan",
+                            )
+                        )
+                        log.info("")
+                        # Reconnect from the endpoint offset
+                        event_id_for_next_batch = [
+                            {
+                                "topic": args.topic,
+                                "partition": args.partition,
+                                "offset": endpoint_offset,
+                            }
+                        ]
+                        continue  # Skip this batch and reconnect
+                    else:
+                        log.error(
+                            f"Offset mismatch: stream offset {first_offset_in_batch} "
+                            f"is later than offset {endpoint_offset} from endpoint; "
+                            f"rewind disabled by --rewind-to-earlier-offset=no"
+                        )
+                        return False
+                elif endpoint_offset > first_offset_in_batch:
+                    # Stream offset is EARLIER than endpoint offset - this is bad
+                    log.error(
+                        f"Offset mismatch: stream offset {first_offset_in_batch} "
+                        f"is earlier than offset {endpoint_offset} from endpoint; "
+                        f"this indicates that updates may have been applied "
+                        f"out of order or some updates are missing"
                     )
                     return False
 
@@ -434,33 +618,15 @@ class UpdateWikidataCommand(QleverCommand):
             # Check if we can use a cached SPARQL query file
             use_cached_file = False
             cached_file_name = None
-            cached_meta_file_name = None
-            cached_date_range = None
             if (
                 args.use_cached_sparql_queries
                 and first_offset_in_batch is not None
             ):
-                cached_file_name = (
-                    f"update.{first_offset_in_batch}.{args.batch_size}.sparql"
-                )
-                cached_meta_file_name = (
-                    f"update.{first_offset_in_batch}.{args.batch_size}.meta"
-                )
-                if os.path.exists(cached_file_name):
+                cached_update = self.determine_next_cached_update(first_offset_in_batch,
+                                                                     args.batch_size)
+                if cached_update is not None:
+                    cached_file_name, current_batch_size = cached_update
                     use_cached_file = True
-                    # Try to read metadata file for date range
-                    if os.path.exists(cached_meta_file_name):
-                        try:
-                            with open(cached_meta_file_name, "r") as f:
-                                cached_date_range = f.read().strip()
-                        except Exception:
-                            cached_date_range = None
-
-                    if args.verbose == "yes":
-                        log_msg = f"Using cached SPARQL query file: {cached_file_name}"
-                        if cached_date_range:
-                            log_msg += f" [date range: {cached_date_range}]"
-                        log.info(colored(log_msg, "cyan"))
 
             # Process one event at a time (unless using cached file).
             if not use_cached_file:
@@ -505,9 +671,9 @@ class UpdateWikidataCommand(QleverCommand):
                             rdf_linked_shared_data = event_data.get(
                                 "rdf_linked_shared_data"
                             )
-                            rdf_unlinked_shared_data = event_data.get(
-                                "rdf_unlinked_shared_data"
-                            )
+                            # rdf_unlinked_shared_data = event_data.get(
+                            #     "rdf_unlinked_shared_data"
+                            # )
 
                             # Check batch completion conditions BEFORE processing the
                             # data of this message. If any of the conditions is met,
@@ -609,10 +775,14 @@ class UpdateWikidataCommand(QleverCommand):
                                 )
 
                             # Process the to-be-deleted triples.
-                            for rdf_to_be_deleted in (
-                                rdf_deleted_data,
-                                rdf_unlinked_shared_data,
-                            ):
+                            #
+                            # NOTE: The triples from `rdf_unlinked_shared_data`
+                            # must not be deleted, because they are only
+                            # unlinked from the current entity, but may still
+                            # be linked from other entities. If they are not
+                            # linked from any other entity, they will be
+                            # orphaned, but we don't mind that.
+                            for rdf_to_be_deleted in (rdf_deleted_data,):
                                 if rdf_to_be_deleted is not None:
                                     try:
                                         rdf_to_be_deleted_data = (
@@ -714,7 +884,7 @@ class UpdateWikidataCommand(QleverCommand):
                         # Ctrl+C finishes the current batch (this should come at the
                         # end of the inner event loop so that always at least one
                         # message is processed).
-                        if self.ctrl_c_pressed:
+                        if self.ctrl_c_pressed.is_set():
                             log.warn(
                                 "\rCtrl+C pressed while processing a batch, "
                                 "finishing it and exiting"
@@ -722,7 +892,6 @@ class UpdateWikidataCommand(QleverCommand):
                             break
             else:
                 # Using cached file - set batch size and calculate next offset
-                current_batch_size = args.batch_size
                 total_num_messages += current_batch_size
                 event_id_for_next_batch = [
                     {
@@ -755,28 +924,13 @@ class UpdateWikidataCommand(QleverCommand):
                     f"min delta to NOW: {min_delta_to_now_s}s]"
                 )
 
-                # Add the min and max date of the batch to `insert_triples`.
-                #
-                # NOTE: The min date means that we have *all* updates until that
-                # date. The max date is the date of the latest update we have seen.
-                # However, there may still be earlier updates that we have not seen
-                # yet. Wikidata uses `schema:dateModified` for the latter semantics,
-                # so we use it here as well. For the other semantics, we invent
-                # a new property `wikibase:updatesCompleteUntil`.
-                insert_triples.add(
-                    f"<http://wikiba.se/ontology#Dump> "
-                    f"<http://schema.org/dateModified> "
-                    f'"{date_list[-1]}"^^<http://www.w3.org/2001/XMLSchema#dateTime>'
-                )
-                updates_complete_until = (
-                    date_list[-1]
-                    if args.min_or_max_date == "max"
-                    else date_list[0]
-                )
+                # Add a triples `wikibase:Dump wikibase:updatesCompleteUntil
+                # DATE` and `wikibase:Dump wikibase:updateStreamNextOffset
+                # OFFSET`.
                 insert_triples.add(
                     f"<http://wikiba.se/ontology#Dump> "
                     f"<http://wikiba.se/ontology#updatesCompleteUntil> "
-                    f'"{updates_complete_until}"'
+                    f'"{date_list[-1]}"'
                     f"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
                 )
                 insert_triples.add(
@@ -846,29 +1000,89 @@ class UpdateWikidataCommand(QleverCommand):
             if args.verbose == "yes":
                 log.info(colored(curl_cmd, "blue"))
 
-            # Run it (using `curl` for batch size up to 1000, otherwise
-            # `requests`).
+            # Send the UPDATE request. If it fails, reset to the beginning
+            # of this batch and retry in the next iteration of the outer
+            # loop. If this was a transient error, this makes sure that the
+            # batch is re-assembled and not lost. If the server has
+            # restarted, the offset check at the beginning of the next
+            # iteration will detect the mismatch and rewind.
             try:
                 result = run_command(curl_cmd, return_output=True)
-                result_file_name = f"update.{first_offset_in_batch}.{current_batch_size}.result"
-                with open(result_file_name, "w") as f:
-                    f.write(result)
-            except Exception as e:
-                log.warn(f"Error running `curl` command: {e}")
-                log.info("")
-                continue
+            except Exception:
+                if self.ctrl_c_pressed.is_set():
+                    log.warn(
+                        "\r  \nCtrl+C pressed while executing update, exiting"
+                    )
+                    return True
+                else:
+                    log.warn(
+                        "\r  \nUpdate request failed; will reconnect and retry"
+                    )
+                    event_id_for_next_batch = [
+                        {
+                            "topic": args.topic,
+                            "partition": args.partition,
+                            "offset": first_offset_in_batch,
+                        }
+                    ]
+                    continue
+            result_file_name = (
+                f"update.{first_offset_in_batch}.{current_batch_size}.result"
+            )
+            with open(result_file_name, "w") as f:
+                f.write(result)
+
+            # Clean up old update request files according to --keep-update-requests
+            if args.keep_update_requests != "all":
+                # Find all update.*.{sparql,meta,result} files
+                update_files = {}
+                for ext in ["sparql", "meta", "result"]:
+                    for file_path in glob.glob(f"update.*.*.{ext}"):
+                        # Extract offset from filename (update.OFFSET.SIZE.ext)
+                        parts = Path(file_path).stem.split(".")
+                        if len(parts) >= 3:
+                            offset = parts[1]
+                            if offset not in update_files:
+                                update_files[offset] = []
+                            update_files[offset].append(file_path)
+
+                # Sort by offset (newest last)
+                sorted_offsets = sorted(
+                    update_files.keys(), key=lambda x: int(x)
+                )
+
+                # Determine which to keep
+                if args.keep_update_requests == "none":
+                    files_to_keep = []
+                elif args.keep_update_requests == "last":
+                    files_to_keep = (
+                        update_files[sorted_offsets[-1]]
+                        if sorted_offsets
+                        else []
+                    )
+                elif args.keep_update_requests == "last-three":
+                    files_to_keep = []
+                    for offset in sorted_offsets[-3:]:
+                        files_to_keep.extend(update_files[offset])
+
+                # Delete files not in the keep list
+                for offset, files in update_files.items():
+                    for file_path in files:
+                        if file_path not in files_to_keep:
+                            try:
+                                os.remove(file_path)
+                            except Exception:
+                                pass  # Ignore errors during cleanup
 
             # Results should be a JSON, parse it.
             try:
                 result = json.loads(result)
             except Exception as e:
                 log.error(
-                    f"Error parsing JSON result: {e}"
-                    f", the first 1000 characters are:"
+                    f"Error parsing JSON result: {e}. "
+                    f"The first 1000 characters are: {result[:1000]}"
                 )
-                log.info(result[:1000])
-                log.info("")
-                continue
+                return False
 
             # Check if the result contains a QLever exception.
             if "exception" in result:
@@ -905,10 +1119,17 @@ class UpdateWikidataCommand(QleverCommand):
                     value = 0
                 return value
 
-            # If the batch ended due to a delete operation, we have two
-            # operations (and two statistics), otherwise only one.
-            for i, stats in enumerate(result):
-                # Show statistics of the update operation.
+            # Check for old JSON format (no `operations` or `time` on top level).
+            old_json_message_template = (
+                "Result JSON does not contain `{}` field, you are "
+                "probably using an old version of QLever"
+            )
+            for field in ["operations", "time"]:
+                if field not in result:
+                    raise RuntimeError(old_json_message_template.format(field))
+
+            # Get the per-operation statistics.
+            for i, stats in enumerate(result["operations"]):
                 try:
                     ins_after = stats["delta-triples"]["after"]["inserted"]
                     del_after = stats["delta-triples"]["after"]["deleted"]
@@ -920,9 +1141,11 @@ class UpdateWikidataCommand(QleverCommand):
                         stats["delta-triples"]["operation"]["deleted"]
                     )
                     num_ops = int(stats["delta-triples"]["operation"]["total"])
-                    time_ms = get_time_ms(stats, "total")
+                    time_op_total = get_time_ms(stats, "total")
                     time_us_per_op = (
-                        int(1000 * time_ms / num_ops) if num_ops > 0 else 0
+                        int(1000 * time_op_total / num_ops)
+                        if num_ops > 0
+                        else 0
                     )
                     if args.verbose == "yes":
                         log.info(
@@ -930,55 +1153,31 @@ class UpdateWikidataCommand(QleverCommand):
                                 f"TRIPLES: {num_ops:+10,} -> {ops_after:10,}, "
                                 f"INS: {num_ins:+10,} -> {ins_after:10,}, "
                                 f"DEL: {num_del:+10,} -> {del_after:10,}, "
-                                f"TIME: {time_ms:7,}ms, "
+                                f"TIME: {time_op_total:7,}ms, "
                                 f"TIME/TRIPLE: {time_us_per_op:6,}µs",
                                 attrs=["bold"],
                             )
                         )
 
-                    # Also show a detailed breakdown of the total time.
-                    time_parsing = (
-                        get_time_ms(
-                            stats,
-                            "parsing",
-                            failure_mode=FailureMode.SILENTLY_RETURN_ZERO,
-                        )
-                        if i == 0
-                        else 0
-                    )
                     time_planning = get_time_ms(stats, "planning")
-                    try:
-                        time_preparation = get_time_ms(
-                            stats,
-                            "execution",
-                            "processUpdateImpl",
-                            "preparation",
-                            "total",
-                            failure_mode=FailureMode.THROW_EXCEPTION,
-                        )
-                    except Exception:
-                        time_preparation = get_time_ms(
-                            stats,
-                            "execution",
-                            "processUpdateImpl",
-                            "preparation",
-                        )
+                    time_compute_ids = get_time_ms(
+                        stats,
+                        "execution",
+                        "computeIds",
+                        "total",
+                    )
                     time_where = get_time_ms(
                         stats,
                         "execution",
-                        "processUpdateImpl",
-                        "materializeResult",
+                        "evaluateWhere",
                     )
                     time_metadata = get_time_ms(
                         stats,
-                        "execution",
                         "updateMetadata",
-                        failure_mode=FailureMode.SILENTLY_RETURN_ZERO,
                     )
                     time_insert = get_time_ms(
                         stats,
                         "execution",
-                        "processUpdateImpl",
                         "insertTriples",
                         "total",
                         failure_mode=FailureMode.SILENTLY_RETURN_ZERO,
@@ -986,47 +1185,28 @@ class UpdateWikidataCommand(QleverCommand):
                     time_delete = get_time_ms(
                         stats,
                         "execution",
-                        "processUpdateImpl",
                         "deleteTriples",
                         "total",
                         failure_mode=FailureMode.SILENTLY_RETURN_ZERO,
                     )
-                    time_snapshot = get_time_ms(
-                        stats, "execution", "snapshotCreation"
-                    )
-                    time_writeback = get_time_ms(
-                        stats, "execution", "diskWriteback"
-                    )
-                    time_unaccounted = time_ms - (
-                        time_parsing
-                        + time_planning
-                        + time_preparation
+                    time_unaccounted = time_op_total - (
+                        time_planning
+                        + time_compute_ids
                         + time_where
                         + time_metadata
                         + time_delete
                         + time_insert
-                        + time_snapshot
-                        + time_writeback
                     )
                     if args.verbose == "yes":
                         log.info(
-                            f"PARSING: {100 * time_parsing / time_ms:2.0f}%, "
-                            f"PLANNING: {100 * time_planning / time_ms:2.0f}%, "
-                            f"PREPARATION: {100 * time_preparation / time_ms:2.0f}%, "
-                            f"WHERE: {100 * time_where / time_ms:2.0f}%, "
-                            f"DELETE: {100 * time_delete / time_ms:2.0f}%, "
-                            f"INSERT: {100 * time_insert / time_ms:2.0f}%, "
-                            f"METADATA: {100 * time_metadata / time_ms:2.0f}%, "
-                            f"SNAPSHOT: {100 * time_snapshot / time_ms:2.0f}%, "
-                            f"WRITEBACK: {100 * time_writeback / time_ms:2.0f}%, "
-                            f"UNACCOUNTED: {100 * time_unaccounted / time_ms:2.0f}%",
+                            f"METADATA: {100 * time_metadata / time_op_total:2.0f}%, "
+                            f"PLANNING: {100 * time_planning / time_op_total:2.0f}%, "
+                            f"WHERE: {100 * time_where / time_op_total:2.0f}%, "
+                            f"IDS: {100 * time_compute_ids / time_op_total:2.0f}%, "
+                            f"DELETE: {100 * time_delete / time_op_total:2.0f}%, "
+                            f"INSERT: {100 * time_insert / time_op_total:2.0f}%, "
+                            f"UNACCOUNTED: {100 * time_unaccounted / time_op_total:2.0f}%",
                         )
-
-                    # Update the totals.
-                    total_num_ops += num_ops
-                    total_time_s += time_ms / 1000.0
-                    elapsed_time_s = time.perf_counter() - start_time
-                    time_us_per_op = int(1e6 * total_time_s / total_num_ops)
 
                 except Exception as e:
                     log.warn(
@@ -1040,16 +1220,60 @@ class UpdateWikidataCommand(QleverCommand):
                     log.info("")
                     continue
 
+            # Get times for the whole request (not per operation).
+            time_parsing = get_time_ms(
+                result,
+                "parsing",
+            )
+            time_metadata = get_time_ms(
+                result,
+                "metadataUpdateForSnapshot",
+            )
+            time_snapshot = get_time_ms(
+                result,
+                "snapshotCreation",
+            )
+            time_writeback = get_time_ms(
+                result,
+                "diskWriteback",
+            )
+            time_operations = get_time_ms(
+                result,
+                "operations",
+            )
+            time_total = get_time_ms(
+                result,
+                "total",
+            )
+            time_unaccounted = time_total - (
+                time_parsing
+                + time_metadata
+                + time_snapshot
+                + time_writeback
+                + time_operations
+            )
+
+            # Update the totals.
+            total_update_time += time_total / 1000.0
+            total_elapsed_time = time.perf_counter() - start_time
+
             # Show statistics for the completed batch.
             if args.verbose == "yes":
                 log.info(
                     colored(
-                        f"TOTAL TRIPLES SO FAR: {total_num_ops:10,}, "
-                        f"TOTAL UPDATE TIME SO FAR: {total_time_s:4.0f}s, "
-                        f"ELAPSED TIME SO FAR: {elapsed_time_s:4.0f}s, "
-                        f"AVG TIME/TRIPLE SO FAR: {time_us_per_op:,}µs",
+                        f"TOTAL UPDATE TIME SO FAR: {total_update_time:4.0f}s, "
+                        f"TOTAL ELAPSED TIME SO FAR: {total_elapsed_time:4.0f}s, "
+                        f"TOTAL TIME FOR THIS UPDATE REQUEST: {time_total:7,}ms, ",
                         attrs=["bold"],
                     )
+                )
+                log.info(
+                    f"PARSING: {100 * time_parsing / time_total:2.0f}%, "
+                    f"OPERATIONS: {100 * time_operations / time_total:2.0f}%, "
+                    f"METADATA: {100 * time_metadata / time_total:2.0f}%, "
+                    f"SNAPSHOT: {100 * time_snapshot / time_total:2.0f}%, "
+                    f"WRITEBACK: {100 * time_writeback / time_total:2.0f}%, "
+                    f"UNACCOUNTED: {100 * time_unaccounted / time_total:2.0f}%",
                 )
                 log.info("")
 
@@ -1064,7 +1288,7 @@ class UpdateWikidataCommand(QleverCommand):
             # If Ctrl+C was pressed, we reached `--until`, or we processed
             # exactly `--num-messages`, finish.
             if (
-                self.ctrl_c_pressed
+                self.ctrl_c_pressed.is_set()
                 or self.finished
                 or (
                     args.num_messages is not None
@@ -1073,23 +1297,10 @@ class UpdateWikidataCommand(QleverCommand):
             ):
                 break
 
-        # Final statistics after all batches have been processed.
-        elapsed_time_s = time.perf_counter() - start_time
-        time_us_per_op = (
-            int(1e6 * total_time_s / total_num_ops) if total_num_ops > 0 else 0
-        )
+        # Final message after all batches have been processed.
         log.info(
             f"Processed {batch_count} "
             f"{'batches' if batch_count > 1 else 'batch'} "
             f"terminating update command"
-        )
-        log.info(
-            colored(
-                f"TOTAL TRIPLES: {total_num_ops:10,}, "
-                f"TOTAL TIME: {total_time_s:4.0f}s, "
-                f"ELAPSED TIME: {elapsed_time_s:4.0f}s, "
-                f"AVG TIME/TRIPLE: {time_us_per_op:,}µs",
-                attrs=["bold"],
-            )
         )
         return True
