@@ -10,6 +10,7 @@ import shutil
 import socket
 import string
 import subprocess
+import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -492,3 +493,29 @@ def add_memory_options(subparser, index=True, server=True):
                 "defaults that together stay within this limit. "
             ),
         )
+
+
+def tail_log_file(
+    log_file: Path,
+    max_wait_seconds: int = 30,
+) -> subprocess.Popen | None:
+    """
+    Wait for the log file to appear and start tailing it from the
+    beginning. The old log file should be deleted before calling this
+    function.
+
+    Returns the tail process, or None if the log file was not created
+    within `max_wait_seconds`.
+    """
+    waited = 0.0
+    while not log_file.exists():
+        if waited >= max_wait_seconds:
+            log.error(
+                f"Log file {log_file} was not created within "
+                f"{max_wait_seconds} seconds"
+            )
+            return None
+        time.sleep(0.1)
+        waited += 0.1
+    tail_cmd = f"exec tail -n +1 -f {log_file}"
+    return subprocess.Popen(tail_cmd, shell=True)
