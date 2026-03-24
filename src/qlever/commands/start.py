@@ -13,7 +13,12 @@ from qlever.commands.warmup import WarmupCommand
 from qlever.containerize import Containerize
 from qlever.log import log
 from qlever.qleverfile import Qleverfile
-from qlever.util import binary_exists, is_qlever_server_alive, run_command
+from qlever.util import (
+    binary_exists,
+    is_qlever_server_alive,
+    run_command,
+    tail_log_file,
+)
 
 
 # Construct the command line based on the config file.
@@ -289,20 +294,9 @@ class StartCommand(QleverCommand):
                 f" (Ctrl-C stops following the log, but NOT the server)"
             )
         log.info("")
-        # Wait for the log file to be created before reading from it
-        max_wait_seconds = 30
-        waited = 0.0
-        while not log_file.exists():
-            if waited >= max_wait_seconds:
-                log.error(
-                    f"Log file {log_file} was not created within "
-                    f"{max_wait_seconds} seconds"
-                )
-                return False
-            time.sleep(0.1)
-            waited += 0.1
-        tail_cmd = f"exec tail -n +1 -f {log_file}"
-        tail_proc = subprocess.Popen(tail_cmd, shell=True)
+        tail_proc = tail_log_file(log_file)
+        if tail_proc is None:
+            return False
         while not is_qlever_server_alive(args.endpoint_url):
             time.sleep(1)
 
