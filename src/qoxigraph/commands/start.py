@@ -7,7 +7,12 @@ from pathlib import Path
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.util import binary_exists, is_server_alive, run_command
+from qlever.util import (
+    binary_exists,
+    is_server_alive,
+    run_command,
+    tail_log_file,
+)
 from qoxigraph.commands.stop import StopCommand
 
 
@@ -152,6 +157,10 @@ class StartCommand(QleverCommand):
             )
             return False
 
+        # Remove old log file so that tail starts clean.
+        log_file = Path(f"{args.name}.server-log.txt")
+        log_file.unlink(missing_ok=True)
+
         try:
             process = run_command(
                 start_cmd,
@@ -178,12 +187,11 @@ class StartCommand(QleverCommand):
         if args.system in Containerize.supported_systems():
             time.sleep(2)
             log_cmd = f"exec {args.system} logs -f {args.server_container}"
+            log_proc = subprocess.Popen(log_cmd, shell=True)
         else:
-            log_file = Path(f"{args.name}.server-log.txt")
-            while not log_file.exists():
-                time.sleep(0.1)
-            log_cmd = f"exec tail -F -n +1 {log_file}"
-        log_proc = subprocess.Popen(log_cmd, shell=True)
+            log_proc = tail_log_file(log_file)
+            if log_proc is None:
+                return False
         while not is_server_alive(endpoint_url):
             time.sleep(1)
 
