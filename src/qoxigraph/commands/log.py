@@ -21,7 +21,7 @@ class LogCommand(QleverLogCommand):
         }
 
     def execute(self, args) -> bool:
-        if args.system == "native":
+        if args.system not in Containerize.supported_systems():
             return super().execute(args)
 
         # Handle container logging using docker/podman logs command instead of tail

@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import re
 
+import qlever.util as util
 from qlever.commands.index_stats import (
     IndexStatsCommand as QleverIndexStatsCommand,
 )
+from qlever.commands.index_stats import (
+    get_size_unit,
+    get_size_unit_factor,
+    get_time_unit,
+    get_time_unit_factor,
+)
 from qlever.log import log
-from qlever.util import get_total_file_size, run_command
 
 
 class IndexStatsCommand(QleverIndexStatsCommand):
@@ -20,7 +26,9 @@ class IndexStatsCommand(QleverIndexStatsCommand):
         # Read the last few lines of the log file (the total time is
         # always near the end).
         try:
-            log_text = run_command(f"tail {log_file_name}", return_output=True)
+            log_text = util.run_command(
+                f"tail {log_file_name}", return_output=True
+            )
         except Exception as e:
             log.error(f"Problem reading index log file {log_file_name}: {e}")
             return {}
@@ -39,8 +47,8 @@ class IndexStatsCommand(QleverIndexStatsCommand):
             except (ValueError, TypeError):
                 continue
 
-            time_unit = self.get_time_unit(args.time_unit, value_s)
-            unit_factor = self.get_time_unit_factor(time_unit)
+            time_unit = get_time_unit(args.time_unit, value_s)
+            unit_factor = get_time_unit_factor(time_unit)
 
             stats["TOTAL time"] = (value_s / unit_factor, time_unit)
             break
@@ -52,10 +60,10 @@ class IndexStatsCommand(QleverIndexStatsCommand):
         Part of `execute` that returns the space used by different types of
         index along with the unit.
         """
-        index_size = get_total_file_size([f"{args.name}_index/*.sst"])
+        index_size = util.get_total_file_size([f"{args.name}_index/*.sst"])
 
-        size_unit = self.get_size_unit(args.size_unit, index_size)
-        unit_factor = self.get_size_unit_factor(size_unit)
+        size_unit = get_size_unit(args.size_unit, index_size)
+        unit_factor = get_size_unit_factor(size_unit)
 
         index_size /= unit_factor
 

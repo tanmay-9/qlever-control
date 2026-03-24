@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 import psutil
 
+from qlever import script_name
 from qlever.log import log
 
 
@@ -334,7 +335,7 @@ def binary_exists(binary: str, cmd_arg: str, args) -> bool:
 
     is_containerized = args.system in Containerize.supported_systems()
     cmd = f"{binary} --help"
-    if is_containerized:
+    if is_containerized and script_name == "qlever":
         cmd = Containerize().containerize_command(
             cmd,
             args.system,
@@ -382,7 +383,7 @@ def is_server_alive(url: str) -> bool:
         return False
 
 
-def input_files_exist(input_files: str, script_name: str) -> bool:
+def input_files_exist(input_files: str) -> bool:
     """
     Check if all of the input files exist in current working directory.
     """

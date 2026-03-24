@@ -51,4 +51,4 @@ class QueryCommand(QleverQueryCommand):
             args.sparql_endpoint = f"{args.host_name}:{args.port}/query"
         args.pin_to_cache = None
         args.access_token = None
-        super().execute(args)
+        return super().execute(args)
