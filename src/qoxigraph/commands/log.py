@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from qlever import script_name
 from qlever.commands.log import LogCommand as QleverLogCommand
 from qlever.containerize import Containerize
 from qlever.log import log
@@ -8,7 +9,7 @@ from qlever.util import run_command
 
 class LogCommand(QleverLogCommand):
     def __init__(self):
-        self.script_name = "qoxigraph"
+        pass
 
     def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
         return {
@@ -43,7 +44,7 @@ class LogCommand(QleverLogCommand):
 
         if not Containerize().is_running(args.system, args.server_container):
             log.error(f"No server container {args.server_container} found!\n")
-            log.info(f"Are you sure you called `{self.script_name} start`?")
+            log.info(f"Are you sure you called `{script_name} start`?")
             return False
 
         try:

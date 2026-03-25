@@ -28,7 +28,7 @@ def wrap_cmd_in_container(args, cmd: str, ulimit: int | None = None) -> str:
 
 class IndexCommand(QleverCommand):
     def __init__(self):
-        self.script_name = "qoxigraph"
+        pass
 
     def description(self) -> str:
         return "Build the index for a given RDF dataset"

@@ -4,6 +4,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from qlever import script_name
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
@@ -53,7 +54,7 @@ def wrap_cmd_in_container(args, cmd: str) -> str:
 
 class StartCommand(QleverCommand):
     def __init__(self):
-        self.script_name = "qoxigraph"
+        pass
 
     def description(self) -> str:
         return (
@@ -144,7 +145,7 @@ class StartCommand(QleverCommand):
         ):
             log.error(f"No Oxigraph index files for {args.name} found!\n")
             log.info(
-                f"Did you call `{self.script_name} index`? If you did, check "
+                f"Did you call `{script_name} index`? If you did, check "
                 "if .sst index files are present in index directory."
             )
             return False
@@ -153,7 +154,7 @@ class StartCommand(QleverCommand):
         if is_server_alive(url=endpoint_url):
             log.error(f"Oxigraph server already running on {endpoint_url}\n")
             log.info(
-                f"To kill the existing server, use `{self.script_name} stop`"
+                f"To kill the existing server, use `{script_name} stop`"
             )
             return False
 
