@@ -11,6 +11,11 @@ from qlever.log import log
 
 
 def wrap_cmd_in_container(args, cmd: str, ulimit: int | None = None) -> str:
+    """
+    Wrap an indexing command in a container that is automatically removed
+    after the process exits (`--rm`) Use `use_bash=False` as Oxigraph image
+    doesn't support bash entrypoint.
+    """
     run_subcommand = "run --rm"
     if ulimit:
         run_subcommand += f" --ulimit nofile={ulimit}:{ulimit}"
@@ -27,6 +32,15 @@ def wrap_cmd_in_container(args, cmd: str, ulimit: int | None = None) -> str:
 
 
 class IndexCommand(QleverCommand):
+    """
+    Build an Oxigraph index for an RDF dataset. The indexing workflow is:
+    1. Run `oxigraph load` to import input files into a RocksDB store.
+    2. Optionally run `oxigraph optimize` to compact storage for read-only use.
+
+    For large datasets (>5 GB), the file descriptor ulimit is raised
+    automatically because RocksDB opens many .sst files concurrently.
+    """
+
     def __init__(self):
         pass
 
@@ -62,8 +76,9 @@ class IndexCommand(QleverCommand):
         )
 
         ulimit = args.ulimit
-        # If the total file size is larger than 5 GB, set ulimit (such that a
-        # large number of open files is allowed).
+        # RocksDB opens many .sst files concurrently. For datasets larger
+        # than 5 GB, raise the file descriptor limit so the process does
+        # not hit the default OS soft limit.
         total_file_size = util.get_total_file_size(
             shlex.split(args.input_files)
         )
@@ -78,7 +93,8 @@ class IndexCommand(QleverCommand):
 
         cmds_to_execute.append(index_cmd)
 
-        # Optimize database storage for read-only index
+        # Compact the RocksDB storage for read-only serving. This reduces
+        # disk usage and speeds up queries but makes the index immutable.
         optimize_cmd = None
         if args.read_only == "yes":
             optimize_cmd = f"optimize -l {args.name}_index/"
@@ -108,6 +124,8 @@ class IndexCommand(QleverCommand):
             if not util.binary_exists(args.index_binary, "index-binary", args):
                 return False
 
+        # Abort if a previous index already exists. RocksDB .sst files in
+        # the index directory indicate an existing store.
         if (
             len([p.name for p in Path(f"{args.name}_index").glob("*.sst")])
             != 0

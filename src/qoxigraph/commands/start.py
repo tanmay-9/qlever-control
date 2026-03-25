@@ -20,10 +20,10 @@ from qoxigraph.commands.stop import StopCommand
 def timeout_supported(args, serve_ps: str) -> bool:
     """Check whether the oxigraph server binary supports query timeouts."""
     help_cmd = f"{serve_ps} --help"
-    if args.system == "native":
-        help_cmd = f"{args.server_binary} {help_cmd}"
-    else:
+    if args.system in Containerize.supported_systems():
         help_cmd = f"{args.system} run --rm {args.image} {help_cmd}"
+    else:
+        help_cmd = f"{args.server_binary} {help_cmd}"
     try:
         help_output = run_command(help_cmd, return_output=True)
         return "timeout-s" in help_output
@@ -36,6 +36,7 @@ def timeout_supported(args, serve_ps: str) -> bool:
 
 
 def wrap_cmd_in_container(args, cmd: str) -> str:
+    """Wrap the server start command in a container with restart policy."""
     run_subcommand = "run --restart=unless-stopped"
     if not args.run_in_foreground:
         run_subcommand += " -d"
@@ -53,6 +54,13 @@ def wrap_cmd_in_container(args, cmd: str) -> str:
 
 
 class StartCommand(QleverCommand):
+    """
+    Start the Oxigraph SPARQL server for an already-indexed dataset.
+    Supports both native and containerized execution, with an option
+    to run in the foreground. Uses `serve-read-only` or `serve`
+    depending on the read_only setting.
+    """
+
     def __init__(self):
         pass
 
@@ -91,10 +99,12 @@ class StartCommand(QleverCommand):
         )
 
     def execute(self, args) -> bool:
+        # Inside a container, bind to 0.0.0.0 so the port mapping is
+        # reachable from the host; natively, bind to the configured host.
         bind = (
-            f"{args.host_name}:{args.port}"
-            if args.system == "native"
-            else f"0.0.0.0:{args.port}"
+            f"0.0.0.0:{args.port}"
+            if args.system in Containerize.supported_systems() 
+            else f"{args.host_name}:{args.port}"
         )
         process = "serve-read-only" if args.read_only == "yes" else "serve"
         timeout_str = ""
@@ -185,6 +195,9 @@ class StartCommand(QleverCommand):
                 " (Ctrl-C stops following the log, but NOT the server)"
             )
         log.info("")
+        # For containers, use `docker/podman logs -f` as Oxigraph doesn't
+        # support redirecting logs to a log file. A short delay ensures
+        # the container is up before attaching.
         if args.system in Containerize.supported_systems():
             time.sleep(2)
             log_cmd = f"exec {args.system} logs -f {args.server_container}"
@@ -207,6 +220,7 @@ class StartCommand(QleverCommand):
             log_proc.terminate()
 
         # With `--run-in-foreground`, wait until the server is stopped.
+        # On Ctrl-C, terminate the process and clean up the container.
         if args.run_in_foreground:
             try:
                 process.wait()

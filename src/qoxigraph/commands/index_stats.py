@@ -17,15 +17,18 @@ from qlever.log import log
 
 class IndexStatsCommand(QleverIndexStatsCommand):
     """
-    Class for executing the `index-stats` command.
+    Show index build time and disk space usage for an Oxigraph dataset.
+    Time is read from the "Total elapsed time" line appended to the
+    index log by the index command; space is the sum of all .sst files.
     """
 
     def execute_time(
         self, args, log_file_name: str
     ) -> dict[str, tuple[float | None, str]]:
-        # Read the last few lines of the log file (the total time is
-        # always near the end).
+        """Parse total index build time from the index log file."""
         try:
+            # Read the last few lines of the log file (the total time is
+            # always near the end).
             log_text = util.run_command(
                 f"tail {log_file_name}", return_output=True
             )
@@ -57,8 +60,7 @@ class IndexStatsCommand(QleverIndexStatsCommand):
 
     def execute_space(self, args) -> dict[str, tuple[float, str]]:
         """
-        Part of `execute` that returns the space used by different types of
-        index along with the unit.
+        Return the space used by the index files (*.sst) along with the unit.
         """
         index_size = util.get_total_file_size([f"{args.name}_index/*.sst"])
 

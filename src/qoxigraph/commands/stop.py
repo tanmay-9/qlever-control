@@ -9,16 +9,23 @@ from qoxigraph.commands.status import StatusCommand
 
 
 class StopCommand(QleverCommand):
+    """
+    Stop the Oxigraph server for a given dataset. For native execution,
+    finds and kills processes matching the dataset-name regex. For
+    containers, stops and removes the server container.
+    """
+
     # Override this with StatusCommand from child class for execute
     # method to work as intended
     STATUS_COMMAND = StatusCommand()
-    DEFAULT_REGEX = "oxigraph\\s+serve.*:%%PORT%%"
+    # %%NAME%% is replaced at runtime with the dataset name from the Qleverfile
+    DEFAULT_REGEX = "oxigraph\\s+serve.*%%NAME%%_index"
 
     def __init__(self):
         pass
 
     def description(self) -> str:
-        return "Stop Oxigraph server for a given dataset or port"
+        return "Stop Oxigraph server for a given dataset"
 
     def should_have_qleverfile(self) -> bool:
         return True
@@ -26,7 +33,6 @@ class StopCommand(QleverCommand):
     def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
         return {
             "data": ["name"],
-            "server": ["port"],
             "runtime": ["system", "server_container"],
         }
 
@@ -39,15 +45,17 @@ class StopCommand(QleverCommand):
         )
 
     def execute(self, args) -> bool:
+        # Substitute the dataset name into the regex template so we only
+        # match the server running for this dataset.
         cmdline_regex = args.cmdline_regex
-        if "%%PORT%%" in args.cmdline_regex and hasattr(args, "port"):
+        if "%%NAME%%" in args.cmdline_regex and hasattr(args, "name"):
             cmdline_regex = args.cmdline_regex.replace(
-                "%%PORT%%", str(args.port)
+                "%%NAME%%", str(args.name)
             )
         description = (
-            f'Checking for processes matching "{cmdline_regex}"'
-            if args.system == "native"
-            else f"Checking for container with name {args.server_container}"
+            f"Checking for container with name {args.server_container}"
+            if args.system in Containerize.supported_systems()
+            else f'Checking for processes matching "{cmdline_regex}"'
         )
 
         self.show(description, only_show=args.show)

@@ -8,6 +8,12 @@ from qlever.util import run_command
 
 
 class LogCommand(QleverLogCommand):
+    """
+    Show server logs for Oxigraph. For native execution, tails the log
+    file as usual. For containers, uses `docker/podman logs` as it is
+    not possible to redirect oxigraph logs to a log file.
+    """
+
     def __init__(self):
         pass
 

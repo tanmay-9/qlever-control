@@ -11,8 +11,16 @@ from qlever.qleverfile import Qleverfile
 
 
 class SetupConfigCommand(QleverSetupConfigCommand):
+    """
+    Create a Qleverfile for Oxigraph from a dataset template from `src/qlever/Qleverfiles`.
+    Filters the template to keep only the relevant sections and adds Oxigraph-specific
+    defaults (read-only mode, query timeout).
+    This class is used as the base SetupConfigCommand by all the other new engines.
+    """
+
     IMAGE = "ghcr.io/oxigraph/oxigraph"
 
+    # Sections and keys to retain when filtering a Qleverfile template.
     FILTER_CRITERIA = {
         "data": [],
         "index": ["INPUT_FILES"],
@@ -23,6 +31,7 @@ class SetupConfigCommand(QleverSetupConfigCommand):
 
     @staticmethod
     def construct_engine_specific_params(args) -> dict[str, dict[str, str]]:
+        """Return Oxigraph-specific defaults to inject into the Qleverfile."""
         return {"server": {"READ_ONLY": "yes", "TIMEOUT": "60s"}}
 
     @staticmethod
@@ -30,6 +39,7 @@ class SetupConfigCommand(QleverSetupConfigCommand):
         qleverfile_parser: RawConfigParser,
         engine_specific_params: dict[str, dict[str, str]],
     ) -> None:
+        """Merge engine-specific parameters into the Qleverfile parser."""
         for section, option_dict in engine_specific_params.items():
             if qleverfile_parser.has_section(section):
                 for option, value in option_dict.items():
@@ -60,9 +70,7 @@ class SetupConfigCommand(QleverSetupConfigCommand):
             )
             qleverfile_parser.set("runtime", "IMAGE", self.IMAGE)
             params = self.construct_engine_specific_params(args)
-            self.add_engine_specific_option_values(
-                qleverfile_parser, params
-            )
+            self.add_engine_specific_option_values(qleverfile_parser, params)
             for section, arg_name in self.override_args:
                 if arg_value := getattr(args, arg_name, None):
                     qleverfile_parser.set(
