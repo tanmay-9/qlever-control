@@ -16,7 +16,7 @@ class SetupConfigCommand(QoxigraphSetupConfigCommand):
     auto-generate sensible Qleverfile defaults.
     """
 
-    IMAGE = "adfreiburg/virtuoso-opensource-7"
+    IMAGE = "docker.io/openlink/virtuoso-opensource-7:latest"
     VIRTUOSO_INI_URL = (
         "https://raw.githubusercontent.com/openlink/virtuoso-opensource/"
         "23abbfbe9eb78d47dd70d8aca08cef0e81202bfb/binsrc/virtuoso/virtuoso.ini"

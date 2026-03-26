@@ -10,6 +10,10 @@ from qlever.containerize import Containerize
 from qlever.log import log
 from qvirtuoso.commands.stop import StopCommand
 
+# Virtuoso buffer tuning constants (per GB of free memory)
+NUM_BUFFERS_PER_GB = 85_000
+MAX_DIRTY_BUFFERS_PER_GB = 65_000
+
 
 def get_update_ini_cmd(
     arg_name: str, config_params: dict[str, dict[str, str]]
@@ -94,6 +98,69 @@ def virtuoso_ini_help_msg(script_name: str, args, ini_files: list[str]) -> str:
     return ini_msg
 
 
+def config_dict_for_update_ini(args) -> dict[str, dict[str, str]]:
+    """
+    Construct the parameter dictionary for all the necessary sections and
+    options of virtuoso.ini that need updating for the index process
+    """
+    config_dict = {
+        "Parameters": {},
+        "HTTPServer": {},
+        "Database": {},
+    }
+    http_port = (
+        f"{args.host_name}:{args.port}"
+        if args.system == "native"
+        else str(args.port)
+    )
+    try:
+        free_memory_gb = int(args.free_memory_gb[:-1])
+    except ValueError as e:
+        log.warning(
+            f"Invalid --free-memory-gb value {args.free_memory_gb}. Error: {e}"
+        )
+        log.info("Setting free system memory to 4GB")
+        free_memory_gb = 4
+
+    config_dict["Parameters"]["ServerPort"] = str(args.isql_port)
+    config_dict["HTTPServer"]["ServerPort"] = http_port
+    config_dict["Database"]["ErrorLogFile"] = f"{args.name}.index-log.txt"
+    config_dict["Parameters"]["NumberOfBuffers"] = str(
+        NUM_BUFFERS_PER_GB * free_memory_gb
+    )
+    config_dict["Parameters"]["MaxDirtyBuffers"] = str(
+        MAX_DIRTY_BUFFERS_PER_GB * free_memory_gb
+    )
+    return config_dict
+
+
+def wrap_cmd_in_container(
+    args, start_cmd: str, ld_dir_cmd: str, run_cmds: list[str]
+) -> tuple[str, str, str]:
+    """
+    Wrap the three indexing phases (start server, register files, load
+    data) into container commands. The server runs detached, while
+    ld_dir and rdf_loader_run are executed via `docker exec`.
+    """
+    start_cmd = Containerize().containerize_command(
+        cmd=f"{start_cmd} -f",
+        container_system=args.system,
+        run_subcommand="run -d -e DBA_PASSWORD=dba --group-add virtuoso",
+        image_name=args.image,
+        container_name=args.index_container,
+        volumes=[("$(pwd)", "/database")],
+        ports=[(args.port, args.port)],
+        use_bash=True,
+    )
+    exec_cmd = f"{args.system} exec {args.index_container}"
+
+    ld_dir_cmd = f"{exec_cmd} {ld_dir_cmd}"
+    separator = " " if len(run_cmds) > 2 else "; "
+    run_cmd = f'{exec_cmd} bash -c "{separator.join(run_cmds)}"'
+
+    return start_cmd, ld_dir_cmd, run_cmd
+
+
 class IndexCommand(QleverCommand):
     """
     Build a Virtuoso index for an RDF dataset. The indexing workflow is:
@@ -102,14 +169,7 @@ class IndexCommand(QleverCommand):
     3. Register input files via isql ld_dir()
     4. Load data via rdf_loader_run() (optionally with parallel loaders)
     5. Checkpoint and stop the server
-
-    When using a container system, the Docker image is built from the local
-    Dockerfile if not already present (or if --rebuild-image is passed).
     """
-
-    # Virtuoso buffer tuning constants (per GB of free memory)
-    NUM_BUFFERS_PER_GB = 85_000
-    MAX_DIRTY_BUFFERS_PER_GB = 65_000
 
     def __init__(self):
         self.script_name = "qvirtuoso"
@@ -146,74 +206,6 @@ class IndexCommand(QleverCommand):
                 "large datasets to prevent total data loss in case of failure."
             ),
         )
-        subparser.add_argument(
-            "--rebuild-image",
-            action="store_true",
-            default=False,
-            help="Rebuild the Docker image to get the latest updates",
-        )
-
-    def config_dict_for_update_ini(self, args) -> dict[str, dict[str, str]]:
-        """
-        Construct the parameter dictionary for all the necessary sections and
-        options of virtuoso.ini that need updating for the index process
-        """
-        config_dict = {
-            "Parameters": {},
-            "HTTPServer": {},
-            "Database": {},
-        }
-        http_port = (
-            f"{args.host_name}:{args.port}"
-            if args.system == "native"
-            else str(args.port)
-        )
-        try:
-            free_memory_gb = int(args.free_memory_gb[:-1])
-        except ValueError as e:
-            log.warning(
-                f"Invalid --free-memory-gb value {args.free_memory_gb}. Error: {e}"
-            )
-            log.info("Setting free system memory to 4GB")
-            free_memory_gb = 4
-
-        config_dict["Parameters"]["ServerPort"] = str(args.isql_port)
-        config_dict["HTTPServer"]["ServerPort"] = http_port
-        config_dict["Database"]["ErrorLogFile"] = f"{args.name}.index-log.txt"
-        config_dict["Parameters"]["NumberOfBuffers"] = str(
-            self.NUM_BUFFERS_PER_GB * free_memory_gb
-        )
-        config_dict["Parameters"]["MaxDirtyBuffers"] = str(
-            self.MAX_DIRTY_BUFFERS_PER_GB * free_memory_gb
-        )
-        return config_dict
-
-    @staticmethod
-    def wrap_cmd_in_container(
-        args, start_cmd: str, ld_dir_cmd: str, run_cmds: list[str]
-    ) -> tuple[str, str, str]:
-        """
-        Wrap the three indexing phases (start server, register files, load
-        data) into container commands. The server runs detached, while
-        ld_dir and rdf_loader_run are executed via `docker exec`.
-        """
-        start_cmd = Containerize().containerize_command(
-            cmd=f"{start_cmd} -f",
-            container_system=args.system,
-            run_subcommand="run -d -e DBA_PASSWORD=dba",
-            image_name=args.image,
-            container_name=args.index_container,
-            volumes=[("$(pwd)", "/database")],
-            ports=[(args.port, args.port)],
-            use_bash=True,
-        )
-        exec_cmd = f"{args.system} exec {args.index_container}"
-
-        ld_dir_cmd = f"{exec_cmd} {ld_dir_cmd}"
-        separator = " " if len(run_cmds) > 2 else "; "
-        run_cmd = f'{exec_cmd} bash -c "{separator.join(run_cmds)}"'
-
-        return start_cmd, ld_dir_cmd, run_cmd
 
     def execute(self, args) -> bool:
         num_parallel_loaders = args.num_parallel_loaders
@@ -259,8 +251,12 @@ class IndexCommand(QleverCommand):
             )
 
         virtuoso_ini_config_dict = self.config_dict_for_update_ini(args)
-        update_ini_cmd = get_update_ini_cmd(args.name, virtuoso_ini_config_dict)
-        log_virtuoso_ini_changes(args.name, virtuoso_ini_config_dict, update_ini_cmd)
+        update_ini_cmd = get_update_ini_cmd(
+            args.name, virtuoso_ini_config_dict
+        )
+        log_virtuoso_ini_changes(
+            args.name, virtuoso_ini_config_dict, update_ini_cmd
+        )
 
         cmd_to_show += f"{start_cmd}\n\n{ld_dir_cmd}\n{run_cmd_to_show}"
 
@@ -270,7 +266,7 @@ class IndexCommand(QleverCommand):
             return True
 
         # Check if all of the input files exist.
-        if not util.input_files_exist(args.input_files, self.script_name):
+        if not util.input_files_exist(args.input_files):
             return False
 
         # When running natively, check if the binary exists and works.
@@ -294,14 +290,14 @@ class IndexCommand(QleverCommand):
                 )
                 return False
 
-            if not image_id or args.rebuild_image:
-                build_successful = util.build_image(
-                    build_cmd, args.system, args.image
-                )
-                if not build_successful:
-                    return False
-            else:
-                log.info(f"{args.image} image present on the system\n")
+            # if not image_id or args.rebuild_image:
+            #     build_successful = util.build_image(
+            #         build_cmd, args.system, args.image
+            #     )
+            #     if not build_successful:
+            #         return False
+            # else:
+            #     log.info(f"{args.image} image present on the system\n")
 
         if Path("virtuoso.db").exists() and not args.extend_existing_index:
             log.error(

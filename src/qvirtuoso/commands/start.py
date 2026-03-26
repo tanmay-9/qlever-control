@@ -99,7 +99,7 @@ class StartCommand(QleverCommand):
     @staticmethod
     def wrap_cmd_in_container(args, cmd: str) -> str:
         """Wrap the server start command in a container with restart policy."""
-        run_subcommand = "run --restart=unless-stopped"
+        run_subcommand = "run --restart=unless-stopped --group-add virtuoso"
         if not args.run_in_foreground:
             run_subcommand += " -d"
         return Containerize().containerize_command(
