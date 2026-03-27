@@ -35,16 +35,20 @@ class TestIndexCommand(unittest.TestCase):
         args.only_pso_and_pos_permutations = False
         args.use_patterns = True
         args.parallel_parsing = False
+        args.add_has_word_triples = False
         args.text_index = "Test Index"
         args.stxxl_memory = False
         args.system = "native"
         args.show = False
         args.overwrite_existing = False
+        args.vocabulary_type = "on-disk-compressed"
         args.index_container = "test_container"
         args.image = "test_image"
         args.multi_input_json = False
         args.ulimit = None
+        args.encode_as_id = None
         args.parser_buffer_size = None
+        args.materialized_views = None
 
         # Mock glob, get_total_file_size, get_existing_index_files,
         # run_command and containerize
@@ -61,7 +65,8 @@ class TestIndexCommand(unittest.TestCase):
         expected_index_cmd = (
             f"{args.cat_input_files} | {args.index_binary}"
             f" -i {args.name} -s {args.name}.settings.json"
-            f" -F {args.format} -f - | tee"
+            f" --vocabulary-type {args.vocabulary_type}"
+            f" -F {args.format} -f - 2>&1 | tee"
             f" {args.name}.index-log.txt"
         )
         index_cmd_call = call(expected_index_cmd, show_output=True)
@@ -113,6 +118,7 @@ class TestIndexCommand(unittest.TestCase):
         args.input_files = "*.nt"
         args.only_pso_and_pos_permutations = False
         args.use_patterns = True
+        args.add_has_word_triples = False
         args.text_index = None
         args.stxxl_memory = None
         args.system = "native"
@@ -121,6 +127,7 @@ class TestIndexCommand(unittest.TestCase):
         args.index_container = "test_container"
         args.image = "test_image"
         args.multi_input_json = False
+        args.materialized_views = None
 
         # Mock glob, get_total_file_size, get_existing_index_files,
         # run_command and containerize
@@ -174,6 +181,7 @@ class TestIndexCommand(unittest.TestCase):
         args.input_files = "*.nt"
         args.only_pso_and_pos_permutations = False
         args.use_patterns = True
+        args.add_has_word_triples = False
         args.text_index = None
         args.stxxl_memory = None
         args.system = "native"
@@ -182,6 +190,7 @@ class TestIndexCommand(unittest.TestCase):
         args.index_container = "test_container"
         args.image = "test_image"
         args.multi_input_json = False
+        args.materialized_views = None
 
         # Mock glob, get_total_file_size, get_existing_index_files,
         # run_command and containerize
@@ -238,16 +247,20 @@ class TestIndexCommand(unittest.TestCase):
         args.only_pso_and_pos_permutations = False
         args.use_patterns = True
         args.parallel_parsing = False
+        args.add_has_word_triples = False
         args.text_index = None
         args.stxxl_memory = None
         args.system = "native"
         args.show = False
         args.overwrite_existing = False
+        args.vocabulary_type = "on-disk-compressed"
         args.index_container = "test_container"
         args.image = "test_image"
         args.multi_input_json = False
         args.ulimit = None
+        args.encode_as_id = None
         args.parser_buffer_size = None
+        args.materialized_views = None
 
         # Mock glob, get_total_file_size, get_existing_index_files,
         # run_command and containerize
@@ -264,8 +277,9 @@ class TestIndexCommand(unittest.TestCase):
         expected_index_cmd = (
             f"ulimit -Sn 500000 && {args.cat_input_files} | {args.index_binary}"
             f" -i {args.name} -s {args.name}.settings.json"
+            f" --vocabulary-type {args.vocabulary_type}"
             f" -F {args.format} -f -"
-            f" | tee {args.name}.index-log.txt"
+            f" 2>&1 | tee {args.name}.index-log.txt"
         )
         mock_util_run_command.assert_called_once_with(
             f"{args.index_binary} --help"
@@ -344,15 +358,19 @@ class TestIndexCommand(unittest.TestCase):
         args.multi_input_json = True
         args.cat_input_files = False
         args.only_pso_and_pos_permutations = True
-        args.use_patterns = False
+        args.use_patterns = "no"
+        args.add_has_word_triples = False
         args.text_index = "from_text_records_and_literals"
         args.stxxl_memory = True
         args.input_files = "*.nt"
         args.system = "native"
         args.settings_json = '{"example": "settings"}'
+        args.vocabulary_type = "on-disk-compressed"
         args.show = True
         args.ulimit = None
+        args.encode_as_id = None
         args.parser_buffer_size = None
+        args.materialized_views = None
 
         # Mock get_input_options_for_json
         mock_input_json.return_value = "test_input_stream"
@@ -364,13 +382,14 @@ class TestIndexCommand(unittest.TestCase):
         expected_index_cmd = (
             f"{args.index_binary}"
             f" -i {args.name} -s {args.name}.settings.json"
+            f" --vocabulary-type {args.vocabulary_type}"
             f" {mock_input_json.return_value}"
-            f" --only-pso-and-pos-permutations --no-patterns"
+            f" --only-pso-and-pos-permutations"
             f" --no-patterns -w {args.name}.wordsfile.tsv"
             f" -d {args.name}.docsfile.tsv"
             f" --text-words-from-literals"
             f" --stxxl-memory {args.stxxl_memory}"
-            f" | tee {args.name}.index-log.txt"
+            f" 2>&1 | tee {args.name}.index-log.txt"
         )
         settings_json_cmd = (
             f"echo {shlex.quote(args.settings_json)} "

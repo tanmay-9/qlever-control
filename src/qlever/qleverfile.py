@@ -21,6 +21,41 @@ class Qleverfile:
     Qleverfile + functions for parsing.
     """
 
+    # Runtime parameters (for `settings` and `start` commands).
+    SERVER_RUNTIME_PARAMETERS = [
+        "cache-max-num-entries",
+        "cache-max-size",
+        "cache-max-size-single-entry",
+        "cache-service-results",
+        "default-query-timeout",
+        "division-by-zero-is-undef",
+        "enable-distributive-union",
+        "enable-prefilter-on-index-scans",
+        "group-by-disable-index-scan-optimizations",
+        "group-by-hash-map-enabled",
+        "lazy-index-scan-max-size-materialization",
+        "lazy-index-scan-num-threads",
+        "lazy-index-scan-queue-size",
+        "lazy-result-max-cache-size",
+        "permutation-writer-num-threads",
+        "query-planning-budget",
+        "request-body-limit",
+        "service-allowed-iri-prefixes",
+        "service-max-redirects",
+        "service-max-value-rows",
+        "sort-estimate-cancellation-factor",
+        "sort-in-memory-threshold",
+        "sparql-results-json-with-time",
+        "spatial-join-prefilter-max-size",
+        "spatial-join-max-num-threads",
+        "strip-columns",
+        "syntax-test-mode",
+        "throw-on-unbound-variables",
+        "treat-default-graph-as-named-graph",
+        "use-binsearch-transitive-path",
+        "websocket-updates-enabled",
+    ]
+
     @staticmethod
     def all_arguments():
         """
@@ -61,7 +96,7 @@ class Qleverfile:
             "--text-description",
             type=str,
             default=None,
-            help="A concise description of the additional text data" " if any",
+            help="A concise description of the additional text data if any",
         )
         data_args["format"] = arg(
             "--format",
@@ -108,6 +143,15 @@ class Qleverfile:
             default="{}",
             help="The `.settings.json` file for the index",
         )
+        index_args["materialized_views"] = arg(
+            "--materialized-views",
+            type=str,
+            default=None,
+            help="JSON to specify materialized views to be created at the "
+            'end of the index build, of the form `{ "view_name": '
+            '"SPARQL query", ... }`; default: do not create any '
+            "materialized views",
+        )
         index_args["ulimit"] = arg(
             "--ulimit",
             type=int,
@@ -116,10 +160,24 @@ class Qleverfile:
             "files (default: 1048576 when the total size of the input files "
             "is larger than 10 GB)",
         )
+        index_args["vocabulary_type"] = arg(
+            "--vocabulary-type",
+            type=str,
+            choices=[
+                "on-disk-compressed",
+                "on-disk-uncompressed",
+                "in-memory-compressed",
+                "in-memory-uncompressed",
+                "on-disk-compressed-geo-split",
+            ],
+            default="on-disk-compressed",
+            help="The type of the vocabulary to use for the index "
+            " (default: `on-disk-compressed`)",
+        )
         index_args["index_binary"] = arg(
             "--index-binary",
             type=str,
-            default="IndexBuilderMain",
+            default="qlever-index",
             help="The binary for building the index (this requires "
             "that you have compiled QLever on your machine)",
         )
@@ -137,6 +195,14 @@ class Qleverfile:
             "large enough to contain the end of at least one statement "
             "(default: 10M)",
         )
+        index_args["encode_as_id"] = arg(
+            "--encode-as-id",
+            type=str,
+            help="Space-separated list of IRI prefixes (without angle "
+            "brackets); IRIs that start with one of these prefixes, followed "
+            "by a sequence of digits, do not require a vocabulary entry but "
+            "are directly encoded in the ID (default: none)",
+        )
         index_args["only_pso_and_pos_permutations"] = arg(
             "--only-pso-and-pos-permutations",
             action="store_true",
@@ -145,11 +211,18 @@ class Qleverfile:
         )
         index_args["use_patterns"] = arg(
             "--use-patterns",
-            action="store_true",
-            default=True,
-            help="Precompute so-called patterns needed for fast processing"
-            " of queries like SELECT ?p (COUNT(DISTINCT ?s) AS ?c) "
+            choices=["yes", "no"],
+            default="yes",
+            help="Whether to precompute the so-called patterns used for fast "
+            "processing of queries like SELECT ?p (COUNT(DISTINCT ?s) AS ?c) "
             "WHERE { ?s ?p [] ... } GROUP BY ?p",
+        )
+        index_args["add_has_word_triples"] = arg(
+            "--add-has-word-triples",
+            action="store_true",
+            default=False,
+            help="Whether to add `ql:has-word` triples for text literals "
+            "(which can then be used for custom text search queries)",
         )
         index_args["text_index"] = arg(
             "--text-index",
@@ -181,14 +254,13 @@ class Qleverfile:
         server_args["server_binary"] = arg(
             "--server-binary",
             type=str,
-            default="ServerMain",
+            default="qlever-server",
             help="The binary for starting the server (this requires "
             "that you have compiled QLever on your machine)",
         )
         server_args["host_name"] = arg(
             "--host-name",
             type=str,
-            default="localhost",
             help="The name of the host on which the server listens for "
             "requests",
         )
@@ -261,10 +333,10 @@ class Qleverfile:
         )
         server_args["use_patterns"] = arg(
             "--use-patterns",
-            action="store_true",
-            default=True,
-            help="Use the patterns precomputed during the index build"
-            " (see `qlever index --help` for their utility)",
+            choices=["yes", "no"],
+            default="yes",
+            help="Whether to use the patterns precomputed during the index "
+            "build (see `qlever index --help` for their utility)",
         )
         server_args["use_text_index"] = arg(
             "--use-text-index",
@@ -416,10 +488,15 @@ class Qleverfile:
             server = config["server"]
         if index.get("text_index", "none") != "none":
             server["use_text_index"] = "yes"
+        if index.get("only_pso_and_pos_permutations", "false") == "true":
+            index["use_patterns"] = "no"
+        if index.get("use_patterns", None) == "no":
+            server["use_patterns"] = "no"
 
         # Add other non-trivial default values.
         try:
-            config["server"]["host_name"] = socket.gethostname()
+            if config["server"].get("host_name") is None:
+                config["server"]["host_name"] = socket.gethostname()
         except Exception:
             log.warning(
                 "Could not get the hostname, using `localhost` as default"

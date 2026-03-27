@@ -30,19 +30,23 @@ class IndexCommand(QleverCommand):
     def should_have_qleverfile(self) -> bool:
         return True
 
-    def relevant_qleverfile_arguments(self) -> dict[str : list[str]]:
+    def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
         return {
             "data": ["name", "format"],
             "index": [
                 "input_files",
                 "cat_input_files",
+                "encode_as_id",
                 "multi_input_json",
                 "parallel_parsing",
                 "settings_json",
+                "materialized_views",
+                "vocabulary_type",
                 "index_binary",
                 "only_pso_and_pos_permutations",
                 "ulimit",
                 "use_patterns",
+                "add_has_word_triples",
                 "text_index",
                 "stxxl_memory",
                 "parser_buffer_size",
@@ -98,8 +102,7 @@ class IndexCommand(QleverCommand):
             # Check that `input_spec` is a dictionary.
             if not isinstance(input_spec, dict):
                 raise self.InvalidInputJson(
-                    f"Element {i} in `MULTI_INPUT_JSON` must be a JSON "
-                    "object",
+                    f"Element {i} in `MULTI_INPUT_JSON` must be a JSON object",
                     input_spec,
                 )
             # For each `input_spec`, we must have a command.
@@ -184,6 +187,7 @@ class IndexCommand(QleverCommand):
             index_cmd = (
                 f"{args.cat_input_files} | {args.index_binary}"
                 f" -i {args.name} -s {args.name}.settings.json"
+                f" --vocabulary-type {args.vocabulary_type}"
                 f" -F {args.format} -f -"
             )
             if args.parallel_parsing:
@@ -199,6 +203,7 @@ class IndexCommand(QleverCommand):
             index_cmd = (
                 f"{args.index_binary}"
                 f" -i {args.name} -s {args.name}.settings.json"
+                f" --vocabulary-type {args.vocabulary_type}"
                 f" {input_options}"
             )
         else:
@@ -212,17 +217,20 @@ class IndexCommand(QleverCommand):
             return False
 
         # Add remaining options.
+        if args.encode_as_id:
+            index_cmd += f" --encode-as-id {args.encode_as_id}"
         if args.only_pso_and_pos_permutations:
-            index_cmd += " --only-pso-and-pos-permutations --no-patterns"
-        if not args.use_patterns:
+            index_cmd += " --only-pso-and-pos-permutations"
+        if args.use_patterns == "no":
             index_cmd += " --no-patterns"
+        if args.add_has_word_triples:
+            index_cmd += " --add-has-word-triples"
         if args.text_index in [
             "from_text_records",
             "from_text_records_and_literals",
         ]:
             index_cmd += (
-                f" -w {args.name}.wordsfile.tsv"
-                f" -d {args.name}.docsfile.tsv"
+                f" -w {args.name}.wordsfile.tsv -d {args.name}.docsfile.tsv"
             )
         if args.text_index in [
             "from_literals",
@@ -233,7 +241,11 @@ class IndexCommand(QleverCommand):
             index_cmd += f" --stxxl-memory {args.stxxl_memory}"
         if args.parser_buffer_size:
             index_cmd += f" --parser-buffer-size {args.parser_buffer_size}"
-        index_cmd += f" | tee {args.name}.index-log.txt"
+        if args.materialized_views:
+            index_cmd += (
+                f" --materialized-views {shlex.quote(args.materialized_views)}"
+            )
+        index_cmd += f" 2>&1 | tee {args.name}.index-log.txt"
 
         # If the total file size is larger than 10 GB, set ulimit (such that a
         # large number of open files is allowed).
@@ -266,10 +278,8 @@ class IndexCommand(QleverCommand):
         if args.show:
             return True
 
-        # When running natively, check if the binary exists and works.
-        if args.system == "native":
-            if not binary_exists(args.index_binary, "index-binary"):
-                return False
+        if not binary_exists(args.index_binary, "index-binary", args):
+            return False
 
         # Check if all of the input files exist.
         for pattern in shlex.split(args.input_files):
@@ -300,8 +310,7 @@ class IndexCommand(QleverCommand):
         ):
             if Containerize.is_running(args.system, args.index_container):
                 log.info(
-                    "Another index process is running, trying to stop "
-                    "it ..."
+                    "Another index process is running, trying to stop it ..."
                 )
                 log.info("")
                 try:

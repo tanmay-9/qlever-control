@@ -3,14 +3,24 @@ from __future__ import annotations
 from configparser import RawConfigParser
 from pathlib import Path
 
-from qlever.command import QleverCommand
+from qlever.commands.setup_config import (
+    SetupConfigCommand as QleverSetupConfigCommand,
+)
 from qlever.log import log
 from qlever.qleverfile import Qleverfile
 
 
-class SetupConfigCommand(QleverCommand):
+class SetupConfigCommand(QleverSetupConfigCommand):
+    """
+    Create a Qleverfile for Oxigraph from a dataset template from `src/qlever/Qleverfiles`.
+    Filters the template to keep only the relevant sections and adds Oxigraph-specific
+    defaults (read-only mode, query timeout).
+    This class is used as the base SetupConfigCommand by all the other new engines.
+    """
+
     IMAGE = "ghcr.io/oxigraph/oxigraph"
 
+    # Sections and keys to retain when filtering a Qleverfile template.
     FILTER_CRITERIA = {
         "data": [],
         "index": ["INPUT_FILES"],
@@ -19,91 +29,63 @@ class SetupConfigCommand(QleverCommand):
         "ui": ["UI_CONFIG"],
     }
 
-    def __init__(self):
-        self.qleverfiles_path = (
-            Path(__file__).parent.parent.parent / "qlever" / "Qleverfiles"
-        )
-        self.qleverfile_names = [
-            p.name.split(".")[1]
-            for p in self.qleverfiles_path.glob("Qleverfile.*")
-        ]
+    @staticmethod
+    def construct_engine_specific_params(args) -> dict[str, dict[str, str]]:
+        """Return Oxigraph-specific defaults to inject into the Qleverfile."""
+        return {"server": {"READ_ONLY": "yes", "TIMEOUT": "60s"}}
 
-    def description(self) -> str:
-        return "Get a pre-configured Qleverfile"
+    @staticmethod
+    def add_engine_specific_option_values(
+        qleverfile_parser: RawConfigParser,
+        engine_specific_params: dict[str, dict[str, str]],
+    ) -> None:
+        """Merge engine-specific parameters into the Qleverfile parser."""
+        for section, option_dict in engine_specific_params.items():
+            if qleverfile_parser.has_section(section):
+                for option, value in option_dict.items():
+                    qleverfile_parser.set(section, option, value)
 
-    def should_have_qleverfile(self) -> bool:
-        return False
-
-    def relevant_qleverfile_arguments(self) -> dict[str : list[str]]:
-        return {}
-
-    def additional_arguments(self, subparser) -> None:
-        subparser.add_argument(
-            "config_name",
-            type=str,
-            choices=self.qleverfile_names,
-            help="The name of the pre-configured Qleverfile to create",
-        )
-
-    def validate_qleverfile_setup(
-        self, args, qleverfile_path: Path
-    ) -> bool | None:
+    def execute(self, args) -> bool:
         # Construct the command line and show it.
+        template_path = (
+            self.qleverfiles_path / f"Qleverfile.{args.config_name}"
+        )
         setup_config_show = (
-            f"Creating Qleverfile for {args.config_name} using "
-            f"Qleverfile.{args.config_name} file in {self.qleverfiles_path}"
+            f"Qleverfile for {args.config_name} will be created using "
+            f"Qleverfile.{args.config_name} file in {template_path}"
         )
         self.show(setup_config_show, only_show=args.show)
         if args.show:
             return True
 
         # If there is already a Qleverfile in the current directory, exit.
-        if qleverfile_path.exists():
-            log.error("`Qleverfile` already exists in current directory")
-            log.info("")
-            log.info(
-                "If you want to create a new Qleverfile using "
-                "`qlever setup-config`, delete the existing Qleverfile "
-                "first"
-            )
+        if self.check_qleverfile_exists():
             return False
-        return None
 
-    def get_filtered_qleverfile_parser(
-        self, config_name: str
-    ) -> RawConfigParser:
-        qleverfile_config_path = (
-            self.qleverfiles_path / f"Qleverfile.{config_name}"
-        )
-        qleverfile_parser = Qleverfile.filter(
-            qleverfile_config_path, self.FILTER_CRITERIA
-        )
-        if qleverfile_parser.has_section("runtime"):
-            qleverfile_parser.set("runtime", "IMAGE", self.IMAGE)
-        return qleverfile_parser
-
-    def execute(self, args) -> bool:
         qleverfile_path = Path("Qleverfile")
-        exit_status = self.validate_qleverfile_setup(args, qleverfile_path)
-        if exit_status is not None:
-            return exit_status
 
-        qleverfile_parser = self.get_filtered_qleverfile_parser(
-            args.config_name
-        )
-        # Copy the Qleverfile to the current directory.
         try:
+            qleverfile_parser = Qleverfile.filter(
+                template_path, self.FILTER_CRITERIA
+            )
+            qleverfile_parser.set("runtime", "IMAGE", self.IMAGE)
+            params = self.construct_engine_specific_params(args)
+            self.add_engine_specific_option_values(qleverfile_parser, params)
+            for section, arg_name in self.override_args:
+                if arg_value := getattr(args, arg_name, None):
+                    qleverfile_parser.set(
+                        section, arg_name.upper(), str(arg_value)
+                    )
             with qleverfile_path.open("w") as f:
                 qleverfile_parser.write(f)
+
+            log.info(
+                f'Created Qleverfile for config "{args.config_name}"'
+                f" in current directory"
+            )
+            return True
         except Exception as e:
             log.error(
                 f'Could not copy "{qleverfile_path}" to current directory: {e}'
             )
             return False
-
-        # If we get here, everything went well.
-        log.info(
-            f'Created Qleverfile for config "{args.config_name}"'
-            f" in current directory"
-        )
-        return True

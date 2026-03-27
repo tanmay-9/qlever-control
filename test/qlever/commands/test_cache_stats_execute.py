@@ -20,7 +20,7 @@ class TestCacheStatsCommand(unittest.TestCase):
     ):
         # Mock arguments for basic cache stats
         args = MagicMock()
-        args.server_url = None
+        args.sparql_endpoint = None
         args.host_name = "localhorst"
         args.port = 1234
         args.show = False
@@ -29,13 +29,13 @@ class TestCacheStatsCommand(unittest.TestCase):
         # Mock `subprocess.check_output` and `json.loads` as encoded bytes
         mock_check_output.side_effect = [
             # Mock cache_stats
-            b'{"pinned-size": 1e9, "non-pinned-size": 3e9}',
+            b'{"cache-size-pinned": 1e9, "cache-size-unpinned": 3e9}',
             # Mock cache_settings
             b'{"cache-max-size": "10 GB"}',
         ]
         # mock cache_stats_dict and cache_settings_dict as a dictionary
         mock_json_loads.side_effect = [
-            {"pinned-size": 1e9, "non-pinned-size": 3e9},
+            {"cache-size-pinned": 1e9, "cache-size-unpinned": 3e9},
             {"cache-max-size": "10 GB"},
         ]
 
@@ -77,20 +77,20 @@ class TestCacheStatsCommand(unittest.TestCase):
     ):
         # Mock arguments for detailed cache stats
         args = MagicMock()
-        args.server_url = "http://testlocalhost:1234"
+        args.sparql_endpoint = "http://testlocalhost:1234"
         args.show = False
         args.detailed = True
 
         # Mock the responses from `subprocess.check_output` and `json.loads`
         mock_check_output.side_effect = [
-            b'{"pinned-size": 2e9, "non-pinned-size": 1e9, "test-stat": 500}',
+            b'{"cache-size-pinned": 2e9, "cache-size-unpinned": 1e9, "test-stat": 500}',
             b'{"cache-max-size": "10 GB", "test-setting": 1000}',
         ]
         # CAREFUL: if value is float you will get an error in re.match
         mock_json_loads.side_effect = [
             {
-                "pinned-size": int(2e9),
-                "non-pinned-size": int(1e9),
+                "cache-size-pinned": int(2e9),
+                "cache-size-unpinned": int(1e9),
                 "test-stat": 500,
             },
             {"cache-max-size": "10 GB", "test-setting": 1000},
@@ -101,10 +101,10 @@ class TestCacheStatsCommand(unittest.TestCase):
 
         # Assertions
         expected_stats_call = (
-            f"curl -s {args.server_url} " f'--data-urlencode "cmd=cache-stats"'
+            f"curl -s {args.sparql_endpoint} " f'--data-urlencode "cmd=cache-stats"'
         )
         expected_settings_call = (
-            f"curl -s {args.server_url} "
+            f"curl -s {args.sparql_endpoint} "
             f'--data-urlencode "cmd=get-settings"'
         )
 
@@ -112,10 +112,10 @@ class TestCacheStatsCommand(unittest.TestCase):
         mock_check_output.assert_any_call(expected_settings_call, shell=True)
 
         # Verify that detailed stats and settings were logged as a table
-        mock_log.info.assert_any_call("pinned-size     : 2,000,000,000")
-        mock_log.info.assert_any_call("non-pinned-size : 1,000,000,000")
-        mock_log.info.assert_any_call("test-stat       : 500")
         mock_log.info.assert_any_call("cache-max-size : 10 GB")
+        mock_log.info.assert_any_call("cache-size-pinned   : 2,000,000,000")
+        mock_log.info.assert_any_call("cache-size-unpinned : 1,000,000,000")
+        mock_log.info.assert_any_call("test-stat           : 500")
         mock_log.info.assert_any_call("test-setting   : 1,000")
 
         self.assertTrue(result)
@@ -127,7 +127,7 @@ class TestCacheStatsCommand(unittest.TestCase):
     def test_execute_failed_cache_stats(self, mock_log, mock_check_output):
         # Mock arguments for basic cache stats
         args = MagicMock()
-        args.server_url = "http://testlocalhost:1234"
+        args.sparql_endpoint = "http://testlocalhost:1234"
         args.show = False
         args.detailed = False
 
@@ -153,7 +153,7 @@ class TestCacheStatsCommand(unittest.TestCase):
     ):
         # Mock arguments for basic cache stats
         args = MagicMock()
-        args.server_url = None
+        args.sparql_endpoint = None
         args.port = 1234
         args.show = False
         args.detailed = False
@@ -189,18 +189,18 @@ class TestCacheStatsCommand(unittest.TestCase):
     ):
         # Mock arguments for basic cache stats
         args = MagicMock()
-        args.server_url = None
+        args.sparql_endpoint = None
         args.port = 1234
         args.show = False
         args.detailed = False
 
         # Mock the responses with empty cache size
         mock_check_output.side_effect = [
-            b'{"pinned-size": 0, "non-pinned-size": 0}',
+            b'{"cache-size-pinned": 0, "cache-size-unpinned": 0}',
             b'{"cache-max-size": "10 GB"}',
         ]
         mock_json_loads.side_effect = [
-            {"pinned-size": 0, "non-pinned-size": 0},
+            {"cache-size-pinned": 0, "cache-size-unpinned": 0},
             {"cache-max-size": "10 GB"},
         ]
 
