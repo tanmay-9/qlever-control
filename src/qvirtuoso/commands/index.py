@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 import qlever.util as util
+from qlever import script_name
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
@@ -172,7 +173,7 @@ class IndexCommand(QleverCommand):
     """
 
     def __init__(self):
-        self.script_name = "qvirtuoso"
+        pass
 
     def description(self) -> str:
         return "Build the index for a given RDF dataset"
@@ -215,6 +216,8 @@ class IndexCommand(QleverCommand):
         ld_dir_cmd = (
             isql_cmd + f" exec=\"ld_dir('.', '{args.input_files}', '');\""
         )
+
+        # Multiple parallel loaders i.e. rdf_loader_run()
         if num_parallel_loaders > 1:
             run_cmds = [
                 f"{isql_cmd} exec='rdf_loader_run();' &"
@@ -222,35 +225,27 @@ class IndexCommand(QleverCommand):
             run_cmds.append("wait;")
         else:
             run_cmds = [f"{isql_cmd} exec='rdf_loader_run();'"]
+
         run_cmds.append(f"{isql_cmd} exec='checkpoint;'")
+
         separator = " " if num_parallel_loaders > 1 else "; "
         run_cmd = separator.join(run_cmds)
 
         run_cmd_to_show = "\n".join(run_cmds)
-        image_id = build_cmd = cmd_to_show = ""
-        if args.system != "native":
-            start_cmd, ld_dir_cmd, run_cmd = self.wrap_cmd_in_container(
+        if args.system in Containerize.supported_systems():
+            start_cmd, ld_dir_cmd, run_cmd = wrap_cmd_in_container(
                 args, start_cmd, ld_dir_cmd, run_cmds
             )
             run_cmd_to_show = run_cmd
-            dockerfile_dir = Path(__file__).parent.parent
-            dockerfile_path = dockerfile_dir / "Dockerfile"
-            build_cmd = (
-                f"{args.system} build -f {dockerfile_path} -t {args.image} --build-arg "
-                f"UID=$(id -u) --build-arg GID=$(id -g) {dockerfile_dir}"
-            )
-            image_id = util.get_container_image_id(args.system, args.image)
-            if not image_id or args.rebuild_image:
-                cmd_to_show = f"{build_cmd}\n\n"
 
         ini_files = [str(ini) for ini in Path(".").glob("*.ini")]
         if not Path(f"{args.name}.virtuoso.ini").exists():
             self.show(
                 f"{args.name}.virtuoso.ini configfile not found in the current "
-                f"directory! {virtuoso_ini_help_msg(self.script_name, args, ini_files)}"
+                f"directory! {virtuoso_ini_help_msg(script_name, args, ini_files)}"
             )
 
-        virtuoso_ini_config_dict = self.config_dict_for_update_ini(args)
+        virtuoso_ini_config_dict = config_dict_for_update_ini(args)
         update_ini_cmd = get_update_ini_cmd(
             args.name, virtuoso_ini_config_dict
         )
@@ -258,7 +253,7 @@ class IndexCommand(QleverCommand):
             args.name, virtuoso_ini_config_dict, update_ini_cmd
         )
 
-        cmd_to_show += f"{start_cmd}\n\n{ld_dir_cmd}\n{run_cmd_to_show}"
+        cmd_to_show = f"{start_cmd}\n\n{ld_dir_cmd}\n{run_cmd_to_show}"
 
         # Show the command line.
         self.show(cmd_to_show, only_show=args.show)
@@ -269,8 +264,17 @@ class IndexCommand(QleverCommand):
         if not util.input_files_exist(args.input_files):
             return False
 
-        # When running natively, check if the binary exists and works.
-        if args.system == "native":
+        if args.system in Containerize.supported_systems():
+            if Containerize().is_running(args.system, args.index_container):
+                log.info(
+                    f"{args.system} container {args.index_container} is still up, "
+                    "which means that data loading is in progress. Please wait..."
+                )
+                return False
+        else:
+            # When running natively, check if the binary exists and works.
+            # We use shutil.which instead of util.binary_exists because
+            # isql --help writes to stderr instead of stdout
             for binary, ps in [
                 (args.index_binary, "index"),
                 (args.server_binary, "server"),
@@ -282,23 +286,8 @@ class IndexCommand(QleverCommand):
                         "set `--system to a container system`"
                     )
                     return False
-        else:
-            if Containerize().is_running(args.system, args.index_container):
-                log.info(
-                    f"{args.system} container {args.index_container} is still up, "
-                    "which means that data loading is in progress. Please wait..."
-                )
-                return False
 
-            # if not image_id or args.rebuild_image:
-            #     build_successful = util.build_image(
-            #         build_cmd, args.system, args.image
-            #     )
-            #     if not build_successful:
-            #         return False
-            # else:
-            #     log.info(f"{args.image} image present on the system\n")
-
+        # Check if previous index exists and user is not trying to extend it
         if Path("virtuoso.db").exists() and not args.extend_existing_index:
             log.error(
                 "virtuoso.db found in current directory "
@@ -311,7 +300,7 @@ class IndexCommand(QleverCommand):
             )
             return False
 
-        if args.system == "native":
+        if args.system not in Containerize.supported_systems():
             if util.is_port_used(args.isql_port):
                 log.error(
                     f"The isql port {args.isql_port} is already used! "
@@ -330,7 +319,7 @@ class IndexCommand(QleverCommand):
             else:
                 log.error(
                     f"{args.name}.virtuoso.ini configfile not found in the current "
-                    f"directory! {virtuoso_ini_help_msg(self.script_name, args, ini_files)}"
+                    f"directory! {virtuoso_ini_help_msg(script_name, args, ini_files)}"
                 )
                 return False
 

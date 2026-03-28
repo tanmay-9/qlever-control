@@ -5,8 +5,8 @@ from qoxigraph.commands.query import QueryCommand as QoxigraphQueryCommand
 
 class QueryCommand(QoxigraphQueryCommand):
     """
-    Send a SPARQL query to the Virtuoso server. Defaults the endpoint
-    to <host_name>:<port>/sparql if not explicitly provided.
+    Send a SPARQL query to the Virtuoso server. Extends the base query
+    command with Virtuoso's /sparql endpoint
     """
 
     def execute(self, args) -> bool:

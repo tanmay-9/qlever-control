@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import time
 from pathlib import Path
 
+from qlever import script_name
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.util import is_server_alive, run_command
+from qlever.util import is_server_alive, run_command, tail_log_file
 from qvirtuoso.commands.index import (
     get_update_ini_cmd,
     log_virtuoso_ini_changes,
@@ -16,6 +16,58 @@ from qvirtuoso.commands.index import (
     virtuoso_ini_help_msg,
 )
 from qvirtuoso.commands.stop import StopCommand
+
+VIRTUOSO_MAX_RESULT_ROWS = 1048576
+
+
+def config_dict_for_update_ini(args) -> dict[str, dict[str, str]]:
+    """
+    Construct the parameter dictionary for all the necessary sections and
+    options of virtuoso.ini that need updating for the start process
+    """
+    config_dict = {
+        "Parameters": {},
+        "HTTPServer": {},
+        "Database": {},
+        "SPARQL": {},
+    }
+    http_port = (
+        str(args.port)
+        if args.system in Containerize.supported_systems()
+        else f"{args.host_name}:{args.port}"
+    )
+
+    try:
+        timeout_s = int(args.timeout[:-1])
+    except ValueError as e:
+        log.warning(f"Invalid timeout value {args.timeout}. Error: {e}")
+        log.info("Setting timeout to 30s!")
+        timeout_s = 30
+
+    # config_dict["Parameters"]["ServerPort"] = str(args.isql_port)
+    config_dict["Parameters"]["MaxQueryMem"] = str(args.max_query_memory)
+    config_dict["HTTPServer"]["ServerPort"] = http_port
+    config_dict["Database"]["ErrorLogFile"] = f"{args.name}.server-log.txt"
+    config_dict["SPARQL"]["MaxQueryCostEstimationTime"] = "-1"
+    config_dict["SPARQL"]["ResultSetMaxRows"] = str(VIRTUOSO_MAX_RESULT_ROWS)
+    config_dict["SPARQL"]["MaxQueryExecutionTime"] = str(timeout_s)
+    return config_dict
+
+
+def wrap_cmd_in_container(args, cmd: str) -> str:
+    """Wrap the server start command in a container with restart policy."""
+    run_subcommand = "run --restart=unless-stopped --group-add virtuoso"
+    if not args.run_in_foreground:
+        run_subcommand += " -d"
+    return Containerize().containerize_command(
+        cmd=cmd,
+        container_system=args.system,
+        run_subcommand=run_subcommand,
+        image_name=args.image,
+        container_name=args.server_container,
+        volumes=[("$(pwd)", "/database")],
+        ports=[(args.port, args.port)],
+    )
 
 
 class StartCommand(QleverCommand):
@@ -27,7 +79,7 @@ class StartCommand(QleverCommand):
     """
 
     def __init__(self):
-        self.script_name = "qvirtuoso"
+        pass
 
     def description(self) -> str:
         return (
@@ -63,74 +115,25 @@ class StartCommand(QleverCommand):
             ),
         )
 
-    def config_dict_for_update_ini(self, args) -> dict[str, dict[str, str]]:
-        """
-        Construct the parameter dictionary for all the necessary sections and
-        options of virtuoso.ini that need updating for the start process
-        """
-        config_dict = {
-            "Parameters": {},
-            "HTTPServer": {},
-            "Database": {},
-            "SPARQL": {},
-        }
-        http_port = (
-            f"{args.host_name}:{args.port}"
-            if args.system == "native"
-            else str(args.port)
-        )
-
-        try:
-            timeout_s = int(args.timeout[:-1])
-        except ValueError as e:
-            log.warning(f"Invalid timeout value {args.timeout}. Error: {e}")
-            log.info("Setting timeout to 30s!")
-            timeout_s = 30
-
-        # config_dict["Parameters"]["ServerPort"] = str(args.isql_port)
-        config_dict["Parameters"]["MaxQueryMem"] = str(args.max_query_memory)
-        config_dict["HTTPServer"]["ServerPort"] = http_port
-        config_dict["Database"]["ErrorLogFile"] = f"{args.name}.server-log.txt"
-        config_dict["SPARQL"]["MaxQueryCostEstimationTime"] = "-1"
-        config_dict["SPARQL"]["ResultSetMaxRows"] = "1048576"
-        config_dict["SPARQL"]["MaxQueryExecutionTime"] = str(timeout_s)
-        return config_dict
-
-    @staticmethod
-    def wrap_cmd_in_container(args, cmd: str) -> str:
-        """Wrap the server start command in a container with restart policy."""
-        run_subcommand = "run --restart=unless-stopped --group-add virtuoso"
-        if not args.run_in_foreground:
-            run_subcommand += " -d"
-        return Containerize().containerize_command(
-            cmd=cmd,
-            container_system=args.system,
-            run_subcommand=run_subcommand,
-            image_name=args.image,
-            container_name=args.server_container,
-            volumes=[("$(pwd)", "/database")],
-            ports=[(args.port, args.port)],
-        )
-
     def execute(self, args) -> bool:
         start_cmd = (
             f"{args.server_binary} -c {args.name}.virtuoso.ini {args.extra_args} "
         )
-        if args.system == "native":
+        if args.system in Containerize.supported_systems():
+            start_cmd = wrap_cmd_in_container(args, f"{start_cmd} -f")
+        else:
             if args.run_in_foreground:
                 start_cmd += " -f"
-        else:
-            start_cmd = self.wrap_cmd_in_container(args, f"{start_cmd} -f")
 
         ini_files = [str(ini) for ini in Path(".").glob("*.ini")]
         if not Path(f"{args.name}.virtuoso.ini").exists():
             self.show(
                 f"{args.name}.virtuoso.ini configfile "
                 "not found in the current directory! "
-                f"{virtuoso_ini_help_msg(self.script_name, args, ini_files)}"
+                f"{virtuoso_ini_help_msg(script_name, args, ini_files)}"
             )
 
-        virtuoso_ini_config_dict = self.config_dict_for_update_ini(args)
+        virtuoso_ini_config_dict = config_dict_for_update_ini(args)
         update_ini_cmd = get_update_ini_cmd(args.name, virtuoso_ini_config_dict)
         log_virtuoso_ini_changes(args.name, virtuoso_ini_config_dict, update_ini_cmd)
         # Show the command line.
@@ -141,7 +144,9 @@ class StartCommand(QleverCommand):
         endpoint_url = f"http://{args.host_name}:{args.port}/sparql"
 
         # When running natively, check if the binary exists and works.
-        if args.system == "native":
+        # We use shutil.which instead of util.binary_exists because
+        # virtuoso-t --help writes to stderr instead of stdout
+        if args.system not in Containerize.supported_systems():
             if not shutil.which(args.server_binary):
                 log.error(
                     f'Running "{args.server_binary}" failed, '
@@ -154,7 +159,7 @@ class StartCommand(QleverCommand):
         if not Path("virtuoso.db").exists():
             log.error(f"No Virtuoso index db for {args.name} found!\n")
             log.info(
-                f"Did you call `{self.script_name} index`? If you did, check "
+                f"Did you call `{script_name} index`? If you did, check "
                 "if virtuoso.db is present in current working directory."
             )
             return False
@@ -162,7 +167,7 @@ class StartCommand(QleverCommand):
         if is_server_alive(url=endpoint_url):
             log.error(f"Virtuoso server already running on {endpoint_url}\n")
             log.info(
-                f"To kill the existing server, use `{self.script_name} stop`"
+                f"To kill the existing server, use `{script_name} stop`"
             )
             return False
 
@@ -177,7 +182,7 @@ class StartCommand(QleverCommand):
                 log.error(
                     f"{args.name}.virtuoso.ini configfile "
                     "not found in the current directory! "
-                    f"{virtuoso_ini_help_msg(self.script_name, args, ini_files)}"
+                    f"{virtuoso_ini_help_msg(script_name, args, ini_files)}"
                 )
                 return False
 
@@ -208,10 +213,9 @@ class StartCommand(QleverCommand):
             )
         log.info("")
         log_file = Path(f"{args.name}.server-log.txt")
-        while not log_file.exists():
-            time.sleep(0.1)
-        log_cmd = f"exec tail -f {log_file}"
-        log_proc = subprocess.Popen(log_cmd, shell=True)
+        log_proc = tail_log_file(log_file)
+        if log_proc is None:
+            return False
         while not is_server_alive(endpoint_url):
             time.sleep(1)
 

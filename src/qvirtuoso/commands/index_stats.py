@@ -105,8 +105,7 @@ class IndexStatsCommand(QleverIndexStatsCommand):
 
     def execute_space(self, args) -> dict[str, tuple[float, str]]:
         """
-        Part of `execute` that returns the space used by different types of
-        index along with the unit.
+        Return the space used by the index (virtuoso.db) along with the unit.
         """
         index_size = get_total_file_size(["virtuoso.db"])
 

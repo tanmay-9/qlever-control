@@ -7,8 +7,8 @@ from qlever.commands.benchmark_queries import (
 
 class BenchmarkQueriesCommand(QleverBenchmarkQueriesCommand):
     """
-    Run benchmark queries against the Virtuoso server. Defaults the endpoint
-    to <host_name>:<port>/sparql if not explicitly provided.
+    Run benchmark queries against the Virtuoso SPARQL endpoint.
+    Overrides the default endpoint to use Virtuoso's /sparql path.
     """
 
     def execute(self, args) -> bool:
