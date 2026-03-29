@@ -213,9 +213,11 @@ class IndexCommand(QleverCommand):
         start_cmd = f"{args.server_binary} -c {args.name}.virtuoso.ini"
 
         isql_cmd = f"{args.index_binary} {args.isql_port} dba dba"
-        ld_dir_cmd = (
-            isql_cmd + f" exec=\"ld_dir('.', '{args.input_files}', '');\""
+        ld_dir_stmts = " ".join(
+            f"ld_dir('.', '{f}', '');"
+            for f in args.input_files.split()
         )
+        ld_dir_cmd = isql_cmd + f' exec="{ld_dir_stmts}"'
 
         # Multiple parallel loaders i.e. rdf_loader_run()
         if num_parallel_loaders > 1:
