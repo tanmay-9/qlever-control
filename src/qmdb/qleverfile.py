@@ -2,7 +2,12 @@ from __future__ import annotations
 
 
 def qleverfile_args(all_args: dict[str, dict[str, tuple]]) -> None:
-    """Define additional mdb specific Qleverfile parameters"""
+    """
+    Define MillenniumDB-specific Qleverfile parameters for the [data],
+    [index], and [server] sections. These include the mdb binary for
+    indexing with buffer sizes and btree permutations, and the mdb server
+    binary with its thread count, timeout, and memory buffer settings.
+    """
 
     def arg(*args, **kwargs):
         return (args, kwargs)
