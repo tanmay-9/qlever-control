@@ -408,7 +408,7 @@ def build_image(build_cmd: str, system: str, image: str) -> bool:
     """
     log.info(f"Building {system} image {image}...")
     try:
-        run_command(build_cmd, show_output=True)
+        run_command(build_cmd, show_output=True, show_stderr=True)
         log.info(
             f"Finished building {system} image {image}! "
             "Continuing with index operation...\n"
