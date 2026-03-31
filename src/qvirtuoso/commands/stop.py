@@ -17,7 +17,3 @@ class StopCommand(QoxigraphStopCommand):
 
     def description(self) -> str:
         return "Stop Virtuoso server for a given dataset or port"
-
-    def execute(self, args) -> bool:
-        args.cmdline_regex = args.cmdline_regex.replace("%%NAME%%", args.name)
-        return super().execute(args)
