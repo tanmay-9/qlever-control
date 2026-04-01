@@ -98,10 +98,9 @@ class IndexCommand(QleverCommand):
         index_cmd += f" --btree-permutations {args.btree_permutations}"
 
         if args.buffer_strings:
-            index_cmd += (
-                f" --buffer-strings {args.buffer_strings}B"
-                f" --buffer-tensors {args.buffer_tensors}B"
-            )
+            index_cmd += f" --buffer-strings {args.buffer_strings}B"
+        if args.buffer_tensors:
+            index_cmd += f" --buffer-tensors {args.buffer_tensors}B"
 
         if args.prefixes:
             index_cmd += f" --prefixes {args.prefixes}"

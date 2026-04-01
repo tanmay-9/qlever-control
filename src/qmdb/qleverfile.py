@@ -90,7 +90,7 @@ def qleverfile_args(all_args: dict[str, dict[str, tuple]]) -> None:
         "--threads",
         type=int,
         default=None,
-        help="Number of worker threads",
+        help="Number of worker threads (default = auto)",
     )
     server_args["strings_dynamic"] = arg(
         "--strings-dynamic",

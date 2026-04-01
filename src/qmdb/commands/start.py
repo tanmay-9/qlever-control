@@ -93,8 +93,10 @@ class StartCommand(QleverCommand):
 
         start_cmd = (
             f"{args.server_binary} server {args.name}_index "
-            f"--port {args.port} --threads {args.threads} --timeout {timeout} "
+            f"--port {args.port} --timeout {timeout} "
         )
+        if args.threads is not None:
+            start_cmd += f"--threads {args.threads} "
         # Append optional MillenniumDB-specific buffer arguments when set.
         for arg in MDB_SPECIFIC_SERVER_ARGS:
             if (arg_value := getattr(args, arg)) is not None and arg_value:
