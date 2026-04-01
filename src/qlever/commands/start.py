@@ -343,6 +343,8 @@ class StartCommand(QleverCommand):
             try:
                 process.wait()
             except KeyboardInterrupt:
+                log.warn("\rCtrl-C pressed, stopping the server ...")
+                log.info("")
                 process.terminate()
                 # Stop the container process manually
                 if args.system in Containerize.supported_systems():
