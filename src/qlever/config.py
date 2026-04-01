@@ -84,7 +84,7 @@ class QleverConfig:
                 action_type = kwargs_copy.get("action", "store")
                 if action_type == "store" and "metavar" not in kwargs_copy:
                     metavar = arg_name.upper()
-                    kwargs_copy["metavar"] = f"(In Qleverfile: [{section}] {metavar})"
+                    kwargs_copy["metavar"] = f"(in Qleverfile: [{section}] {metavar})"
                 # If `qleverfile_config` is given, add info about default
                 # values to the help string.
                 if qleverfile_config is not None:
