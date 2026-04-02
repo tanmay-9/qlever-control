@@ -9,6 +9,7 @@ from pathlib import Path
 
 import psutil
 
+from qlever.containerize import Containerize
 from qlever.log import log
 from qlever.util import format_size, run_command
 
@@ -38,7 +39,7 @@ class MemoryMonitor:
     Monitor memory usage of an index-building process. Works in both
     native mode (via psutil) and container mode (via docker/podman stats).
 
-    Usage as a context manager::
+    Usage as a context manager:
 
         with MemoryMonitor(engine="qlever", dataset="wikidata",
                            cmdline_regex=r"qlever-index"):
@@ -60,7 +61,7 @@ class MemoryMonitor:
         container: str | None = None,
         system: str | None = None,
         interval: float = 1.0,
-        output_dir: str | Path = ".",
+        output_dir: Path = Path.cwd(),
     ):
         self.engine = engine
         self.dataset = dataset
@@ -70,10 +71,10 @@ class MemoryMonitor:
         self.interval = interval
         self.output_dir = Path(output_dir)
         self.peak_rss = 0
-        self.samples: list[tuple[float, int]] = []
+        self.samples = []
         self.stop_event = threading.Event()
-        self.thread: threading.Thread | None = None
-        self.start_time: float = 0
+        self.thread = None
+        self.start_time = 0
 
     def sample_native(self) -> int:
         """
@@ -115,7 +116,9 @@ class MemoryMonitor:
 
     def run_loop(self):
         sample = (
-            self.sample_container if self.container else self.sample_native
+            self.sample_container
+            if self.system in Containerize.supported_systems()
+            else self.sample_native
         )
         while not self.stop_event.is_set():
             rss = sample()

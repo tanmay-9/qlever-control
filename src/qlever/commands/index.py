@@ -327,6 +327,8 @@ class IndexCommand(QleverCommand):
                 engine="qlever",
                 dataset=args.name,
                 cmdline_regex=args.index_binary,
+                container=args.index_container,
+                system=args.system,
             ):
                 run_command(index_cmd, show_output=True)
         except Exception as e:
