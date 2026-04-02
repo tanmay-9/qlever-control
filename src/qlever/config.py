@@ -81,6 +81,10 @@ class QleverConfig:
                                    f"`{section}` not found")
                 args, kwargs = all_qleverfile_args[section][arg_name]
                 kwargs_copy = kwargs.copy()
+                action_type = kwargs_copy.get("action", "store")
+                if action_type == "store" and "metavar" not in kwargs_copy:
+                    metavar = arg_name.upper()
+                    kwargs_copy["metavar"] = f"(in Qleverfile: [{section}] {metavar})"
                 # If `qleverfile_config` is given, add info about default
                 # values to the help string.
                 if qleverfile_config is not None:
@@ -90,10 +94,12 @@ class QleverConfig:
                     if qleverfile_value is not None:
                         kwargs_copy["default"] = qleverfile_value
                         kwargs_copy["required"] = False
+                        escaped_value = qleverfile_value.replace('%', '%%')
                         kwargs_copy["help"] += (f" [default, from Qleverfile:"
-                                                f" {qleverfile_value}]")
+                                                f" {escaped_value}]")
                     else:
-                        kwargs_copy["help"] += f" [default: {default_value}]"
+                        escaped_default = str(default_value).replace('%', '%%')
+                        kwargs_copy["help"] += f" [default: {escaped_default}]"
                 subparser.add_argument(*args, **kwargs_copy)
 
         # Additional arguments that are shared by all commands.
