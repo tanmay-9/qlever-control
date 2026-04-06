@@ -6,6 +6,7 @@ import qlever.util as util
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
+from qlever.memory_monitor import MemoryMonitor
 
 
 def wrap_cmd_in_container(args, cmd: str) -> str:
@@ -170,7 +171,14 @@ class IndexCommand(QleverCommand):
 
         # Run the index command.
         try:
-            util.run_command(index_cmd, show_output=True)
+            with MemoryMonitor(
+                engine="millenniumdb",
+                dataset=args.name,
+                cmdline_regex=args.index_binary,
+                container=args.index_container,
+                system=args.system,
+            ):
+                util.run_command(index_cmd, show_output=True)
         except Exception as e:
             log.error(f"Building the index failed: {e}")
             return False
