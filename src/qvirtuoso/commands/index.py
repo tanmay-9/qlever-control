@@ -9,6 +9,7 @@ from qlever import script_name
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
+from qlever.memory_monitor import MemoryMonitor
 from qvirtuoso.commands.stop import StopCommand
 
 # Virtuoso buffer tuning constants (per GB of free memory)
@@ -16,60 +17,42 @@ NUM_BUFFERS_PER_GB = 85_000
 MAX_DIRTY_BUFFERS_PER_GB = 65_000
 
 
-def get_update_ini_cmd(
-    arg_name: str, config_params: dict[str, dict[str, str]]
-) -> str:
+def update_virtuoso_ini(
+    arg_name: str,
+    config_dict: dict[str, dict[str, tuple[str, bool]]],
+) -> bool:
     """
-    Build a cross-platform sed pipeline that updates key=value pairs in
-    virtuoso.ini. Writes to a temporary file first and then replaces the
-    original to avoid truncation from reading and writing the same file
-    in a single pipeline.
+    Read the virtuoso.ini file, apply the updates from config_dict,
+    and write it back.
     """
-    ini_file = f"{arg_name}.virtuoso.ini"
-    sed_pipeline = f"cat {ini_file}"
-    for section, option_dict in config_params.items():
-        for option, new_value in option_dict.items():
-            sed_pipeline += (
-                f" | {util.get_ini_sed_cmd(section, option, new_value)}"
-            )
-    sed_pipeline += f" > {ini_file}.tmp && mv {ini_file}.tmp {ini_file}"
-    return sed_pipeline
-
-
-def update_virtuoso_ini(arg_name: str, update_ini_cmd: str) -> bool:
-    """
-    Execute the sed pipeline command to update virtuoso.ini options.
-    """
+    ini_path = Path(f"{arg_name}.virtuoso.ini")
     try:
-        log.debug(update_ini_cmd)
-        util.run_command(update_ini_cmd)
+        lines = ini_path.read_text().splitlines()
+        result = util.update_ini_values(lines, config_dict)
+        ini_path.write_text("\n".join(result) + "\n")
         return True
     except Exception as e:
         log.error(
-            f"Couldn't replace the necessary sections in "
-            f"{arg_name}.virtuoso.ini: {e}"
+            f"Couldn't update {arg_name}.virtuoso.ini: {e}"
         )
         return False
 
 
 def log_virtuoso_ini_changes(
     arg_name: str,
-    virtuoso_ini_config_dict: dict[str, dict[str, str]],
-    update_ini_cmd: str,
+    config_dict: dict[str, dict[str, tuple[str, bool]]],
 ):
     """
-    Log the sed command and the section/option values that will be written
-    to virtuoso.ini. Called before execution so the user can review what
-    will change (also visible with --show).
+    Log the section/option values that will be written to virtuoso.ini.
+    Called before execution so the user can review what will change.
     """
     log.info(
         f"Following options of {arg_name}.virtuoso.ini will be updated "
-        "with the values from Qleverfile using the following sed command:"
+        "with the values from Qleverfile:\n"
     )
-    IndexCommand.show(f"\n{update_ini_cmd}")
-    for section, option_dict in virtuoso_ini_config_dict.items():
+    for section, option_dict in config_dict.items():
         log_values = [f"[{section}]"]
-        for option, new_value in option_dict.items():
+        for option, (new_value, _) in option_dict.items():
             log_values.append(f"{option}  =  {new_value}")
         log.info("\n".join(log_values))
         log.info("")
@@ -99,16 +82,14 @@ def virtuoso_ini_help_msg(script_name: str, args, ini_files: list[str]) -> str:
     return ini_msg
 
 
-def config_dict_for_update_ini(args) -> dict[str, dict[str, str]]:
+def config_dict_for_update_ini(
+    args,
+) -> dict[str, dict[str, tuple[str, bool]]]:
     """
     Construct the parameter dictionary for all the necessary sections and
-    options of virtuoso.ini that need updating for the index process
+    options of virtuoso.ini that need updating for the index process.
+    Each value is a (new_value, is_suffix) tuple.
     """
-    config_dict = {
-        "Parameters": {},
-        "HTTPServer": {},
-        "Database": {},
-    }
     http_port = (
         f"{args.host_name}:{args.port}"
         if args.system == "native"
@@ -123,16 +104,19 @@ def config_dict_for_update_ini(args) -> dict[str, dict[str, str]]:
         log.info("Setting free system memory to 4GB")
         free_memory_gb = 4
 
-    config_dict["Parameters"]["ServerPort"] = str(args.isql_port)
-    config_dict["HTTPServer"]["ServerPort"] = http_port
-    config_dict["Database"]["ErrorLogFile"] = f"{args.name}.index-log.txt"
-    config_dict["Parameters"]["NumberOfBuffers"] = str(
-        NUM_BUFFERS_PER_GB * free_memory_gb
-    )
-    config_dict["Parameters"]["MaxDirtyBuffers"] = str(
-        MAX_DIRTY_BUFFERS_PER_GB * free_memory_gb
-    )
-    return config_dict
+    return {
+        "Parameters": {
+            "ServerPort": (str(args.isql_port), False),
+            "NumberOfBuffers": (str(NUM_BUFFERS_PER_GB * free_memory_gb), False),
+            "MaxDirtyBuffers": (str(MAX_DIRTY_BUFFERS_PER_GB * free_memory_gb), False),
+        },
+        "HTTPServer": {
+            "ServerPort": (http_port, False),
+        },
+        "Database": {
+            "ErrorLogFile": (f"{args.name}.index-log.txt", False),
+        },
+    }
 
 
 def wrap_cmd_in_container(
@@ -248,12 +232,7 @@ class IndexCommand(QleverCommand):
             )
 
         virtuoso_ini_config_dict = config_dict_for_update_ini(args)
-        update_ini_cmd = get_update_ini_cmd(
-            args.name, virtuoso_ini_config_dict
-        )
-        log_virtuoso_ini_changes(
-            args.name, virtuoso_ini_config_dict, update_ini_cmd
-        )
+        log_virtuoso_ini_changes(args.name, virtuoso_ini_config_dict)
 
         cmd_to_show = f"{start_cmd}\n\n{ld_dir_cmd}\n{run_cmd_to_show}"
 
@@ -325,8 +304,18 @@ class IndexCommand(QleverCommand):
                 )
                 return False
 
-        if not update_virtuoso_ini(args.name, update_ini_cmd):
+        if not update_virtuoso_ini(args.name, virtuoso_ini_config_dict):
             return False
+
+        # Helper to stop the server/container after a failure so it does
+        # not block the next indexing attempt.
+        def stop_server():
+            try:
+                args.server_container = args.index_container
+                args.cmdline_regex = StopCommand.DEFAULT_REGEX
+                StopCommand().execute(args)
+            except Exception as stop_err:
+                log.warning(f"Failed to stop Virtuoso server: {stop_err}")
 
         # Run the index command.
         try:
@@ -350,6 +339,7 @@ class IndexCommand(QleverCommand):
             ):
                 if time.time() - start_time > timeout:
                     log.error("Timed out waiting for Virtuoso to be online.")
+                    stop_server()
                     return False
                 if log_proc is None and log_file.exists():
                     log_proc = util.run_command(
@@ -360,17 +350,23 @@ class IndexCommand(QleverCommand):
                 time.sleep(1)
             # Execute the ld_dir and rdf_loader_run commands
             log.info("Virtuoso server online! Loading data into Virtuoso...\n")
-            util.run_command(ld_dir_cmd)
-            util.run_command(run_cmd)
+            with MemoryMonitor(
+                engine="virtuoso",
+                dataset=args.name,
+                cmdline_regex=args.index_binary,
+                container=args.index_container,
+                system=args.system,
+            ):
+                util.run_command(ld_dir_cmd)
+                util.run_command(run_cmd)
             if log_proc is not None:
                 log_proc.terminate()
             log.info("")
             log.info("Data loading has finished!")
 
-            # Construct args for Stop Command to stop running virtuoso-t process
-            args.server_container = args.index_container
-            args.cmdline_regex = StopCommand.DEFAULT_REGEX
-            return StopCommand().execute(args)
+            stop_server()
+            return True
         except Exception as e:
             log.error(f"Building the index failed: {e}")
+            stop_server()
             return False

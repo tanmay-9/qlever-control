@@ -10,7 +10,6 @@ from qlever.containerize import Containerize
 from qlever.log import log
 from qlever.util import is_server_alive, run_command, tail_log_file
 from qvirtuoso.commands.index import (
-    get_update_ini_cmd,
     log_virtuoso_ini_changes,
     update_virtuoso_ini,
     virtuoso_ini_help_msg,
@@ -20,17 +19,14 @@ from qvirtuoso.commands.stop import StopCommand
 VIRTUOSO_MAX_RESULT_ROWS = 1048576
 
 
-def config_dict_for_update_ini(args) -> dict[str, dict[str, str]]:
+def config_dict_for_update_ini(
+    args,
+) -> dict[str, dict[str, tuple[str, bool]]]:
     """
     Construct the parameter dictionary for all the necessary sections and
-    options of virtuoso.ini that need updating for the start process
+    options of virtuoso.ini that need updating for the start process.
+    Each value is a (new_value, is_suffix) tuple.
     """
-    config_dict = {
-        "Parameters": {},
-        "HTTPServer": {},
-        "Database": {},
-        "SPARQL": {},
-    }
     http_port = (
         str(args.port)
         if args.system in Containerize.supported_systems()
@@ -44,14 +40,22 @@ def config_dict_for_update_ini(args) -> dict[str, dict[str, str]]:
         log.info("Setting timeout to 30s!")
         timeout_s = 30
 
-    # config_dict["Parameters"]["ServerPort"] = str(args.isql_port)
-    config_dict["Parameters"]["MaxQueryMem"] = str(args.max_query_memory)
-    config_dict["HTTPServer"]["ServerPort"] = http_port
-    config_dict["Database"]["ErrorLogFile"] = f"{args.name}.server-log.txt"
-    config_dict["SPARQL"]["MaxQueryCostEstimationTime"] = "-1"
-    config_dict["SPARQL"]["ResultSetMaxRows"] = str(VIRTUOSO_MAX_RESULT_ROWS)
-    config_dict["SPARQL"]["MaxQueryExecutionTime"] = str(timeout_s)
-    return config_dict
+    return {
+        "Parameters": {
+            "MaxQueryMem": (str(args.max_query_memory), False),
+        },
+        "HTTPServer": {
+            "ServerPort": (http_port, False),
+        },
+        "Database": {
+            "ErrorLogFile": (f"{args.name}.server-log.txt", False),
+        },
+        "SPARQL": {
+            "MaxQueryCostEstimationTime": ("-1", False),
+            "ResultSetMaxRows": (str(VIRTUOSO_MAX_RESULT_ROWS), False),
+            "MaxQueryExecutionTime": (str(timeout_s), False),
+        },
+    }
 
 
 def wrap_cmd_in_container(args, cmd: str) -> str:
@@ -134,8 +138,7 @@ class StartCommand(QleverCommand):
             )
 
         virtuoso_ini_config_dict = config_dict_for_update_ini(args)
-        update_ini_cmd = get_update_ini_cmd(args.name, virtuoso_ini_config_dict)
-        log_virtuoso_ini_changes(args.name, virtuoso_ini_config_dict, update_ini_cmd)
+        log_virtuoso_ini_changes(args.name, virtuoso_ini_config_dict)
         # Show the command line.
         self.show(start_cmd, only_show=args.show)
         if args.show:
@@ -186,7 +189,7 @@ class StartCommand(QleverCommand):
                 )
                 return False
 
-        if not update_virtuoso_ini(args.name, update_ini_cmd):
+        if not update_virtuoso_ini(args.name, virtuoso_ini_config_dict):
             return False
 
         try:
