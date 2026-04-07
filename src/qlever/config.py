@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import socket
 import traceback
 from importlib.metadata import version
 from pathlib import Path
@@ -10,6 +11,7 @@ import argcomplete
 from termcolor import colored
 
 from qlever import command_objects, engine_name, script_name
+from qlever.containerize import Containerize
 from qlever.log import log, log_levels
 from qlever.qleverfile import Qleverfile
 
@@ -225,6 +227,27 @@ class QleverConfig:
                             "Qleverfile. You have to specify all required "
                             "arguments on the command line. This is possible, "
                             "but not recommended.")
+
+        # Warn if the host name resolves to IPv6 first and the system is
+        # a container runtime. Container port forwarding (podman/docker in
+        # rootless mode) typically only forwards on IPv4, so curl will
+        # connect via IPv6 and fail.
+        host_name = getattr(args, "host_name", None)
+        system = getattr(args, "system", "native")
+        if host_name and system in Containerize.supported_systems():
+            try:
+                addrinfo = socket.getaddrinfo(host_name, None)
+                if addrinfo and addrinfo[0][0] == socket.AF_INET6:
+                    log.warning(
+                        f"Your system resolves '{host_name}' to an "
+                        "IPv6 address first, which may cause connection "
+                        "failures with containerized servers. If you face "
+                        "connection issues, consider setting HOST_NAME to an "
+                        "IPv4 address in your Qleverfile or using "
+                        "--host-name 127.0.0.1"
+                    )
+            except Exception:
+                pass
 
         # Warn if the old binary names are still being used.
         if "IndexBuilderMain" in getattr(args, "index_binary", ""):
