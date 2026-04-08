@@ -402,6 +402,15 @@ def input_files_exist(input_files: str) -> bool:
     return True
 
 
+def selinux_enforcing() -> bool:
+    """Check if SELinux is in enforcing mode by reading the kernel interface."""
+    try:
+        with open("/sys/fs/selinux/enforce") as f:
+            return f.read().strip() == "1"
+    except (FileNotFoundError, PermissionError):
+        return False
+
+
 def build_image(build_cmd: str, system: str, image: str) -> bool:
     """
     Build a container image using the build command, container system and

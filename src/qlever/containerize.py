@@ -12,15 +12,6 @@ from qlever.log import log
 from qlever.util import get_random_string, run_command
 
 
-def _selinux_enforcing() -> bool:
-    """Check if SELinux is in enforcing mode by reading the kernel interface."""
-    try:
-        with open("/sys/fs/selinux/enforce") as f:
-            return f.read().strip() == "1"
-    except (FileNotFoundError, PermissionError):
-        return False
-
-
 class ContainerizeException(Exception):
     pass
 
@@ -62,15 +53,6 @@ class Containerize:
             return ContainerizeException(
                 f'Invalid container system "{container_system}"'
                 f" (must be one of {Containerize.supported_systems()})"
-            )
-
-        # Warn if SELinux is enforcing but not disabled for the container.
-        if _selinux_enforcing() and not disable_selinux:
-            log.warning(
-                "SELinux is enforcing, which may cause permission "
-                "errors with bind-mounted files. If you experience "
-                "issues, set DISABLE_SELINUX = yes in your "
-                "Qleverfile or use --disable-selinux yes"
             )
 
         # Set user and group ids. This is important so that the files created
