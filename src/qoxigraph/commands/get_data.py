@@ -1,1 +1,1 @@
-../../qlever/commands/get_data.py
+from qlever.commands.get_data import GetDataCommand  # noqa
