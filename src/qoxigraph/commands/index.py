@@ -8,6 +8,7 @@ import qlever.util as util
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
+from qlever.memory_monitor import MemoryMonitor
 
 
 def wrap_cmd_in_container(args, cmd: str, ulimit: int | None = None) -> str:
@@ -142,30 +143,51 @@ class IndexCommand(QleverCommand):
         # file. Oxigraph's progress output is unreliable (may not print a
         # final summary line when loading multiple files), so we measure
         # the time externally.
+        #
+        # The MemoryMonitor wraps both the load and optimize steps so
+        # that peak RSS is tracked across the entire indexing workflow.
         log_file_name = f"{args.name}.index-log.txt"
-        try:
-            start_time = time.time()
-            util.run_command(index_cmd, show_output=True, show_stderr=True)
-            elapsed_s = time.time() - start_time
-            with open(log_file_name, "a") as f:
-                f.write(f"Total elapsed time: {elapsed_s:.0f}s\n")
-        except Exception as e:
-            log.error(f"Building the index failed: {e}")
-            return False
-
-        if optimize_cmd:
+        with MemoryMonitor(
+            engine="qoxigraph",
+            dataset=args.name,
+            cmdline_regex=args.index_binary,
+            container=args.index_container,
+            system=args.system,
+        ):
             try:
-                log.info("")
-                log.info("Optimizing read-only database storage:")
-                self.show(optimize_cmd)
+                load_start = time.time()
                 util.run_command(
-                    optimize_cmd, show_output=True, show_stderr=True
+                    index_cmd, show_output=True, show_stderr=True
                 )
+                load_s = time.time() - load_start
             except Exception as e:
-                log.error(f"Optimizing the database storage failed: {e}")
-                log.info(
-                    f"Please run manually: "
-                    f"{args.index_binary} optimize -l {args.name}_index/"
-                )
+                log.error(f"Building the index failed: {e}")
+                return False
+
+            optimize_s = 0.0
+            if optimize_cmd:
+                try:
+                    log.info("")
+                    log.info("Optimizing read-only database storage:")
+                    self.show(optimize_cmd)
+                    optimize_start = time.time()
+                    util.run_command(
+                        optimize_cmd, show_output=True, show_stderr=True
+                    )
+                    optimize_s = time.time() - optimize_start
+                except Exception as e:
+                    log.error(f"Optimizing the database storage failed: {e}")
+                    log.info(
+                        f"Please run manually: "
+                        f"{args.index_binary} optimize -l {args.name}_index/"
+                    )
+
+        with open(log_file_name, "a") as f:
+            f.write(f"Load time: {load_s:.0f}s\n")
+            if optimize_cmd:
+                f.write(f"Optimize time: {optimize_s:.0f}s\n")
+            f.write(
+                f"Total elapsed time: {load_s + optimize_s:.0f}s\n"
+            )
 
         return True

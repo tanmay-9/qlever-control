@@ -25,9 +25,9 @@ class IndexStatsCommand(QleverIndexStatsCommand):
     def execute_time(
         self, args, log_file_name: str
     ) -> dict[str, tuple[float | None, str]]:
-        """Parse total index build time from the index log file."""
+        """Parse index build times from the index log file."""
         try:
-            # Read the last few lines of the log file (the total time is
+            # Read the last few lines of the log file (the times are
             # always near the end).
             log_text = util.run_command(
                 f"tail {log_file_name}", return_output=True
@@ -36,25 +36,40 @@ class IndexStatsCommand(QleverIndexStatsCommand):
             log.error(f"Problem reading index log file {log_file_name}: {e}")
             return {}
 
-        stats = {}
-        # Pattern: "Total elapsed time: <number>s" (total time, always last)
-        total_pattern = re.compile(r"Total elapsed time: ([\d,]+)s$")
+        patterns = {
+            "Load time": re.compile(r"Load time: ([\d,]+)s$"),
+            "Optimize time": re.compile(r"Optimize time: ([\d,]+)s$"),
+            "TOTAL time": re.compile(r"Total elapsed time: ([\d,]+)s$"),
+        }
 
+        raw_seconds = {}
         for line in log_text.splitlines():
-            match = total_pattern.search(line)
-            if not match:
-                continue
+            for name, pattern in patterns.items():
+                match = pattern.search(line)
+                if match:
+                    try:
+                        raw_seconds[name] = float(
+                            match.group(1).replace(",", "")
+                        )
+                    except (ValueError, TypeError):
+                        pass
 
-            try:
-                value_s = float(match.group(1).replace(",", ""))
-            except (ValueError, TypeError):
-                continue
+        if not raw_seconds:
+            return {}
 
-            time_unit = get_time_unit(args.time_unit, value_s)
-            unit_factor = get_time_unit_factor(time_unit)
+        # Pick a time unit based on the total time.
+        total_s = raw_seconds.get("TOTAL time")
+        time_unit = get_time_unit(args.time_unit, total_s)
+        unit_factor = get_time_unit_factor(time_unit)
 
-            stats["TOTAL time"] = (value_s / unit_factor, time_unit)
-            break
+        stats = {}
+        for name in ["Load time", "Optimize time", "TOTAL time"]:
+            if name in raw_seconds:
+                stats[name] = (raw_seconds[name] / unit_factor, time_unit)
+
+        # If there was no optimize step, Load and TOTAL are identical
+        if "Optimize time" not in stats:
+            stats.pop("Load time", None)
 
         return stats
 
