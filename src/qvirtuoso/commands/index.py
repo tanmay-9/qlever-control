@@ -351,7 +351,6 @@ class IndexCommand(QleverCommand):
             # Execute the ld_dir and rdf_loader_run commands
             log.info("Virtuoso server online! Loading data into Virtuoso...\n")
             with MemoryMonitor(
-                engine="virtuoso",
                 dataset=args.name,
                 cmdline_regex=args.index_binary,
                 container=args.index_container,
