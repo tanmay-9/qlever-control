@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 import shutil
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import qlever.util as util
@@ -15,6 +17,20 @@ from qvirtuoso.commands.stop import StopCommand
 # Virtuoso buffer tuning constants (per GB of free memory)
 NUM_BUFFERS_PER_GB = 85_000
 MAX_DIRTY_BUFFERS_PER_GB = 65_000
+
+
+def find_virtuoso_pid(lck_path: Path) -> int | None:
+    """
+    Read virtuoso.lck and return the PID of the running Virtuoso
+    server. The file is written by virtuoso-t on startup and contains
+    a ``VIRT_PID=<pid>`` entry.
+    """
+    try:
+        content = lck_path.read_text()
+    except OSError:
+        return None
+    match = re.search(r"VIRT_PID\s*=\s*(\d+)", content)
+    return int(match.group(1)) if match else None
 
 
 def update_virtuoso_ini(
@@ -350,12 +366,32 @@ class IndexCommand(QleverCommand):
                 time.sleep(1)
             # Execute the ld_dir and rdf_loader_run commands
             log.info("Virtuoso server online! Loading data into Virtuoso...\n")
-            with MemoryMonitor(
-                dataset=args.name,
-                cmdline_regex=args.index_binary,
-                container=args.index_container,
-                system=args.system,
-            ):
+
+            # Resolve virtuoso-t's PID so the memory monitor can follow
+            # the detached server process in native mode.
+            virtuoso_pid = None
+            if args.system not in Containerize.supported_systems():
+                virtuoso_pid = find_virtuoso_pid(Path("virtuoso.lck"))
+                if virtuoso_pid is None:
+                    log.warning(
+                        "Could not resolve virtuoso-t PID from "
+                        "virtuoso.lck; memory monitoring will be skipped"
+                    )
+
+            monitor_ctx = (
+                MemoryMonitor(
+                    dataset=args.name,
+                    cmdline_regex=args.server_binary,
+                    container=args.index_container,
+                    system=args.system,
+                    parent_pid=virtuoso_pid,
+                )
+                if args.system in Containerize.supported_systems()
+                or virtuoso_pid is not None
+                else nullcontext()
+            )
+
+            with monitor_ctx:
                 util.run_command(ld_dir_cmd)
                 util.run_command(run_cmd)
             if log_proc is not None:
