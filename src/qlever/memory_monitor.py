@@ -66,6 +66,7 @@ class MemoryMonitor:
         system: str | None = None,
         interval: float = 1.0,
         output_dir: Path = Path.cwd(),
+        parent_pid: int | None = None,
     ):
         """
         Args:
@@ -80,6 +81,11 @@ class MemoryMonitor:
             system:         Container runtime ("docker" or "podman").
             interval:       Seconds between samples (default 1.0).
             output_dir:     Directory for the JSON memory log file.
+            parent_pid:     PID whose descendants are searched for the
+                            index process. Defaults to the current
+                            Python process. Useful when the target is a
+                            daemonized process that re-parents away
+                            from us (e.g. virtuoso-t).
         """
         self.engine = engine_name
         self.dataset = dataset
@@ -88,6 +94,7 @@ class MemoryMonitor:
         self.system = system
         self.interval = interval
         self.output_dir = Path(output_dir)
+        self.parent_pid = parent_pid
         self.peak_rss = 0
         self.samples = []
         self.stop_event = threading.Event()
@@ -96,24 +103,32 @@ class MemoryMonitor:
 
     def sample_native(self) -> int:
         """
-        Find the index process among our children by matching its
-        command line, then sum RSS of that process and all its
-        descendants.
+        Find the index process among ``self.parent_pid`` and its
+        descendants by matching its command line, then sum RSS of that
+        process and all of its descendants. Returns 0 if the target
+        has disappeared.
         """
-        me = psutil.Process()
-        for child in me.children(recursive=True):
+        try:
+            parent = psutil.Process(self.parent_pid)
+            candidates = [parent] + parent.children(recursive=True)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return 0
+        for proc in candidates:
             try:
-                cmdline = " ".join(child.cmdline())
+                cmdline = " ".join(proc.cmdline())
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
             if re.search(self.cmdline_regex, cmdline):
-                rss = child.memory_info().rss
-                for grandchild in child.children(recursive=True):
-                    try:
-                        rss += grandchild.memory_info().rss
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-                return rss
+                try:
+                    rss = proc.memory_info().rss
+                    for descendant in proc.children(recursive=True):
+                        try:
+                            rss += descendant.memory_info().rss
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+                    return rss
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    return 0
         return 0
 
     def sample_container(self) -> int:
@@ -155,10 +170,7 @@ class MemoryMonitor:
         Write all collected samples and metadata to a JSON file at
         ``<output_dir>/<engine>.<dataset>.memory-log.json``.
         """
-        path = (
-            self.output_dir
-            / f"{self.engine.lower()}.{self.dataset.lower()}.memory-log.json"
-        )
+        path = self.output_dir / f"{self.dataset}.memory-log.json"
         data = {
             "engine": self.engine,
             "dataset": self.dataset,
