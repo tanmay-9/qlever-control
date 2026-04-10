@@ -9,6 +9,7 @@ from pathlib import Path
 
 import psutil
 
+from qlever import engine_name
 from qlever.containerize import Containerize
 from qlever.log import log
 from qlever.util import format_size, run_command
@@ -16,15 +17,20 @@ from qlever.util import format_size, run_command
 
 def parse_container_mem_usage(usage: str) -> int:
     """
-    Parse a memory usage string from `docker stats` / `podman stats`
-    like "4.2GiB", "150MiB", "512KiB" into bytes.
+    Parse a memory usage string from ``docker stats`` or ``podman stats``
+    into bytes.  Docker reports binary units (GiB, MiB) while Podman
+    reports decimal units (GB, MB).
     """
     usage = usage.strip()
     units = {
         "TIB": 1024**4,
+        "TB": 1000**4,
         "GIB": 1024**3,
+        "GB": 1000**3,
         "MIB": 1024**2,
+        "MB": 1000**2,
         "KIB": 1024,
+        "KB": 1000,
         "B": 1,
     }
     for suffix, multiplier in units.items():
@@ -41,13 +47,12 @@ class MemoryMonitor:
 
     Usage as a context manager:
 
-        with MemoryMonitor(engine="qlever", dataset="wikidata",
-                           cmdline_regex=r"qlever-index"):
+        with MemoryMonitor(dataset="wikidata", cmdline_regex="qlever-index"):
             run_command(cmd, show_output=True)
 
         # For container mode:
-        with MemoryMonitor(engine="qlever", dataset="wikidata",
-                           cmdline_regex=r"qlever-index",
+        with MemoryMonitor(dataset="wikidata",
+                           cmdline_regex="qlever-index",
                            container="qlever.index.wikidata",
                            system="docker"):
             run_command(cmd, show_output=True)
@@ -55,7 +60,6 @@ class MemoryMonitor:
 
     def __init__(
         self,
-        engine: str,
         dataset: str,
         cmdline_regex: str,
         container: str | None = None,
@@ -63,7 +67,21 @@ class MemoryMonitor:
         interval: float = 1.0,
         output_dir: Path = Path.cwd(),
     ):
-        self.engine = engine
+        """
+        Args:
+            dataset:        Name of the dataset being indexed.
+            cmdline_regex:  Regex matched against child process command
+                            lines to identify the index process (native
+                            mode only).
+            container:      Container name to query for memory stats.
+                            When set together with ``system``, sampling
+                            uses ``docker/podman stats`` instead of
+                            psutil.
+            system:         Container runtime ("docker" or "podman").
+            interval:       Seconds between samples (default 1.0).
+            output_dir:     Directory for the JSON memory log file.
+        """
+        self.engine = engine_name
         self.dataset = dataset
         self.cmdline_regex = cmdline_regex
         self.container = container
@@ -115,6 +133,11 @@ class MemoryMonitor:
             return 0
 
     def run_loop(self):
+        """
+        Polling loop that runs on a background thread. Selects the
+        appropriate sampling method (native or container) and collects
+        (elapsed_seconds, rss_bytes) tuples until the stop event is set.
+        """
         sample = (
             self.sample_container
             if self.system in Containerize.supported_systems()
@@ -128,9 +151,11 @@ class MemoryMonitor:
             self.stop_event.wait(self.interval)
 
     def save(self):
-        path = (
-            self.output_dir / f"{self.engine}.{self.dataset}.memory-log.json"
-        )
+        """
+        Write all collected samples and metadata to a JSON file at
+        ``<output_dir>/<engine>.<dataset>.memory-log.json``.
+        """
+        path = self.output_dir / f"{self.dataset}.memory-log.json"
         data = {
             "engine": self.engine,
             "dataset": self.dataset,
@@ -151,12 +176,14 @@ class MemoryMonitor:
             json.dump(data, f, indent=2)
 
     def __enter__(self):
+        """Start the background sampling thread."""
         self.start_time = time.monotonic()
         self.thread = threading.Thread(target=self.run_loop, daemon=True)
         self.thread.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Stop sampling, persist results, and log peak memory usage."""
         self.stop_event.set()
         self.thread.join()
         self.save()
