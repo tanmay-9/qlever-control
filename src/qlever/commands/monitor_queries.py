@@ -16,6 +16,7 @@ from qlever.log import log
 from qlever.util import pretty_printed_query
 
 MAX_CONSECUTIVE_FAILURES = 5
+SLOW_LOG_HEADER = "logged_at\tevent\tqid\tduration_s\tsparql\n"
 
 
 def fetch_queries(monitor_queries_cmd: str) -> dict | None:
@@ -42,9 +43,14 @@ def server_supports_duration(queries_dict: dict) -> bool:
 def append_slow_log(
     path: str, event: str, qid: str, duration_s: int, sparql: str = ""
 ) -> None:
-    """Append a single TSV-formatted slow-query event to the warning log."""
+    """Append a single TSV-formatted slow-query event to the warning log.
+
+    Writes a column header if the file is empty or newly created.
+    """
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(path, "a") as f:
+        if f.tell() == 0:
+            f.write(SLOW_LOG_HEADER)
         f.write(f"{ts}\t{event}\t{qid}\t{duration_s}\t{sparql}\n")
 
 
@@ -97,6 +103,8 @@ def compact_slow_log(path: str) -> None:
     try:
         with open(path) as f:
             for line in f:
+                if line == SLOW_LOG_HEADER:
+                    continue
                 parts = line.rstrip("\n").split("\t", maxsplit=4)
                 if len(parts) < 5:
                     continue
@@ -114,6 +122,7 @@ def compact_slow_log(path: str) -> None:
     if not starts:
         return
     with open(path, "w") as f:
+        f.write("logged_at\tstatus\tqid\tduration_s\tsparql\n")
         for qid, (logged_at, start_duration, sparql) in starts.items():
             duration = finals.get(qid, start_duration)
             status = "finished" if qid in finals else "unfinished"
@@ -215,7 +224,7 @@ class MonitorQueriesCommand(QleverCommand):
             type=str,
             default=None,
             help="File to append slow-query warnings to"
-            " (default = {name}.slow-queries.log)",
+            " (default = {name}.slow-queries.tsv)",
         )
 
     def execute(self, args) -> bool:
@@ -248,7 +257,7 @@ class MonitorQueriesCommand(QleverCommand):
                 return False
             args.warn_after = max(1.0, timeout_s - 10)
         if args.warning_log is None:
-            args.warning_log = f"{args.name}.slow-queries.log"
+            args.warning_log = f"{args.name}.slow-queries.tsv"
 
         console = Console()
 
