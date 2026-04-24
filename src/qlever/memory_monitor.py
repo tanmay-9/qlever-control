@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import ctypes
-import ctypes.util
-import json
+import re
 import sys
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime
 from pathlib import Path
 
@@ -18,40 +16,23 @@ from qlever.log import log
 from qlever.util import format_size, run_command
 
 IS_LINUX = sys.platform.startswith("linux")
-IS_MACOS = sys.platform == "darwin"
-
-libc = ctypes.CDLL(ctypes.util.find_library("c")) if IS_MACOS else None
-
-
-def phys_footprint(pid: int) -> int:
-    """
-    Return `ri_phys_footprint` from `proc_pid_rusage` on macOS, the
-    closest available analog to Linux PSS. Returns 0 on any other
-    platform or on error.
-    """
-    if IS_MACOS:
-        buf = (ctypes.c_uint64 * 24)()
-        if libc.proc_pid_rusage(pid, 2, buf) == 0:
-            return buf[9]
-    return 0
 
 
 @dataclass
-class MemorySample:
+class Sample:
     """
-    One memory measurement. `rss` is always populated (native or
-    container). `uss` is populated in native mode on both Linux and
-    macOS. `pss` and `swap` are Linux-only; `phys_footprint` is
-    macOS-only. Unavailable fields stay `None` and are dropped from
-    the JSON output.
+    One resource measurement. `rss` and `uss` are populated in native
+    mode on both Linux and macOS; container mode populates `rss` and
+    `cpu_percent`. `swap` is Linux-only, `uss` is native-only.
+    Unavailable fields stay `None` and are written as empty columns
+    in the TSV.
     """
 
     elapsed_s: float = 0.0
-    rss: int = 0
-    pss: int | None = None
+    rss: int | None = None
     uss: int | None = None
     swap: int | None = None
-    phys_footprint: int | None = None
+    cpu_percent: float | None = None
 
 
 def parse_container_mem_usage(usage: str) -> int:
@@ -77,6 +58,266 @@ def parse_container_mem_usage(usage: str) -> int:
             number = float(usage[: len(usage) - len(suffix)])
             return int(number * multiplier)
     return 0
+
+
+def format_row(sample: Sample) -> str:
+    """Format a Sample as a TSV row; None fields become empty columns."""
+    values = [getattr(sample, f.name) for f in fields(sample)]
+    return "\t".join("" if v is None else str(v) for v in values) + "\n"
+
+
+def compute_phase_boundaries(
+    log_path: Path,
+) -> tuple[datetime | None, dict[str, tuple[float, float]]]:
+    """
+    Parse the index build log for phase timestamps. Returns
+    (overall_begin, phases), where `overall_begin` is the datetime
+    of the first "INFO: Processing" line, and `phases` maps each
+    phase name to (start_s, end_s) elapsed seconds relative to
+    `overall_begin`. Returns (None, {}) if the log is missing or
+    the first phase cannot be located. Phases with incomplete
+    timestamps are skipped.
+    """
+    try:
+        lines = log_path.read_text().splitlines()
+    except OSError:
+        return None, {}
+
+    ts_regex = r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"
+    ts_format = "%Y-%m-%d %H:%M:%S"
+
+    def find(pattern, start=0):
+        for j in range(start, len(lines)):
+            if re.search(pattern, lines[j]):
+                m = re.match(ts_regex, lines[j])
+                if m:
+                    try:
+                        return datetime.strptime(m.group(1), ts_format), j + 1
+                    except ValueError:
+                        continue
+        return None, len(lines)
+
+    overall_begin, idx = find(r"INFO:\s*Processing")
+    if overall_begin is None:
+        return None, {}
+
+    merge_begin, idx = find(r"INFO:\s*Merging partial vocab", idx)
+    convert_begin, idx = find(r"INFO:\s*Converting triples", idx)
+
+    perms = []
+    cursor = idx
+    while True:
+        perm_begin, cursor = find(
+            r"INFO:\s*Creating permutations ([A-Z]+ and [A-Z]+)", cursor
+        )
+        if perm_begin is None:
+            break
+        m = re.search(
+            r"Creating permutations ([A-Z]+ and [A-Z]+)", lines[cursor - 1]
+        )
+        name = (
+            m.group(1).replace(" and ", " & ") if m else f"#{len(perms) + 1}"
+        )
+        perms.append((perm_begin, name))
+
+    normal_end, idx = find(r"INFO:\s*Index build completed", idx)
+    text_begin, _ = find(r"INFO:\s*Adding text index")
+    text_end, _ = find(r"INFO:\s*Text index build comp")
+
+    def rel(ts):
+        return (ts - overall_begin).total_seconds() if ts else None
+
+    phases = {}
+
+    def add(name, start, end):
+        s, e = rel(start), rel(end)
+        if s is not None and e is not None:
+            phases[name] = (s, e)
+
+    add("Parse input", overall_begin, merge_begin)
+    add("Build vocabularies", merge_begin, convert_begin)
+    if perms:
+        add("Convert to global IDs", convert_begin, perms[0][0])
+        perm_names = set()
+        for k, (perm_begin, name) in enumerate(perms):
+            perm_end = perms[k + 1][0] if k + 1 < len(perms) else normal_end
+            if name in perm_names:
+                suffix = 2
+                while f"{name} ({suffix})" in perm_names:
+                    suffix += 1
+                name = f"{name} ({suffix})"
+            perm_names.add(name)
+            add(f"Permutation {name}", perm_begin, perm_end)
+    else:
+        add("Convert to global IDs", convert_begin, normal_end)
+    add("Text index", text_begin, text_end)
+
+    return overall_begin, phases
+
+
+def read_tsv(path: Path) -> dict:
+    """
+    Read a usage-log TSV into a dict of numpy arrays keyed by column
+    name. Empty cells become NaN so matplotlib can skip them.
+    """
+    import csv
+
+    import numpy as np
+
+    cols = {}
+    with open(path) as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        if reader.fieldnames is None:
+            return {}
+        for name in reader.fieldnames:
+            cols[name] = []
+        for row in reader:
+            for name in reader.fieldnames:
+                v = row[name]
+                cols[name].append(float(v) if v else np.nan)
+    return {name: np.array(vals) for name, vals in cols.items()}
+
+
+def pick_time_unit(max_elapsed_s: float) -> tuple[str, float]:
+    """Pick an axis label and divisor for the X axis based on build duration."""
+    if max_elapsed_s < 200:
+        return "Elapsed (s)", 1.0
+    if max_elapsed_s < 3600:
+        return "Elapsed (min)", 60.0
+    return "Elapsed (h)", 3600.0
+
+
+def annotate_peak(
+    ax, x, y_gib, label: str, color: str, offset: tuple[int, int]
+):
+    """Draw an arrow pointing at the peak of a GiB-valued series."""
+    import numpy as np
+
+    if np.all(np.isnan(y_gib)):
+        return
+    idx = int(np.nanargmax(y_gib))
+    peak_bytes = int(y_gib[idx] * 1024**3)
+    ax.annotate(
+        f"peak {label}: {format_size(peak_bytes)}",
+        xy=(x[idx], y_gib[idx]),
+        xytext=offset,
+        textcoords="offset points",
+        arrowprops=dict(arrowstyle="->", color=color),
+        fontsize=9,
+        color=color,
+    )
+
+
+def plot_usage(
+    tsv_path: Path,
+    log_path: Path,
+    wall_start: datetime,
+    out_path: Path,
+    title: str,
+) -> None:
+    """
+    Read the usage TSV and index log, render a dual-axis plot of
+    memory and CPU over time with phase bands from the index log,
+    and save it to `out_path`. Silently returns if the TSV is empty
+    or unreadable.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    data = read_tsv(tsv_path)
+    if not data or len(data.get("elapsed_s", [])) == 0:
+        return
+
+    overall_begin, phases = compute_phase_boundaries(log_path)
+    if overall_begin is not None:
+        offset_s = (overall_begin - wall_start).total_seconds()
+        mask = data["elapsed_s"] >= offset_s
+        data = {k: v[mask] for k, v in data.items()}
+        data["elapsed_s"] = data["elapsed_s"] - offset_s
+
+    elapsed_s = data["elapsed_s"]
+    if len(elapsed_s) == 0:
+        return
+
+    x_label, x_factor = pick_time_unit(float(elapsed_s[-1]))
+    x = elapsed_s / x_factor
+    gib = 1024**3
+    rss_gib = data["rss"] / gib
+    swap_gib = data["swap"] / gib
+    cores = psutil.cpu_count() or 1
+    cpu_norm = data["cpu_percent"] / cores
+
+    fig, ax_mem = plt.subplots(figsize=(12, 6), constrained_layout=True)
+    ax_cpu = ax_mem.twinx()
+
+    band_colors = plt.colormaps["Pastel1"].colors
+    for i, (name, (start_s, end_s)) in enumerate(phases.items()):
+        ax_mem.axvspan(
+            start_s / x_factor,
+            end_s / x_factor,
+            color=band_colors[i % len(band_colors)],
+            alpha=0.4,
+            zorder=0,
+        )
+        mid = (start_s + end_s) / 2 / x_factor
+        ax_mem.text(
+            mid,
+            0.98,
+            name,
+            transform=ax_mem.get_xaxis_transform(),
+            ha="center",
+            va="top",
+            rotation=90,
+            fontsize=8,
+            alpha=0.7,
+        )
+
+    ax_mem.plot(x, rss_gib, color="#cc0000", label="RSS", linewidth=1.5)
+    ax_mem.plot(
+        x,
+        swap_gib,
+        color="#996600",
+        linestyle=":",
+        label="Swap",
+        linewidth=1.2,
+    )
+    ax_mem.set_xlabel(x_label)
+    ax_mem.set_ylabel("RSS Memory (GiB)")
+    ax_mem.grid(True, linestyle="--", alpha=0.3)
+
+    if not np.all(np.isnan(cpu_norm)):
+        ax_cpu.plot(
+            x,
+            cpu_norm,
+            color="#1f77b4",
+            label="CPU",
+            linewidth=1.2,
+            alpha=0.7,
+        )
+    ax_cpu.set_ylabel(f"CPU (% of {cores} cores)")
+    ax_cpu.set_ylim(0, 100)
+
+    max_rss = float(np.nanmax(rss_gib))
+    ax_mem.set_ylim(0, max_rss * 1.3)
+    ax_mem.set_xlim(0, float(x[-1]) * 1.03)
+
+    annotate_peak(ax_mem, x, rss_gib, "RSS", "#cc0000", (-25, 20))
+
+    lines_mem, labels_mem = ax_mem.get_legend_handles_labels()
+    lines_cpu, labels_cpu = ax_cpu.get_legend_handles_labels()
+    ax_mem.legend(
+        lines_mem + lines_cpu,
+        labels_mem + labels_cpu,
+        loc="center left",
+        bbox_to_anchor=(1.08, 0.5),
+    )
+
+    ax_mem.set_title(title)
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
 
 
 class MemoryMonitor:
@@ -120,7 +361,7 @@ class MemoryMonitor:
                             psutil.
             system:         Container runtime ("docker" or "podman").
             interval:       Seconds between samples (default 1.0).
-            output_dir:     Directory for the JSON memory log file.
+            output_dir:     Directory for the TSV usage log file.
             parent_pid:     PID whose descendants are searched for the
                             index process. Defaults to the current
                             Python process. Useful when the target is a
@@ -136,22 +377,21 @@ class MemoryMonitor:
         self.output_dir = Path(output_dir)
         self.parent_pid = parent_pid
         self.peak_rss = 0
-        self.samples = []
+        self.peak_uss = 0
+        self.worker_proc = None
+        self.log_file = None
         self.stop_event = threading.Event()
         self.thread = None
         self.start_time = 0
+        self.wall_start = None
 
-    def sample_native(self) -> MemorySample:
-        """
-        Read memory usage of the index worker found among
-        `self.parent_pid` and its descendants. The worker is the
-        process whose `Path(argv[0]).name` equals `self.binary`.
-        """
+    def find_worker(self) -> psutil.Process | None:
+        """Find the index worker among descendants of `parent_pid`."""
         try:
             root = psutil.Process(self.parent_pid)
             candidates = [root] + root.children(recursive=True)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return MemorySample()
+            return None
         target = Path(self.binary).name
         for proc in candidates:
             try:
@@ -159,90 +399,113 @@ class MemoryMonitor:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
             if cmdline and Path(cmdline[0]).name == target:
-                try:
-                    info = proc.memory_full_info()
-                    sample = MemorySample(rss=info.rss, uss=info.uss)
-                    if IS_LINUX:
-                        sample.pss = info.pss
-                        sample.swap = info.swap
-                    elif IS_MACOS:
-                        sample.phys_footprint = phys_footprint(proc.pid)
-                    return sample
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    return MemorySample()
-        return MemorySample()
+                return proc
+        return None
 
-    def sample_container(self) -> MemorySample:
+    def sample_native(self) -> Sample:
         """
-        Query the container runtime for the memory usage of the
-        index container. Only `rss` is populated; cgroup stats do
-        not expose a PSS/USS equivalent per process.
+        Read memory + CPU usage of the index worker. Caches the
+        psutil.Process so `cpu_percent` returns a meaningful delta
+        between samples rather than always 0 on a fresh Process.
+        """
+        if self.worker_proc is None or not self.worker_proc.is_running():
+            self.worker_proc = self.find_worker()
+            if self.worker_proc is None:
+                return Sample()
+            try:
+                self.worker_proc.cpu_percent(interval=None)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                self.worker_proc = None
+                return Sample()
+        try:
+            mem = self.worker_proc.memory_full_info()
+            cpu_pct = self.worker_proc.cpu_percent(interval=None)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            self.worker_proc = None
+            return Sample()
+        sample = Sample(rss=mem.rss, uss=mem.uss, cpu_percent=cpu_pct)
+        if IS_LINUX:
+            sample.swap = mem.swap
+        return sample
+
+    def sample_container(self) -> Sample:
+        """
+        Query the container runtime for memory + CPU usage of the
+        index container. `rss` and `cpu_percent` are populated;
+        cgroup stats do not expose USS or swap per process.
         """
         try:
             output = run_command(
                 f"{self.system} stats --no-stream"
-                f" --format '{{{{.MemUsage}}}}' {self.container}",
+                f" --format '{{{{.MemUsage}}}}\t{{{{.CPUPerc}}}}'"
+                f" {self.container}",
                 return_output=True,
             )
-            usage = output.strip().split("/")[0].strip()
-            return MemorySample(rss=parse_container_mem_usage(usage))
+            mem_str, cpu_str = output.strip().split("\t")
+            usage = mem_str.split("/")[0].strip()
+            cpu_pct = float(cpu_str.strip().rstrip("%"))
+            return Sample(
+                rss=parse_container_mem_usage(usage),
+                cpu_percent=cpu_pct,
+            )
         except Exception:
-            return MemorySample()
+            return Sample()
 
     def run_loop(self):
         """
-        Polling loop that runs on a background thread. Selects the
-        appropriate sampling method (native or container) and collects
-        `MemorySample` entries until the stop event is set.
+        Polling loop on a background thread. Samples resource usage
+        and appends one TSV row per iteration until stop_event is set.
         """
-        sample = (
+        take_sample = (
             self.sample_container
             if self.system in Containerize.supported_systems()
             else self.sample_native
         )
         while not self.stop_event.is_set():
-            ms = sample()
-            ms.elapsed_s = round(time.monotonic() - self.start_time, 1)
-            self.peak_rss = max(self.peak_rss, ms.rss)
-            self.samples.append(ms)
+            sample = take_sample()
+            sample.elapsed_s = round(time.monotonic() - self.start_time, 1)
+            if sample.rss is not None:
+                self.peak_rss = max(self.peak_rss, sample.rss)
+            if sample.uss is not None:
+                self.peak_uss = max(self.peak_uss, sample.uss)
+            self.log_file.write(format_row(sample))
+            self.log_file.flush()
             self.stop_event.wait(self.interval)
 
-    def save(self):
-        """
-        Write all collected samples and metadata to a JSON file at
-        `<output_dir>/<dataset>.memory-log.json`. Fields that are
-        unavailable on the current platform (e.g. pss on macOS,
-        phys_footprint on Linux) are omitted from each sample.
-        """
-        path = self.output_dir / f"{self.dataset}.memory-log.json"
-        data = {
-            "engine": self.engine,
-            "dataset": self.dataset,
-            "start_time": datetime.fromtimestamp(
-                time.time() - (time.monotonic() - self.start_time)
-            ).isoformat(timespec="seconds"),
-            "peak_rss_bytes": self.peak_rss,
-            "peak_rss_human": format_size(self.peak_rss),
-            "elapsed_s": (self.samples[-1].elapsed_s if self.samples else 0),
-            "samples": [
-                {k: v for k, v in asdict(s).items() if v is not None}
-                for s in self.samples
-            ],
-        }
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
-
     def __enter__(self):
-        """Start the background sampling thread."""
+        """Open the TSV log, write the header, start sampling thread."""
+        path = self.output_dir / f"{self.dataset}.usage-log.tsv"
+        self.log_file = open(path, "w")
+        header = "\t".join(f.name for f in fields(Sample)) + "\n"
+        self.log_file.write(header)
+        self.log_file.flush()
+        self.wall_start = datetime.now()
         self.start_time = time.monotonic()
         self.thread = threading.Thread(target=self.run_loop, daemon=True)
         self.thread.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Stop sampling, persist results, and log peak memory usage."""
+        """Stop sampling, close the log, render the plot, log peaks."""
         self.stop_event.set()
         self.thread.join()
-        self.save()
-        log.info(f"Peak memory usage: {format_size(self.peak_rss)}")
+        self.log_file.close()
+        log.info(
+            f"Peak memory: RSS {format_size(self.peak_rss)},"
+            f" USS {format_size(self.peak_uss)}"
+        )
+        tsv_path = self.output_dir / f"{self.dataset}.usage-log.tsv"
+        log_path = self.output_dir / f"{self.dataset}.index-log.txt"
+        plot_path = self.output_dir / f"{self.dataset}.usage-log.png"
+        try:
+            plot_usage(
+                tsv_path=tsv_path,
+                log_path=log_path,
+                wall_start=self.wall_start,
+                out_path=plot_path,
+                title=f"{self.engine} index build: {self.dataset}",
+            )
+            log.info(f"Usage plot saved to {plot_path}")
+        except Exception as e:
+            log.warning(f"Could not render usage plot: {e}")
         return False
