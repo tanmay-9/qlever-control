@@ -13,9 +13,15 @@ import psutil
 from qlever import engine_name
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.util import format_size, run_command
+from qlever.util import run_command
 
 IS_LINUX = sys.platform.startswith("linux")
+GB = 10**9
+
+
+def format_gb(bytes_val: float) -> str:
+    """Format a byte count as decimal GB with two decimals."""
+    return f"{bytes_val / GB:.2f} GB"
 
 
 @dataclass
@@ -101,6 +107,17 @@ def compute_phase_boundaries(
     if overall_begin is None:
         return None, {}
 
+    precise = re.match(
+        r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)", lines[idx - 1]
+    )
+    if precise:
+        try:
+            overall_begin = datetime.strptime(
+                precise.group(1), "%Y-%m-%d %H:%M:%S.%f"
+            )
+        except ValueError:
+            pass
+
     merge_begin, idx = find(r"INFO:\s*Merging partial vocab", idx)
     convert_begin, idx = find(r"INFO:\s*Converting triples", idx)
 
@@ -155,6 +172,52 @@ def compute_phase_boundaries(
     return overall_begin, phases
 
 
+def parse_git_hash(log_path: Path) -> str | None:
+    """Return the git hash printed on the first line of a QLever index log."""
+    try:
+        first_line = log_path.read_text().splitlines()[0]
+    except (OSError, IndexError):
+        return None
+    m = re.search(r"git hash ([0-9a-f]+)", first_line)
+    return m.group(1) if m else None
+
+
+def parse_qleverfile(qleverfile_path: Path) -> dict[str, str]:
+    """Read STXXL_MEMORY and num-triples-per-batch from a QLeverfile."""
+    try:
+        text = qleverfile_path.read_text()
+    except OSError:
+        return {}
+    info = {}
+    stxxl = re.search(r"^\s*STXXL_MEMORY\s*=\s*(\S+)", text, re.MULTILINE)
+    if stxxl:
+        info["stxxl"] = stxxl.group(1)
+    batch = re.search(r'"num-triples-per-batch"\s*:\s*(\d+)', text)
+    if batch:
+        n = int(batch.group(1))
+        if n >= 1_000_000:
+            info["batch"] = f"{n / 1_000_000:g}M"
+        elif n >= 1_000:
+            info["batch"] = f"{n / 1_000:g}K"
+        else:
+            info["batch"] = str(n)
+    return info
+
+
+def build_info_line(log_path: Path, qleverfile_path: Path) -> str | None:
+    """Assemble a 'batch | git | STXXL' line from the index log and QLeverfile."""
+    qf = parse_qleverfile(qleverfile_path)
+    git_hash = parse_git_hash(log_path)
+    parts = []
+    if "batch" in qf:
+        parts.append(f"batch = {qf['batch']} triples")
+    if git_hash:
+        parts.append(f"git = {git_hash}")
+    if "stxxl" in qf:
+        parts.append(f"STXXL = {qf['stxxl']}")
+    return "   |   ".join(parts) if parts else None
+
+
 def read_tsv(path: Path) -> dict:
     """
     Read a usage-log TSV into a dict of numpy arrays keyed by column
@@ -188,18 +251,17 @@ def pick_time_unit(max_elapsed_s: float) -> tuple[str, float]:
 
 
 def annotate_peak(
-    ax, x, y_gib, label: str, color: str, offset: tuple[int, int]
+    ax, x, y_gb, label: str, color: str, offset: tuple[int, int]
 ):
-    """Draw an arrow pointing at the peak of a GiB-valued series."""
+    """Draw an arrow pointing at the peak of a GB-valued series."""
     import numpy as np
 
-    if np.all(np.isnan(y_gib)):
+    if np.all(np.isnan(y_gb)):
         return
-    idx = int(np.nanargmax(y_gib))
-    peak_bytes = int(y_gib[idx] * 1024**3)
+    idx = int(np.nanargmax(y_gb))
     ax.annotate(
-        f"peak {label}: {format_size(peak_bytes)}",
-        xy=(x[idx], y_gib[idx]),
+        f"peak {label}: {y_gb[idx]:.2f} GB",
+        xy=(x[idx], y_gb[idx]),
         xytext=offset,
         textcoords="offset points",
         arrowprops=dict(arrowstyle="->", color=color),
@@ -211,6 +273,7 @@ def annotate_peak(
 def plot_usage(
     tsv_path: Path,
     log_path: Path,
+    qleverfile_path: Path,
     wall_start: datetime,
     out_path: Path,
     title: str,
@@ -244,9 +307,8 @@ def plot_usage(
 
     x_label, x_factor = pick_time_unit(float(elapsed_s[-1]))
     x = elapsed_s / x_factor
-    gib = 1024**3
-    rss_gib = data["rss"] / gib
-    swap_gib = data["swap"] / gib
+    rss_gb = data["rss"] / GB
+    swap_gb = data["swap"] / GB
     cores = psutil.cpu_count() or 1
     cpu_norm = data["cpu_percent"] / cores
 
@@ -254,7 +316,12 @@ def plot_usage(
     ax_cpu = ax_mem.twinx()
 
     band_colors = plt.colormaps["Pastel1"].colors
+    total_s = float(elapsed_s[-1]) if len(elapsed_s) else 0.0
+    min_label_s = total_s * 0.02
     for i, (name, (start_s, end_s)) in enumerate(phases.items()):
+        band_s = end_s - start_s
+        if band_s <= 0:
+            continue
         ax_mem.axvspan(
             start_s / x_factor,
             end_s / x_factor,
@@ -262,6 +329,8 @@ def plot_usage(
             alpha=0.4,
             zorder=0,
         )
+        if band_s < min_label_s:
+            continue
         mid = (start_s + end_s) / 2 / x_factor
         ax_mem.text(
             mid,
@@ -275,17 +344,17 @@ def plot_usage(
             alpha=0.7,
         )
 
-    ax_mem.plot(x, rss_gib, color="#cc0000", label="RSS", linewidth=1.5)
+    ax_mem.plot(x, rss_gb, color="#cc0000", label="RSS", linewidth=1.5)
     ax_mem.plot(
         x,
-        swap_gib,
+        swap_gb,
         color="#996600",
         linestyle=":",
         label="Swap",
         linewidth=1.2,
     )
     ax_mem.set_xlabel(x_label)
-    ax_mem.set_ylabel("RSS Memory (GiB)")
+    ax_mem.set_ylabel("RSS Memory (GB)")
     ax_mem.grid(True, linestyle="--", alpha=0.3)
 
     if not np.all(np.isnan(cpu_norm)):
@@ -300,11 +369,12 @@ def plot_usage(
     ax_cpu.set_ylabel(f"CPU (% of {cores} cores)")
     ax_cpu.set_ylim(0, 100)
 
-    max_rss = float(np.nanmax(rss_gib))
-    ax_mem.set_ylim(0, max_rss * 1.3)
-    ax_mem.set_xlim(0, float(x[-1]) * 1.03)
+    max_rss = float(np.nanmax(rss_gb))
+    x_max = float(x[-1])
+    ax_mem.set_ylim(-max_rss * 0.04, max_rss * 1.4)
+    ax_mem.set_xlim(-x_max * 0.02, x_max * 1.06)
 
-    annotate_peak(ax_mem, x, rss_gib, "RSS", "#cc0000", (-25, 20))
+    annotate_peak(ax_mem, x, rss_gb, "RSS", "#cc0000", (-25, 20))
 
     lines_mem, labels_mem = ax_mem.get_legend_handles_labels()
     lines_cpu, labels_cpu = ax_cpu.get_legend_handles_labels()
@@ -315,7 +385,8 @@ def plot_usage(
         bbox_to_anchor=(1.08, 0.5),
     )
 
-    ax_mem.set_title(title)
+    info_line = build_info_line(log_path, qleverfile_path)
+    ax_mem.set_title(f"{title}\n{info_line}" if info_line else title)
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
 
@@ -491,16 +562,18 @@ class MemoryMonitor:
         self.thread.join()
         self.log_file.close()
         log.info(
-            f"Peak memory: RSS {format_size(self.peak_rss)},"
-            f" USS {format_size(self.peak_uss)}"
+            f"Peak memory: RSS {format_gb(self.peak_rss)},"
+            f" USS {format_gb(self.peak_uss)}"
         )
         tsv_path = self.output_dir / f"{self.dataset}.usage-log.tsv"
         log_path = self.output_dir / f"{self.dataset}.index-log.txt"
+        qleverfile_path = Path.cwd() / "Qleverfile"
         plot_path = self.output_dir / f"{self.dataset}.usage-log.png"
         try:
             plot_usage(
                 tsv_path=tsv_path,
                 log_path=log_path,
+                qleverfile_path=qleverfile_path,
                 wall_start=self.wall_start,
                 out_path=plot_path,
                 title=f"{self.engine} index build: {self.dataset}",
