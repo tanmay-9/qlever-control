@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import sys
 import threading
 import time
 from dataclasses import dataclass, fields
@@ -15,7 +14,6 @@ from qlever.containerize import Containerize
 from qlever.log import log
 from qlever.util import run_command
 
-IS_LINUX = sys.platform.startswith("linux")
 GB = 10**9
 
 
@@ -27,17 +25,14 @@ def format_gb(bytes_val: float) -> str:
 @dataclass
 class Sample:
     """
-    One resource measurement. `rss` and `uss` are populated in native
-    mode on both Linux and macOS; container mode populates `rss` and
-    `cpu_percent`. `swap` is Linux-only, `uss` is native-only.
-    Unavailable fields stay `None` and are written as empty columns
-    in the TSV.
+    One resource measurement. `rss` is populated in native mode (via
+    psutil.Process.memory_info — cheap `/proc/<pid>/statm` read) and
+    in container mode (via docker/podman stats). Unavailable fields
+    stay `None` and are written as empty columns in the TSV.
     """
 
     elapsed_s: float = 0.0
     rss: int | None = None
-    uss: int | None = None
-    swap: int | None = None
     cpu_percent: float | None = None
 
 
@@ -241,6 +236,40 @@ def read_tsv(path: Path) -> dict:
     return {name: np.array(vals) for name, vals in cols.items()}
 
 
+def downsample_for_plot(data: dict, max_points: int) -> dict:
+    """
+    Bucket consecutive samples and reduce each bucket to one point so
+    the plot stays readable on long builds. RSS, swap and CPU are
+    reduced with `nanmax` so memory peaks survive; `elapsed_s` uses
+    `nanmin` so the x-axis stays monotone. Returns `data` unchanged
+    if it already has at most `max_points` rows. Note: `peak_rss`
+    is tracked separately at full sampling resolution, so this
+    aggregation only affects the rendered plot.
+    """
+    import warnings
+
+    import numpy as np
+
+    n = len(data["elapsed_s"])
+    if n <= max_points:
+        return data
+
+    bucket = -(-n // max_points)
+    n_buckets = -(-n // bucket)
+    pad = n_buckets * bucket - n
+
+    out = {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        for name, arr in data.items():
+            if pad:
+                arr = np.concatenate([arr, np.full(pad, np.nan)])
+            reshaped = arr.reshape(n_buckets, bucket)
+            reducer = np.nanmin if name == "elapsed_s" else np.nanmax
+            out[name] = reducer(reshaped, axis=1)
+    return out
+
+
 def pick_time_unit(max_elapsed_s: float) -> tuple[str, float]:
     """Pick an axis label and divisor for the X axis based on build duration."""
     if max_elapsed_s < 200:
@@ -277,12 +306,15 @@ def plot_usage(
     wall_start: datetime,
     out_path: Path,
     title: str,
+    plot_max_points: int = 500,
 ) -> None:
     """
     Read the usage TSV and index log, render a dual-axis plot of
     memory and CPU over time with phase bands from the index log,
     and save it to `out_path`. Silently returns if the TSV is empty
-    or unreadable.
+    or unreadable. `plot_max_points` caps the number of dots drawn
+    per series; raw samples are bucketed and reduced with max so
+    memory peaks survive the downsampling.
     """
     import matplotlib
 
@@ -305,12 +337,14 @@ def plot_usage(
     if len(elapsed_s) == 0:
         return
 
+    data = downsample_for_plot(data, plot_max_points)
+    elapsed_s = data["elapsed_s"]
+
     x_label, x_factor = pick_time_unit(float(elapsed_s[-1]))
     x = elapsed_s / x_factor
     rss_gb = data["rss"] / GB
-    swap_gb = data["swap"] / GB
     cores = psutil.cpu_count() or 1
-    cpu_norm = data["cpu_percent"] / cores
+    cpu_cores = data["cpu_percent"] / 100.0
 
     fig, ax_mem = plt.subplots(figsize=(12, 6), constrained_layout=True)
     ax_cpu = ax_mem.twinx()
@@ -345,29 +379,21 @@ def plot_usage(
         )
 
     ax_mem.plot(x, rss_gb, color="#cc0000", label="RSS", linewidth=1.5)
-    ax_mem.plot(
-        x,
-        swap_gb,
-        color="#996600",
-        linestyle=":",
-        label="Swap",
-        linewidth=1.2,
-    )
     ax_mem.set_xlabel(x_label)
     ax_mem.set_ylabel("RSS Memory (GB)")
     ax_mem.grid(True, linestyle="--", alpha=0.3)
 
-    if not np.all(np.isnan(cpu_norm)):
+    if not np.all(np.isnan(cpu_cores)):
         ax_cpu.plot(
             x,
-            cpu_norm,
+            cpu_cores,
             color="#1f77b4",
             label="CPU",
             linewidth=1.2,
             alpha=0.7,
         )
-    ax_cpu.set_ylabel(f"CPU (% of {cores} cores)")
-    ax_cpu.set_ylim(0, 100)
+    ax_cpu.set_ylabel(f"CPU (cores, {cores} available)")
+    ax_cpu.set_ylim(0, cores)
 
     max_rss = float(np.nanmax(rss_gb))
     x_max = float(x[-1])
@@ -391,21 +417,22 @@ def plot_usage(
     plt.close(fig)
 
 
-class MemoryMonitor:
+class ResourceMonitor:
     """
-    Monitor memory usage of an index-building process. Works in both
-    native mode (via psutil) and container mode (via docker/podman stats).
+    Monitor resource usage (memory, swap, CPU) of an index-building
+    process. Works in both native mode (via psutil) and container mode
+    (via docker/podman stats).
 
     Usage as a context manager:
 
-        with MemoryMonitor(dataset="wikidata", binary="qlever-index"):
+        with ResourceMonitor(dataset="wikidata", binary="qlever-index"):
             run_command(cmd, show_output=True)
 
         # For container mode:
-        with MemoryMonitor(dataset="wikidata",
-                           binary="qlever-index",
-                           container="qlever.index.wikidata",
-                           system="docker"):
+        with ResourceMonitor(dataset="wikidata",
+                             binary="qlever-index",
+                             container="qlever.index.wikidata",
+                             system="docker"):
             run_command(cmd, show_output=True)
     """
 
@@ -448,7 +475,6 @@ class MemoryMonitor:
         self.output_dir = Path(output_dir)
         self.parent_pid = parent_pid
         self.peak_rss = 0
-        self.peak_uss = 0
         self.worker_proc = None
         self.log_file = None
         self.stop_event = threading.Event()
@@ -475,7 +501,7 @@ class MemoryMonitor:
 
     def sample_native(self) -> Sample:
         """
-        Read memory + CPU usage of the index worker. Caches the
+        Read RSS + CPU usage of the index worker. Caches the
         psutil.Process so `cpu_percent` returns a meaningful delta
         between samples rather than always 0 on a fresh Process.
         """
@@ -489,21 +515,17 @@ class MemoryMonitor:
                 self.worker_proc = None
                 return Sample()
         try:
-            mem = self.worker_proc.memory_full_info()
+            mem = self.worker_proc.memory_info()
             cpu_pct = self.worker_proc.cpu_percent(interval=None)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             self.worker_proc = None
             return Sample()
-        sample = Sample(rss=mem.rss, uss=mem.uss, cpu_percent=cpu_pct)
-        if IS_LINUX:
-            sample.swap = mem.swap
-        return sample
+        return Sample(rss=mem.rss, cpu_percent=cpu_pct)
 
     def sample_container(self) -> Sample:
         """
         Query the container runtime for memory + CPU usage of the
-        index container. `rss` and `cpu_percent` are populated;
-        cgroup stats do not expose USS or swap per process.
+        index container.
         """
         try:
             output = run_command(
@@ -537,8 +559,6 @@ class MemoryMonitor:
             sample.elapsed_s = round(time.monotonic() - self.start_time, 1)
             if sample.rss is not None:
                 self.peak_rss = max(self.peak_rss, sample.rss)
-            if sample.uss is not None:
-                self.peak_uss = max(self.peak_uss, sample.uss)
             self.log_file.write(format_row(sample))
             self.log_file.flush()
             self.stop_event.wait(self.interval)
@@ -561,10 +581,7 @@ class MemoryMonitor:
         self.stop_event.set()
         self.thread.join()
         self.log_file.close()
-        log.info(
-            f"Peak memory: RSS {format_gb(self.peak_rss)},"
-            f" USS {format_gb(self.peak_uss)}"
-        )
+        log.info(f"Peak memory: RSS {format_gb(self.peak_rss)}")
         tsv_path = self.output_dir / f"{self.dataset}.usage-log.tsv"
         log_path = self.output_dir / f"{self.dataset}.index-log.txt"
         qleverfile_path = Path.cwd() / "Qleverfile"

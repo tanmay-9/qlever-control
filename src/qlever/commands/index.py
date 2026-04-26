@@ -8,7 +8,7 @@ import shlex
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.memory_monitor import MemoryMonitor
+from qlever.resource_monitor import ResourceMonitor
 from qlever.util import (
     binary_exists,
     get_existing_index_files,
@@ -52,6 +52,7 @@ class IndexCommand(QleverCommand):
                 "text_index",
                 "stxxl_memory",
                 "parser_buffer_size",
+                "resource_monitor_interval",
             ],
             "runtime": ["system", "image", "index_container"],
         }
@@ -323,11 +324,12 @@ class IndexCommand(QleverCommand):
 
         # Run the index command.
         try:
-            with MemoryMonitor(
+            with ResourceMonitor(
                 dataset=args.name,
                 binary=args.index_binary,
                 container=args.index_container,
                 system=args.system,
+                interval=args.resource_monitor_interval,
             ):
                 run_command(index_cmd, show_output=True)
         except Exception as e:

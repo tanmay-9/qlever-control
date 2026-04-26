@@ -252,6 +252,13 @@ class Qleverfile:
             help="File with the documents for the text index (one line "
             "per document, format: `id\tdocument text`)",
         )
+        index_args["resource_monitor_interval"] = arg(
+            "--resource-monitor-interval",
+            type=float,
+            default=1.0,
+            help="Seconds between resource-usage samples (memory, swap, "
+            "CPU) collected during the index build (default: 1.0)",
+        )
 
         server_args["server_binary"] = arg(
             "--server-binary",
