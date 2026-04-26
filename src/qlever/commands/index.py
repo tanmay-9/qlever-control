@@ -8,7 +8,7 @@ import shlex
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.resource_monitor import ResourceMonitor
+from qlever.resource_monitor import ResourceMonitor, render_usage_plot
 from qlever.util import (
     binary_exists,
     get_existing_index_files,
@@ -53,6 +53,7 @@ class IndexCommand(QleverCommand):
                 "stxxl_memory",
                 "parser_buffer_size",
                 "resource_monitor_interval",
+                "resource_monitor_plot_max_points",
             ],
             "runtime": ["system", "image", "index_container"],
         }
@@ -63,6 +64,15 @@ class IndexCommand(QleverCommand):
             action="store_true",
             default=False,
             help="Overwrite an existing index, think twice before using this",
+        )
+        subparser.add_argument(
+            "--replot-resource-usage",
+            action="store_true",
+            default=False,
+            help="Skip the index build and re-render the resource-usage "
+            "plot from the existing <name>.usage-log.tsv. Useful for "
+            "tweaking plot settings (e.g. --resource-monitor-plot-max-points) "
+            "without re-running the build",
         )
 
     # Exception for invalid JSON.
@@ -183,6 +193,18 @@ class IndexCommand(QleverCommand):
         return " ".join(input_options)
 
     def execute(self, args) -> bool:
+        # Re-render the resource-usage plot from an existing TSV without
+        # rebuilding the index.
+        if args.replot_resource_usage:
+            plot_path = render_usage_plot(
+                args.name,
+                plot_max_points=args.resource_monitor_plot_max_points,
+            )
+            if plot_path is None:
+                return False
+            log.info(f"Usage plot saved to {plot_path}")
+            return True
+
         # The mandatory part of the command line (specifying the input, the
         # basename of the index, and the settings file). There are two ways
         # to specify the input: via a single stream or via multiple streams.
@@ -330,6 +352,7 @@ class IndexCommand(QleverCommand):
                 container=args.index_container,
                 system=args.system,
                 interval=args.resource_monitor_interval,
+                plot_max_points=args.resource_monitor_plot_max_points,
             ):
                 run_command(index_cmd, show_output=True)
         except Exception as e:

@@ -102,17 +102,6 @@ def compute_phase_boundaries(
     if overall_begin is None:
         return None, {}
 
-    precise = re.match(
-        r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+)", lines[idx - 1]
-    )
-    if precise:
-        try:
-            overall_begin = datetime.strptime(
-                precise.group(1), "%Y-%m-%d %H:%M:%S.%f"
-            )
-        except ValueError:
-            pass
-
     merge_begin, idx = find(r"INFO:\s*Merging partial vocab", idx)
     convert_begin, idx = find(r"INFO:\s*Converting triples", idx)
 
@@ -303,7 +292,6 @@ def plot_usage(
     tsv_path: Path,
     log_path: Path,
     qleverfile_path: Path,
-    wall_start: datetime,
     out_path: Path,
     title: str,
     plot_max_points: int = 500,
@@ -326,12 +314,13 @@ def plot_usage(
     if not data or len(data.get("elapsed_s", [])) == 0:
         return
 
-    overall_begin, phases = compute_phase_boundaries(log_path)
-    if overall_begin is not None:
-        offset_s = (overall_begin - wall_start).total_seconds()
-        mask = data["elapsed_s"] >= offset_s
-        data = {k: v[mask] for k, v in data.items()}
-        data["elapsed_s"] = data["elapsed_s"] - offset_s
+    valid = np.where(~np.isnan(data["rss"]))[0]
+    if len(valid) == 0:
+        return
+    data = {k: v[valid[0] :] for k, v in data.items()}
+    data["elapsed_s"] = data["elapsed_s"] - data["elapsed_s"][0]
+
+    _, phases = compute_phase_boundaries(log_path)
 
     elapsed_s = data["elapsed_s"]
     if len(elapsed_s) == 0:
@@ -417,6 +406,39 @@ def plot_usage(
     plt.close(fig)
 
 
+def render_usage_plot(
+    dataset: str,
+    output_dir: Path = Path.cwd(),
+    plot_max_points: int = 500,
+) -> Path | None:
+    """
+    Render `<dataset>.usage-log.png` from `<dataset>.usage-log.tsv`
+    in `output_dir`. Returns the plot path on success, None if the
+    TSV is missing or the plot could not be rendered.
+    """
+    output_dir = Path(output_dir)
+    tsv_path = output_dir / f"{dataset}.usage-log.tsv"
+    log_path = output_dir / f"{dataset}.index-log.txt"
+    qleverfile_path = Path.cwd() / "Qleverfile"
+    plot_path = output_dir / f"{dataset}.usage-log.png"
+    if not tsv_path.exists():
+        log.warning(f"Resource-usage TSV not found: {tsv_path}")
+        return None
+    try:
+        plot_usage(
+            tsv_path=tsv_path,
+            log_path=log_path,
+            qleverfile_path=qleverfile_path,
+            out_path=plot_path,
+            title=f"{engine_name} index build: {dataset}",
+            plot_max_points=plot_max_points,
+        )
+        return plot_path
+    except Exception as e:
+        log.warning(f"Could not render usage plot: {e}")
+        return None
+
+
 class ResourceMonitor:
     """
     Monitor resource usage (memory, swap, CPU) of an index-building
@@ -443,28 +465,32 @@ class ResourceMonitor:
         container: str | None = None,
         system: str | None = None,
         interval: float = 1.0,
+        plot_max_points: int = 500,
         output_dir: Path = Path.cwd(),
         parent_pid: int | None = None,
     ):
         """
         Args:
-            dataset:        Name of the dataset being indexed.
-            binary:         Name of the index executable. Its basename
-                            is matched against `Path(argv[0]).name` of
-                            each process in the descendant tree to find
-                            the worker (native mode only).
-            container:      Container name to query for memory stats.
-                            When set together with `system`, sampling
-                            uses `docker/podman stats` instead of
-                            psutil.
-            system:         Container runtime ("docker" or "podman").
-            interval:       Seconds between samples (default 1.0).
-            output_dir:     Directory for the TSV usage log file.
-            parent_pid:     PID whose descendants are searched for the
-                            index process. Defaults to the current
-                            Python process. Useful when the target is a
-                            daemonized process that re-parents away
-                            from us (e.g. virtuoso-t).
+            dataset:         Name of the dataset being indexed.
+            binary:          Name of the index executable. Its basename
+                             is matched against `Path(argv[0]).name` of
+                             each process in the descendant tree to find
+                             the worker (native mode only).
+            container:       Container name to query for memory stats.
+                             When set together with `system`, sampling
+                             uses `docker/podman stats` instead of
+                             psutil.
+            system:          Container runtime ("docker" or "podman").
+            interval:        Seconds between samples (default 1.0).
+            plot_max_points: Cap on dots drawn per series in the plot
+                             (default 500). Raw samples are bucketed
+                             with max so memory peaks survive.
+            output_dir:      Directory for the TSV usage log file.
+            parent_pid:      PID whose descendants are searched for the
+                             index process. Defaults to the current
+                             Python process. Useful when the target is a
+                             daemonized process that re-parents away
+                             from us (e.g. virtuoso-t).
         """
         self.engine = engine_name
         self.dataset = dataset
@@ -472,15 +498,13 @@ class ResourceMonitor:
         self.container = container
         self.system = system
         self.interval = interval
+        self.plot_max_points = plot_max_points
         self.output_dir = Path(output_dir)
         self.parent_pid = parent_pid
         self.peak_rss = 0
         self.worker_proc = None
-        self.log_file = None
         self.stop_event = threading.Event()
-        self.thread = None
         self.start_time = 0
-        self.wall_start = None
 
     def find_worker(self) -> psutil.Process | None:
         """Find the index worker among descendants of `parent_pid`."""
@@ -557,10 +581,10 @@ class ResourceMonitor:
         while not self.stop_event.is_set():
             sample = take_sample()
             sample.elapsed_s = round(time.monotonic() - self.start_time, 1)
-            if sample.rss is not None:
+            if sample.rss is not None and self.log_file is not None:
                 self.peak_rss = max(self.peak_rss, sample.rss)
-            self.log_file.write(format_row(sample))
-            self.log_file.flush()
+                self.log_file.write(format_row(sample))
+                self.log_file.flush()
             self.stop_event.wait(self.interval)
 
     def __enter__(self):
@@ -570,7 +594,6 @@ class ResourceMonitor:
         header = "\t".join(f.name for f in fields(Sample)) + "\n"
         self.log_file.write(header)
         self.log_file.flush()
-        self.wall_start = datetime.now()
         self.start_time = time.monotonic()
         self.thread = threading.Thread(target=self.run_loop, daemon=True)
         self.thread.start()
@@ -582,20 +605,9 @@ class ResourceMonitor:
         self.thread.join()
         self.log_file.close()
         log.info(f"Peak memory: RSS {format_gb(self.peak_rss)}")
-        tsv_path = self.output_dir / f"{self.dataset}.usage-log.tsv"
-        log_path = self.output_dir / f"{self.dataset}.index-log.txt"
-        qleverfile_path = Path.cwd() / "Qleverfile"
-        plot_path = self.output_dir / f"{self.dataset}.usage-log.png"
-        try:
-            plot_usage(
-                tsv_path=tsv_path,
-                log_path=log_path,
-                qleverfile_path=qleverfile_path,
-                wall_start=self.wall_start,
-                out_path=plot_path,
-                title=f"{self.engine} index build: {self.dataset}",
-            )
+        plot_path = render_usage_plot(
+            self.dataset, self.output_dir, self.plot_max_points
+        )
+        if plot_path is not None:
             log.info(f"Usage plot saved to {plot_path}")
-        except Exception as e:
-            log.warning(f"Could not render usage plot: {e}")
         return False
