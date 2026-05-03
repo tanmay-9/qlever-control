@@ -12,7 +12,6 @@ from datetime import datetime
 from rich.console import Group
 from rich.syntax import Syntax
 from rich.text import Text
-from textual import work
 from textual.app import App, ComposeResult
 from textual.widgets import DataTable, Footer, Static
 
@@ -23,8 +22,9 @@ from qlever.util import pretty_printed_query
 MAX_CONSECUTIVE_FAILURES = 5
 SLOW_LOG_HEADER = "logged_at\tevent\tqid\tduration_s\tsparql\n"
 HINT_TEXT = (
-    "Click a row (or press Enter on a cursored row) to view its full"
-    " SPARQL. Arrow keys move the cursor without triggering pretty-print."
+    "Double-click a row (or press Enter on a highlighted row) to view its full "
+    "pretty-printed SPARQL. Arrow keys move the cursor without triggering "
+    "pretty-print."
 )
 
 
@@ -162,7 +162,7 @@ def detect_slow_queries(
     for qid, info in queries_dict.items():
         if not isinstance(info, dict) or qid in slow_seen:
             continue
-        started_at = info.get("started_at")
+        started_at = info.get("started-at")
         if started_at is None:
             continue
         duration_s = (now_ms - started_at) // 1000
@@ -212,12 +212,28 @@ def compact_slow_log(path: str) -> None:
             f.write(f"{logged_at}\t{status}\t{qid}\t{duration}\t{sparql}\n")
 
 
+def duration_sort_key(cell) -> int:
+    """Parse a Duration cell back into an integer for sorting.
+
+    Cells are written as `f"{N}s"`, `Text.from_markup("[red]Ns[/red]")`,
+    or the literal `"N/A"` for queries the server didn't report a
+    started_at for. `Text` objects expose the unstyled string via
+    `.plain`. `"N/A"` is mapped to -1 so it sorts to the bottom under
+    reverse=True (longest-first ordering).
+    """
+    text = cell.plain if hasattr(cell, "plain") else str(cell)
+    try:
+        return int(text.rstrip("s"))
+    except ValueError:
+        return -1
+
+
 class MonitorApp(App):
     """Textual app for the interactive monitor-queries TUI.
 
     Polls the server every `interval` seconds and renders active queries
-    in a DataTable. Selecting a row (click on the cursored row, or
-    Enter while the cursor is on it) shows the full pretty-printed
+    in a DataTable. Selecting a row (double-click a row, or
+    Enter on a highlighted row) shows the full pretty-printed
     SPARQL of that query in a detail pane below the table. Arrow keys
     move the cursor for browsing — they do not trigger the docker-based
     pretty-printer, so navigation stays snappy.
@@ -242,9 +258,6 @@ class MonitorApp(App):
         ("f", "freeze", "Freeze/Unfreeze table"),
         ("d", "toggle_dark", "Toggle dark mode"),
     ]
-    # Use Textual's default theme rather than inheriting terminal
-    # colors — partial inheritance left the Footer's text invisible
-    # (its theme-driven background collided with ANSI defaults).
     CSS = "#detail { padding: 2; padding-top: 0; }"
 
     def __init__(
@@ -282,7 +295,7 @@ class MonitorApp(App):
         # Sticky selection survives table refreshes (we identify by qid
         # rather than row index — indices renumber every tick).
         self.selected_qid = None
-        # Raw SPARQL of the selected query, cached at selection time so
+        # Pretty-printed SPARQL of the selected query, cached at selection time so
         # `y` keeps working even after the query has finished
         # server-side and is no longer in queries_dict.
         self.selected_query_text = None
@@ -330,13 +343,21 @@ class MonitorApp(App):
         table.add_column("SPARQL", key="sparql")
 
     def refresh_table(self) -> None:
-        """Fetch active queries and rerender the table.
+        """Fetch active queries and incrementally update the table.
 
-        Skipped entirely while `self.freeze` is True — the timer keeps
-        ticking but does nothing, so the last-rendered rows stay put.
-        On fetch failure the table is left untouched (durations freeze)
-        and the status caption shows the retry count; the app exits if
-        failures pass the threshold.
+        Skipped entirely while `self.freeze` is True. On fetch failure
+        the table is left untouched (durations freeze) and the status
+        caption shows the retry count; the app exits if failures pass
+        the threshold.
+
+        Mutation is incremental rather than clear+rebuild: rows that
+        persist between ticks stay in place (so the cursor anchor
+        survives naturally), qids that disappeared are removed, and
+        new qids are appended at the end. Duration and the `#` index
+        are rewritten on every current row every tick — duration
+        because the server only reports `started-at` and we derive
+        seconds client-side, `#` because rows above may have been
+        removed.
         """
         if self.freeze:
             return
@@ -361,21 +382,6 @@ class MonitorApp(App):
             return
         self.failures = 0
         status.update("")
-        # Capture the cursor's current qid before we mutate state — used
-        # below to preserve cursor position across the clear+repopulate
-        # so arrow-key browsing isn't undone on every tick.
-        table = self.query_one(DataTable)
-        old_qids = list(self.queries_dict.keys())
-        cursor_row = (
-            table.cursor_coordinate.row
-            if table.cursor_coordinate is not None
-            else None
-        )
-        cursor_qid = (
-            old_qids[cursor_row]
-            if cursor_row is not None and 0 <= cursor_row < len(old_qids)
-            else None
-        )
         self.queries_dict = queries_dict
         # Lock the server's format and configure columns the first time
         # we actually see data.
@@ -395,39 +401,81 @@ class MonitorApp(App):
                 self.warn_after,
                 self.warning_log,
             )
-        table.clear()
-        now_ms = int(time.time() * 1000)
-        for i, (qid, info) in enumerate(queries_dict.items(), 1):
+
+        table = self.query_one(DataTable)
+        # Capture cursor's qid before mutation: removing a row above
+        # the cursor shifts indices up, but the cursor is tracked by
+        # index, so without this it'd jump to a different qid.
+        existing_qids = [rk.value for rk in table.rows]
+        cursor_row = (
+            table.cursor_coordinate.row
+            if table.cursor_coordinate is not None
+            else None
+        )
+        cursor_qid = (
+            existing_qids[cursor_row]
+            if cursor_row is not None and 0 <= cursor_row < len(existing_qids)
+            else None
+        )
+
+        # Drop rows whose qids the server no longer reports.
+        new_qid_set = set(queries_dict)
+        for qid in existing_qids:
+            if qid not in new_qid_set:
+                table.remove_row(qid)
+
+        # Append new qids at the end (server order). Index and
+        # duration cells are filled by the rewrite pass below.
+        existing_qid_set = set(existing_qids)
+        for qid, info in queries_dict.items():
+            if qid in existing_qid_set:
+                continue
             query_text = info["query"] if isinstance(info, dict) else info
             sparql = re.sub(r"\s+", " ", query_text).strip()
             if self.has_duration:
-                started_at = (
-                    info.get("started_at") if isinstance(info, dict) else None
-                )
-                if started_at is not None:
-                    duration_s = (now_ms - started_at) // 1000
-                    if duration_s >= self.warn_after:
-                        # Text.from_markup keeps the [red]...[/red] markup
-                        # working inside DataTable cells.
-                        duration_cell = Text.from_markup(
-                            f"[red]{duration_s}s[/red]"
-                        )
-                    else:
-                        duration_cell = f"{duration_s}s"
-                else:
-                    duration_cell = "N/A"
-                # Row key = qid so a click can resolve back to a query.
-                table.add_row(str(i), qid, duration_cell, sparql, key=qid)
+                table.add_row("", qid, "", sparql, key=qid)
             else:
-                table.add_row(str(i), qid, sparql, key=qid)
-        # Restore cursor: prefer the user's explicit selection so the
-        # highlight tracks it across refreshes; otherwise restore to the
-        # qid the cursor was on before the refresh, so plain arrow-key
-        # browsing isn't reset every tick. If neither qid is still in
-        # the table, leave the cursor at its post-clear default (row 0).
+                table.add_row("", qid, sparql, key=qid)
+
+        # Rewrite # and duration on every current row.
+        now_ms = int(time.time() * 1000)
+        for i, row_key in enumerate(table.rows, 1):
+            qid = row_key.value
+            table.update_cell(row_key, "idx", str(i))
+            if not self.has_duration:
+                continue
+            info = queries_dict.get(qid)
+            started_at = (
+                info.get("started-at") if isinstance(info, dict) else None
+            )
+            if started_at is not None:
+                duration_s = (now_ms - started_at) // 1000
+                if duration_s >= self.warn_after:
+                    # Text.from_markup keeps the [red]...[/red] markup
+                    # working inside DataTable cells.
+                    duration_cell = Text.from_markup(
+                        f"[red]{duration_s}s[/red]"
+                    )
+                else:
+                    duration_cell = f"{duration_s}s"
+            else:
+                duration_cell = "N/A"
+            table.update_cell(row_key, "duration", duration_cell)
+
+        # Sort longest-running first. Stable across ticks because
+        # duration order is fixed by started_at — two existing rows
+        # never swap, only new rows slide into place. No-op on old
+        # servers, which have no duration column to sort by.
+        if self.has_duration:
+            table.sort("duration", key=duration_sort_key, reverse=True)
+
+        # Re-anchor the cursor: prefer the user's explicit selection so
+        # the highlight tracks it; otherwise restore to whatever qid
+        # the cursor was on before the mutation. If neither qid is
+        # still in the table, leave the cursor where Textual placed it.
         target_qid = self.selected_qid or cursor_qid
         if target_qid is not None:
-            new_qids = list(queries_dict.keys())
+            new_qids = [rk.value for rk in table.rows]
             if target_qid in new_qids:
                 table.move_cursor(row=new_qids.index(target_qid))
 
@@ -453,11 +501,13 @@ class MonitorApp(App):
         if info is None:
             return
         query_text = info["query"] if isinstance(info, dict) else info
-        # Cache the raw SPARQL for the copy action — keeps copy working
+        # Cache the pretty-printed SPARQL for the copy action — keeps copy working
         # if the query finishes server-side after this selection.
         pretty = pretty_printed_query(query_text, True, self.system)
         self.selected_query_text = pretty
-        self.query_one("#detail", Static).update(self.render_detail(qid, pretty))
+        self.query_one("#detail", Static).update(
+            self.render_detail(qid, pretty)
+        )
 
     def render_detail(self, qid: str, pretty: str) -> Group:
         """Build the detail-pane renderable: bold qid + highlighted SPARQL.
@@ -475,15 +525,15 @@ class MonitorApp(App):
             theme=syntax_theme,
             word_wrap=True,
         )
-        return Group(Text(f"Server Query ID: {qid}", style="bold"), Text(""), syntax)
+        return Group(
+            Text(f"Server Query ID: {qid}", style="bold"), Text(""), syntax
+        )
 
     def action_freeze(self) -> None:
         """Pause or resume the periodic table refresh."""
         self.freeze = not self.freeze
         status = self.query_one("#status", Static)
-        status.update(
-            "paused — press 'f' to resume\n" if self.freeze else ""
-        )
+        status.update("paused — press 'f' to resume\n" if self.freeze else "")
 
     def action_toggle_dark(self) -> None:
         """Quick switch between textual-dark and textual-light.
@@ -496,7 +546,10 @@ class MonitorApp(App):
         self.theme = (
             "textual-light" if self.theme == "textual-dark" else "textual-dark"
         )
-        if self.selected_qid is not None and self.selected_query_text is not None:
+        if (
+            self.selected_qid is not None
+            and self.selected_query_text is not None
+        ):
             self.query_one("#detail", Static).update(
                 self.render_detail(self.selected_qid, self.selected_query_text)
             )
@@ -525,21 +578,9 @@ class MonitorApp(App):
         if self.selected_qid is None or self.selected_query_text is None:
             self.notify("No query selected", severity="warning")
             return
-        self.do_copy(self.selected_query_text)
-
-    @work(thread=True, exclusive=True)
-    def do_copy(self, text: str) -> None:
-        """Run the clipboard copy on a worker thread.
-
-        Off-thread so a slow clipboard tool can't stall the 2s refresh
-        tick. exclusive=True drops the result of any older copy still
-        in flight when the user presses 'y' again, so only the latest
-        selection produces a toast.
-        """
-        nbytes = len(text.encode("utf-8"))
-        ok = copy_text(text)
-        msg = f"Copied ({nbytes} B)" if ok else f"Copy failed ({nbytes} B)"
-        self.call_from_thread(self.notify, msg)
+        ok = copy_text(self.selected_query_text)
+        msg = "Copied" if ok else "Copy failed"
+        self.notify(msg)
 
 
 class MonitorQueriesTuiCommand(QleverCommand):
