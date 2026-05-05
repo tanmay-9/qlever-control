@@ -274,6 +274,16 @@ def format_window_line(
     )
 
 
+QID_COL_WIDTH = 14
+
+
+def truncate_qid(qid: str) -> str:
+    """Truncate a qid to fit the Query ID column, with a trailing ellipsis."""
+    if len(qid) <= QID_COL_WIDTH:
+        return qid
+    return qid[: QID_COL_WIDTH - 1] + "…"
+
+
 def duration_sort_key(cell) -> int:
     """Parse a Duration cell into an int for sorting; "N/A" -> -1."""
     text = cell.plain if hasattr(cell, "plain") else str(cell)
@@ -387,6 +397,14 @@ class MonitorApp(App):
         # that came from doing both on a single timer.
         self.theme = "textual-dark"
         self.query_one("#detail", Static).update(HINT_TEXT)
+        # Paint a placeholder so the user sees something while the
+        # first fetch (which can take up to --max-time) is in flight.
+        self.query_one("#metrics", Static).update(
+            Text.from_markup(
+                f"[bold green]{'Session':<{LABEL_WIDTH}}[/] [dim]│[/dim]  "
+                f"[dim]waiting for first fetch...[/dim]"
+            )
+        )
         self.dispatch_fetch()
         self.set_interval(1.0, self.repaint_timer)
         self.set_interval(self.interval, self.fetch_timer)
@@ -394,7 +412,7 @@ class MonitorApp(App):
     def setup_columns(self) -> None:
         """Add columns once `has_duration` is known. Called once."""
         table = self.query_one(DataTable)
-        table.add_column("Query ID", width=18, key="qid")
+        table.add_column("Query ID", width=QID_COL_WIDTH, key="qid")
         if self.has_duration:
             # Header as Text to match the right-justified cell values.
             table.add_column(
@@ -467,6 +485,9 @@ class MonitorApp(App):
             self.has_duration = server_supports_duration(queries_dict)
             self.setup_columns()
         if self.has_duration is None:
+            # Empty server, format not yet locked in. Paint metrics so
+            # the placeholder is replaced with real zeros.
+            self.rerender_from_cache()
             return
         if self.has_duration and len(queries_dict) > self.peak_concurrent:
             self.peak_concurrent = len(queries_dict)
@@ -512,10 +533,11 @@ class MonitorApp(App):
                 continue
             query_text = info["query"] if isinstance(info, dict) else info
             sparql = re.sub(r"\s+", " ", query_text).strip()
+            display_qid = truncate_qid(qid)
             if self.has_duration:
-                table.add_row(qid, "", sparql, key=qid)
+                table.add_row(display_qid, "", sparql, key=qid)
             else:
-                table.add_row(qid, sparql, key=qid)
+                table.add_row(display_qid, sparql, key=qid)
 
         # Prefer the explicit selection so the highlight tracks it;
         # else restore to wherever the cursor was before the diff.
@@ -558,32 +580,34 @@ class MonitorApp(App):
 
         No I/O, no row add/remove. Runs every tick (so durations tick
         up while a fetch is in flight) and at the tail of apply_fetch
-        (so a fresh snapshot is visible immediately).
+        (so a fresh snapshot is visible immediately). Metrics paint
+        unconditionally so an empty server still shows real zeros
+        instead of the "waiting for first fetch" placeholder; the
+        old-server path hides those rows via setup_columns.
         """
-        if not self.has_duration:
-            return
-        table = self.query_one(DataTable)
-        now_ms = int(time.time() * 1000)
-        for row_key in table.rows:
-            qid = row_key.value
-            info = self.queries_dict.get(qid)
-            started_at = (
-                info.get("started-at") if isinstance(info, dict) else None
-            )
-            if started_at is not None:
-                duration_s = (now_ms - started_at) // 1000
-                if duration_s >= self.warn_after:
-                    duration_cell = Text.from_markup(
-                        f"[red]{duration_s}s[/red]", justify="right"
-                    )
+        if self.has_duration:
+            table = self.query_one(DataTable)
+            now_ms = int(time.time() * 1000)
+            for row_key in table.rows:
+                qid = row_key.value
+                info = self.queries_dict.get(qid)
+                started_at = (
+                    info.get("started-at") if isinstance(info, dict) else None
+                )
+                if started_at is not None:
+                    duration_s = (now_ms - started_at) // 1000
+                    if duration_s >= self.warn_after:
+                        duration_cell = Text.from_markup(
+                            f"[red]{duration_s}s[/red]", justify="right"
+                        )
+                    else:
+                        duration_cell = Text(
+                            f"{duration_s}s", justify="right"
+                        )
                 else:
-                    duration_cell = Text(
-                        f"{duration_s}s", justify="right"
-                    )
-            else:
-                duration_cell = Text("N/A", justify="right")
-            table.update_cell(row_key, "duration", duration_cell)
-        table.sort("duration", key=duration_sort_key, reverse=True)
+                    duration_cell = Text("N/A", justify="right")
+                table.update_cell(row_key, "duration", duration_cell)
+            table.sort("duration", key=duration_sort_key, reverse=True)
         elapsed_s = time.monotonic() - self.started_at
         self.query_one("#metrics", Static).update(
             format_metrics_line(
