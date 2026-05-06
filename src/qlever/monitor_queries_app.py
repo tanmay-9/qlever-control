@@ -630,21 +630,46 @@ class MonitorApp(App):
             )
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Pretty-print and show the SPARQL of the selected row.
+        """Pretty-print (off-thread) and show the SPARQL of the selected row.
 
         Fires on Enter or click; arrow-key navigation does not fire
         this, by design — pretty_printed_query shells out to
-        docker/podman and blocks for hundreds of ms.
+        docker/podman and blocks for hundreds of ms, so it runs in a
+        worker thread and the detail pane shows a placeholder while
+        it's in flight.
         """
         qid = event.row_key.value if event.row_key else None
         if qid is None or qid == self.selected_qid:
             return
         self.selected_qid = qid
+        self.selected_query_text = None
         info = self.queries_dict.get(qid)
         if info is None:
             return
         query_text = info["query"] if isinstance(info, dict) else info
+        self.query_one("#detail", Static).update(
+            Group(
+                Text(f"Server Query ID: {qid}", style="bold"),
+                Text(""),
+                Text("Pretty-printing...", style="dim italic"),
+            )
+        )
+        self.run_worker(
+            lambda: self.pretty_print_in_thread(qid, query_text), thread=True
+        )
+
+    def pretty_print_in_thread(self, qid: str, query_text: str) -> None:
+        """Worker body: pretty-print off the event loop, hand result back."""
         pretty = pretty_printed_query(query_text, True, self.system)
+        self.call_from_thread(self.apply_pretty, qid, pretty)
+
+    def apply_pretty(self, qid: str, pretty: str) -> None:
+        """Install pretty-printed SPARQL if the selection hasn't moved on."""
+        # Discard stale results: if the user has already selected a
+        # different row, the in-flight worker's output would overwrite
+        # the newer selection.
+        if qid != self.selected_qid:
+            return
         self.selected_query_text = pretty
         self.query_one("#detail", Static).update(
             self.render_detail(qid, pretty)
