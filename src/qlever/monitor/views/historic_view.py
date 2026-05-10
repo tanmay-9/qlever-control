@@ -48,6 +48,7 @@ class HistoricView(BaseView):
         self.log_file = log_file
         self.timeout = timeout
         self.warn_after = warn_after
+        self.last_size = self.log_file.stat().st_size
         log_start, log_end = read_log_bounds(log_file)
         self.log_start_dt = log_start
         self.log_end_dt = log_end
@@ -94,9 +95,26 @@ class HistoricView(BaseView):
     def get_query_text(self, qid: str) -> str | None:
         event = self.events_by_qid.get(qid)
         return event.get("query") if event else None
+    
+    def refresh_log_end(self) -> None:
+        size = self.log_file.stat().st_size
+        if size == self.last_size:
+            return
+        self.last_size = size
+
+        log_start, log_end = read_log_bounds(self.log_file)
+        self.log_start_dt = log_start
+        self.log_end_dt = log_end
+        hint = self.query_one("#log-range-hint", Static)
+
+        hint.update(
+            f"Log start: {self.log_start_dt.strftime(DISPLAY_FORMAT)}\n"
+            f"Log end:   {self.log_end_dt.strftime(DISPLAY_FORMAT)}"
+        )
 
     def on_mount(self) -> None:
         self.reload_window()
+        self.set_interval(5, self.refresh_log_end)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "load-button":

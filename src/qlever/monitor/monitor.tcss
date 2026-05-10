@@ -17,7 +17,6 @@ QueryTable {
 
 SparqlPane {
     height: 1fr;
-    margin-top: 1;
 }
 
 LiveView > #freeze-banner {
