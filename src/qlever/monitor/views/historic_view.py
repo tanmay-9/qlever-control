@@ -12,7 +12,6 @@ from qlever.monitor.log_reader import (
     read_log_bounds,
 )
 from qlever.monitor.metrics import (
-    DASH,
     format_duration_ms,
     format_historic_summary,
     format_window_duration,
@@ -210,7 +209,7 @@ class HistoricView(BaseView):
                 nearest_rank_percentile(completed_durations, 0.95)
             )
         else:
-            p50 = p95 = DASH
+            p50 = p95 = "—"
         self.query_one(HistoricMetricsPane).set_summary(
             format_historic_summary(
                 window_label=format_window_duration(

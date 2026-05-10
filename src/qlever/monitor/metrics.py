@@ -12,12 +12,6 @@ WINDOWS = [
     ("1h", 3600),
 ]
 
-CYAN = "cyan"
-RED = "red"
-DIM = "dim"
-LABEL_STYLE = "bold yellow"
-DASH = "—"
-
 
 def nearest_rank_percentile(sorted_values: list[int], pct: float) -> int:
     """Nearest-rank percentile of an already-sorted list of ints."""
@@ -56,10 +50,10 @@ def format_window_duration(start_dt: datetime, end_dt: datetime) -> str:
 
 def label_part(label: str) -> tuple[str, str]:
     """Left-padded styled label cell shared by every metrics row."""
-    return (f"{label:<{LABEL_WIDTH}}", LABEL_STYLE)
+    return (f"{label:<{LABEL_WIDTH}}", "bold yellow")
 
 
-SEP = (" │  ", DIM)
+SEP = (" │  ", "dim")
 
 
 def format_top_line(active: int) -> Text:
@@ -68,7 +62,7 @@ def format_top_line(active: int) -> Text:
         label_part("Now"),
         SEP,
         "Active: ",
-        (str(active), CYAN),
+        (str(active), "cyan"),
     )
 
 
@@ -84,13 +78,13 @@ def format_metrics_line(
         label_part(label),
         SEP,
         "completed: ",
-        (str(completed_count), CYAN),
+        (str(completed_count), "cyan"),
         "   p50: ",
-        (p50, CYAN),
+        (p50, "cyan"),
         "   p95: ",
-        (p95, CYAN),
+        (p95, "cyan"),
         "   Slow: ",
-        (str(slow_count), RED),
+        (str(slow_count), "red"),
     )
 
 
@@ -119,7 +113,7 @@ def format_window_line(
     if coverage_s < window_s:
         remaining = format_time_left(window_s - coverage_s)
         return Text.assemble(
-            label_part(label), SEP, (f"collecting ({remaining})", DIM)
+            label_part(label), SEP, (f"collecting ({remaining})", "dim")
         )
     cutoff_ms = now_ms - window_s * 1000
     durations = sorted(d for ts, d in finish_events if ts >= cutoff_ms)
@@ -128,5 +122,5 @@ def format_window_line(
         p50 = format_duration_ms(nearest_rank_percentile(durations, 0.50))
         p95 = format_duration_ms(nearest_rank_percentile(durations, 0.95))
     else:
-        p50 = p95 = DASH
+        p50 = p95 = "—"
     return format_metrics_line(label, len(durations), p50, p95, slow_count)
