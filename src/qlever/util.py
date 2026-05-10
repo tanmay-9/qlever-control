@@ -40,6 +40,44 @@ def get_total_file_size(
     return total_size
 
 
+def try_pretty_print_query(
+    query: str, show_prefixes: bool, system: str = "docker"
+) -> str | None:
+    """
+    Pretty-print a SPARQL query via the `sparql-formatter` container image,
+    returning None if the formatter fails. Optionally strips PREFIX
+    declarations. `system` must be docker or podman; falls back to docker
+    for unsupported values.
+    """
+    from qlever.containerize import Containerize
+
+    if system not in Containerize.supported_systems():
+        system = "docker"
+    remove_prefixes_cmd = " | sed '/^PREFIX /Id'" if not show_prefixes else ""
+    cmd = (
+        f"echo {shlex.quote(query)}"
+        f" | {system} run -i --rm docker.io/sparqling/sparql-formatter"
+        f"{remove_prefixes_cmd} | grep -v '^$'"
+    )
+    try:
+        return run_command(cmd, return_output=True).rstrip()
+    except Exception as e:
+        log.debug(f"Failed to pretty-print query: {e}")
+        return None
+
+
+def pretty_printed_query(
+    query: str, show_prefixes: bool, system: str = "docker"
+) -> str:
+    """
+    Pretty-print a SPARQL query, returning the original query (rstripped) if
+    the formatter fails.
+    """
+    return (
+        try_pretty_print_query(query, show_prefixes, system) or query.rstrip()
+    )
+
+
 def run_command(
     cmd: str,
     return_output: bool = False,
