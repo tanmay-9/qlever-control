@@ -1,0 +1,77 @@
+TabbedContent, TabPane {
+    height: 1fr;
+}
+
+MetricsPane {
+    height: auto;
+    padding-left: 1;
+}
+
+LiveMetricsPane > #live-window-1h {
+    margin-bottom: 1;
+}
+
+QueryTable {
+    height: 1fr;
+}
+
+SparqlPane {
+    height: 1fr;
+    margin-top: 1;
+}
+
+LiveView > #freeze-banner {
+    color: $error;
+    text-style: bold;
+    padding-left: 1;
+    height: auto;
+}
+
+SparqlPane > #sparql-body {
+    padding-left: 2;
+}
+
+HistoricView > #header {
+    height: auto;
+    padding-left: 1;
+    margin-bottom: 1;
+}
+
+HistoricView > #header > #log-range-hint {
+    width: auto;
+    height: 3;
+    color: $text-muted;
+    content-align: left middle;
+    margin-right: 2;
+}
+
+HistoricView > #header > #header-sep {
+    width: 1;
+    height: 3;
+    color: $text-muted;
+    margin-right: 2;
+}
+
+HistoricView > #header > #range-inputs {
+    width: 1fr;
+    height: auto;
+}
+
+HistoricView > #header > #range-inputs > .input-label {
+    width: auto;
+    height: 3;
+    content-align: left middle;
+    margin-right: 1;
+}
+
+HistoricView > #header > #range-inputs > Input {
+    width: 26;
+    margin-right: 2;
+}
+
+HistoricView > #historic-help {
+    height: 1;
+    padding-left: 1;
+    color: $text-muted;
+    margin-bottom: 1;
+}
