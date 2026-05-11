@@ -301,6 +301,18 @@ class UpdateWikidataCommand(QleverCommand):
         else:
             self.ctrl_c_pressed.set()
 
+    @staticmethod
+    def iter_sse_events(source):
+        """
+        Yield events from the SSE stream. If the stream connection drops (e.g.
+        HTTP 503), log a warning and stop the iteration so the caller can
+        reconnect.
+        """
+        try:
+            yield from source
+        except Exception as e:
+            log.warn(f"SSE stream connection lost ({e}), will reconnect ...")
+
     def determine_batch_size_for_cached_update(
         self, offset: int, batch_size: int
     ) -> int | None:
@@ -651,7 +663,7 @@ class UpdateWikidataCommand(QleverCommand):
                     leave=False,
                     bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}{postfix}",
                 ) as pbar:
-                    for event in source:
+                    for event in self.iter_sse_events(source):
                         # Skip events that are not of type `message` (should not
                         # happen), have no field `data` (should not happen either), or
                         # where the topic is not in `args.topics` (one topic by itself
@@ -914,6 +926,11 @@ class UpdateWikidataCommand(QleverCommand):
                         "offset": first_offset_in_batch + current_batch_size,
                     }
                 ]
+
+            # If the stream died before any events were collected (e.g.,
+            # HTTP 503), skip straight to reconnecting.
+            if not use_cached_file and current_batch_size == 0:
+                continue
 
             # Process the current batch of messages (or skip if using cached).
             batch_count += 1
