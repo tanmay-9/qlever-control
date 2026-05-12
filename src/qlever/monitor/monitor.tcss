@@ -11,6 +11,10 @@ LiveMetricsPane > #live-window-1h {
     margin-bottom: 1;
 }
 
+HistoricMetricsPane {
+    margin-bottom: 1;
+}
+
 QueryTable {
     height: 1fr;
 }
@@ -30,42 +34,41 @@ SparqlPane > #sparql-body {
     padding-left: 2;
 }
 
-HistoricView > #header {
-    height: auto;
+WindowControls {
+    height: 1;
     padding-left: 1;
+    padding-right: 1;
     margin-bottom: 1;
 }
 
-HistoricView > #header > #log-range-hint {
+WindowControls > #window-pill {
     width: auto;
-    height: 3;
-    color: $text-muted;
-    content-align: left middle;
-    margin-right: 2;
+    margin-right: 8;
 }
 
-HistoricView > #header > #header-sep {
-    width: 1;
-    height: 3;
-    color: $text-muted;
-    margin-right: 2;
+WindowControls > #mode-chips {
+    width: auto;
+    margin-right: 8;
 }
 
-HistoricView > #header > #range-inputs {
+WindowControls > #selected-pill {
     width: 1fr;
-    height: auto;
 }
 
-HistoricView > #header > #range-inputs > .input-label {
-    width: auto;
-    height: 3;
-    content-align: left middle;
-    margin-right: 1;
+Timeline {
+    height: 2;
+    padding-left: 1;
+    padding-right: 1;
+    margin-bottom: 1;
 }
 
-HistoricView > #header > #range-inputs > Input {
-    width: 26;
-    margin-right: 2;
+Timeline > #timeline-bar {
+    height: 1;
+}
+
+Timeline > #timeline-ticks {
+    height: 1;
+    color: $text-muted;
 }
 
 HistoricView > #historic-help {

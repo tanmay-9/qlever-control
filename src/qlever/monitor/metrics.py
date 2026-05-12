@@ -88,17 +88,6 @@ def format_metrics_line(
     )
 
 
-def format_historic_summary(
-    window_label: str,
-    completed_count: int,
-    p50: str,
-    p95: str,
-    slow_count: int,
-) -> Text:
-    """Single-line summary for a historic window."""
-    return format_metrics_line(
-        window_label, completed_count, p50, p95, slow_count
-    )
 
 
 def format_window_line(

@@ -4,8 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal
-from textual.widgets import Button, Input, Label, Static
+from textual.widgets import Static
 
 from qlever.monitor.log_reader import (
     get_historic_window,
@@ -13,7 +12,7 @@ from qlever.monitor.log_reader import (
 )
 from qlever.monitor.metrics import (
     format_duration_ms,
-    format_historic_summary,
+    format_metrics_line,
     format_window_duration,
     nearest_rank_percentile,
 )
@@ -27,15 +26,28 @@ from qlever.monitor.widgets.query_table import (
     QueryTable,
 )
 from qlever.monitor.widgets.sparql_pane import SparqlPane
+from qlever.monitor.widgets.timeline import Timeline
+from qlever.monitor.widgets.window_controls import PRESETS, WindowControls
 
-DEFAULT_WINDOW = timedelta(hours=1)
-DISPLAY_FORMAT = "%Y-%m-%d %H:%M:%S"
-DISPLAY_FORMAT_HUMAN = "YYYY-MM-DD HH:MM:SS"
+PRESET_SECONDS = dict(PRESETS)
+
+DEFAULT_WINDOW = timedelta(minutes=5)
+DEFAULT_PRESET_KEY = "5m"
 MAX_ROWS = 200
 
 
 class HistoricView(BaseView):
     """Static snapshot view: scan the log for an explicit [from, to] window."""
+
+    BINDINGS = BaseView.BINDINGS + [
+        ("w", "cycle_window(1)", "Window +"),
+        ("W", "cycle_window(-1)", "Window -"),
+        ("m", "cycle_mode", "Mode"),
+        ("shift+left", "page(-1)", "Page left"),
+        ("shift+right", "page(1)", "Page right"),
+        ("g", "snap_start", "Snap start"),
+        ("G", "snap_end", "Snap end"),
+    ]
 
     def __init__(
         self,
@@ -51,38 +63,30 @@ class HistoricView(BaseView):
         log_start, log_end = read_log_bounds(log_file)
         self.log_start_dt = log_start
         self.log_end_dt = log_end
-        default_from = max(log_end - DEFAULT_WINDOW, log_start)
-        self.default_from_str = default_from.strftime(DISPLAY_FORMAT)
-        self.default_to_str = log_end.strftime(DISPLAY_FORMAT)
+        # Pick a default preset that actually fits the log span; otherwise
+        # the pill would advertise a size larger than what's selectable.
+        if log_end - log_start >= DEFAULT_WINDOW:
+            self.default_preset_key = DEFAULT_PRESET_KEY
+            self.window_from_dt = log_end - DEFAULT_WINDOW
+        else:
+            self.default_preset_key = "all"
+            self.window_from_dt = log_start
+        self.window_to_dt = log_end
         self.events_by_qid = {}
+        # Generation guard: discard scan results queued before a newer
+        # apply_window() invalidated them.
+        self.scan_generation = 0
+        # True when the window is parked at log_end and should grow with it.
+        # Toggled automatically by apply_window based on whether to_dt hits
+        # the current log_end.
+        self.follow_tail = True
 
     def compose(self) -> ComposeResult:
-        hint_text = (
-            f"Log start: {self.log_start_dt.strftime(DISPLAY_FORMAT)}\n"
-            f"Log end:   {self.log_end_dt.strftime(DISPLAY_FORMAT)}"
-        )
-        with Horizontal(id="header"):
-            yield Static(hint_text, id="log-range-hint")
-            yield Static("│\n│\n│", id="header-sep")
-            with Horizontal(id="range-inputs"):
-                yield Label("From", classes="input-label")
-                yield Input(
-                    value=self.default_from_str,
-                    id="from-input",
-                )
-                yield Label("To", classes="input-label")
-                yield Input(
-                    value=self.default_to_str,
-                    id="to-input",
-                )
-                yield Button(
-                    "Load",
-                    id="load-button",
-                    variant="primary",
-                )
+        yield WindowControls()
+        yield Timeline()
         yield self.build_metrics_pane()
-        yield Static("", id="historic-help")
         yield self.build_query_table()
+        yield Static("", id="historic-help")
         yield SparqlPane()
 
     def build_metrics_pane(self) -> MetricsPane:
@@ -104,68 +108,132 @@ class HistoricView(BaseView):
         log_start, log_end = read_log_bounds(self.log_file)
         self.log_start_dt = log_start
         self.log_end_dt = log_end
-        hint = self.query_one("#log-range-hint", Static)
-
-        hint.update(
-            f"Log start: {self.log_start_dt.strftime(DISPLAY_FORMAT)}\n"
-            f"Log end:   {self.log_end_dt.strftime(DISPLAY_FORMAT)}"
-        )
+        if self.follow_tail and self.window_to_dt is not None:
+            # Slide the window forward to keep its right edge on the new
+            # log_end while preserving its size. Triggers a re-scan.
+            size = self.window_to_dt - self.window_from_dt
+            new_to = self.log_end_dt
+            new_from = max(self.log_start_dt, new_to - size)
+            self.apply_window(new_from, new_to)
+        else:
+            # Window stays anchored on its absolute timestamps; only the
+            # bar's right edge advances.
+            self.query_one(Timeline).set_state(
+                self.log_start_dt,
+                self.log_end_dt,
+                self.window_from_dt,
+                self.window_to_dt,
+            )
 
     def on_mount(self) -> None:
-        self.reload_window()
+        self.query_one(WindowControls).preset_key = self.default_preset_key
+        self.apply_window(self.window_from_dt, self.window_to_dt)
         self.set_interval(5, self.refresh_log_end)
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "load-button":
-            self.reload_window()
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.reload_window()
-
-    def reload_window(self) -> None:
-        from_value = self.query_one("#from-input", Input).value
-        to_value = self.query_one("#to-input", Input).value
+    def action_cycle_window(self, delta: int) -> None:
+        controls = self.query_one(WindowControls)
+        keys = controls.available_presets()
         try:
-            from_dt = datetime.strptime(from_value, DISPLAY_FORMAT)
+            idx = keys.index(controls.preset_key)
         except ValueError:
-            self.app.notify(
-                f"From: invalid timestamp '{from_value}' "
-                f"(expected {DISPLAY_FORMAT_HUMAN})",
-                severity="error",
+            idx = 0
+        new_key = keys[(idx + delta) % len(keys)]
+        if new_key == "all":
+            from_dt = self.log_start_dt
+            to_dt = self.log_end_dt
+        else:
+            # Pivot around the current right edge so a resize doesn't yank
+            # the user back to log_end; follow_tail wins when on the tail.
+            new_size = timedelta(seconds=PRESET_SECONDS[new_key])
+            anchor_to = (
+                self.log_end_dt if self.follow_tail else self.window_to_dt
             )
-            return
-        try:
-            to_dt = datetime.strptime(to_value, DISPLAY_FORMAT)
-        except ValueError:
-            self.app.notify(
-                f"To: invalid timestamp '{to_value}' "
-                f"(expected {DISPLAY_FORMAT_HUMAN})",
-                severity="error",
-            )
-            return
-        if to_dt <= from_dt:
-            self.app.notify("To must be later than From", severity="error")
-            return
+            from_dt = anchor_to - new_size
+            if from_dt < self.log_start_dt:
+                from_dt = self.log_start_dt
+                to_dt = min(self.log_end_dt, from_dt + new_size)
+            else:
+                to_dt = anchor_to
+        controls.preset_key = new_key
+        self.apply_window(from_dt, to_dt)
 
+    def action_page(self, direction: int) -> None:
+        if self.window_from_dt is None:
+            return
+        size = self.window_to_dt - self.window_from_dt
+        step = size / 2
+        new_from = self.window_from_dt + step * direction
+        new_to = self.window_to_dt + step * direction
+        # Clamp into [log_start, log_end] while preserving window size, so
+        # paging into a boundary lands flush against it rather than shrinking.
+        if new_from < self.log_start_dt:
+            new_from = self.log_start_dt
+            new_to = new_from + size
+        if new_to > self.log_end_dt:
+            new_to = self.log_end_dt
+            new_from = max(self.log_start_dt, new_to - size)
+        if (new_from, new_to) == (self.window_from_dt, self.window_to_dt):
+            return
+        self.apply_window(new_from, new_to)
+
+    def action_snap_start(self) -> None:
+        if self.window_from_dt is None:
+            return
+        size = self.window_to_dt - self.window_from_dt
+        new_from = self.log_start_dt
+        new_to = min(self.log_end_dt, new_from + size)
+        self.apply_window(new_from, new_to)
+
+    def action_snap_end(self) -> None:
+        if self.window_from_dt is None:
+            return
+        size = self.window_to_dt - self.window_from_dt
+        new_to = self.log_end_dt
+        new_from = max(self.log_start_dt, new_to - size)
+        self.apply_window(new_from, new_to)
+
+    def action_cycle_mode(self) -> None:
+        # Dummy: rotates the chip highlight; no effect on the scan yet.
+        controls = self.query_one(WindowControls)
+        controls.mode_index = (controls.mode_index + 1) % 3
+        controls.repaint()
+
+    def apply_window(self, from_dt: datetime, to_dt: datetime) -> None:
+        # Single source of truth for "new window selected": mutates state,
+        # pushes it to the controls + timeline, and kicks the scan worker.
         self.window_from_dt = from_dt
         self.window_to_dt = to_dt
-        self.query_one("#load-button", Button).disabled = True
+        self.follow_tail = to_dt == self.log_end_dt
+        self.scan_generation += 1
+        generation = self.scan_generation
+        self.query_one(Timeline).set_state(
+            self.log_start_dt, self.log_end_dt, from_dt, to_dt
+        )
+        self.query_one(WindowControls).set_state(
+            self.log_start_dt, self.log_end_dt, from_dt, to_dt
+        )
         self.query_one(HistoricQueryTable).clear()
         self.events_by_qid.clear()
         self.query_one(HistoricMetricsPane).set_summary("Loading…")
         self.query_one("#historic-help", Static).update("")
         self.run_worker(
-            lambda: self.scan_window(from_dt, to_dt),
+            lambda: self.scan_window(from_dt, to_dt, generation),
             thread=True,
             exclusive=True,
         )
 
-    def scan_window(self, from_dt: datetime, to_dt: datetime) -> None:
+    def scan_window(
+        self, from_dt: datetime, to_dt: datetime, generation: int
+    ) -> None:
         active, completed, last_scanned_ms = get_historic_window(
             self.log_file, from_dt, to_dt, self.timeout
         )
         self.app.call_from_thread(
-            self.apply_window_data, active, completed, last_scanned_ms
+            self.apply_window_data,
+            active,
+            completed,
+            last_scanned_ms,
+            generation,
         )
 
     def apply_window_data(
@@ -173,7 +241,13 @@ class HistoricView(BaseView):
         active: list[dict],
         completed: list[tuple[dict, dict]],
         last_scanned_ms: int,
+        generation: int,
     ) -> None:
+        # Drop results queued before a newer apply_window() invalidated them.
+        # Without this, fast cycling can land stale rows in the freshly-cleared
+        # table and trigger DuplicateKey on qid collisions.
+        if generation != self.scan_generation:
+            return
         table = self.query_one(HistoricQueryTable)
         rows = []
         for start, end in completed:
@@ -211,8 +285,8 @@ class HistoricView(BaseView):
         else:
             p50 = p95 = "—"
         self.query_one(HistoricMetricsPane).set_summary(
-            format_historic_summary(
-                window_label=format_window_duration(
+            format_metrics_line(
+                label=format_window_duration(
                     self.window_from_dt, self.window_to_dt
                 ),
                 completed_count=len(completed_durations),
@@ -226,4 +300,3 @@ class HistoricView(BaseView):
         self.query_one("#historic-help", Static).update(
             f"Showing {shown} of {total} queries (sorted by duration desc)."
         )
-        self.query_one("#load-button", Button).disabled = False
