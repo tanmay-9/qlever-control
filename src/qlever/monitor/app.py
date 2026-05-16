@@ -4,11 +4,13 @@ from pathlib import Path
 
 from textual import work
 from textual.app import App
+from textual.binding import Binding
+from textual.css.query import NoMatches
 
 from qlever.monitor.util import clipboard_install_hint, copy_text
 from qlever.monitor.views.historic import HistoricScreen
 from qlever.monitor.views.live import LiveScreen
-from qlever.monitor.widgets.sparql_pane import SparqlPane
+from qlever.monitor.widgets.sparql_pane import SparqlPane, SparqlScroll
 from qlever.util import pretty_printed_query
 
 
@@ -35,6 +37,15 @@ class MonitorQueriesApp(App):
         ("t", "cycle_themes", "Change theme"),
         ("y", "copy_query", "Copy SPARQL"),
         ("p", "pretty_print", "Pretty print"),
+        Binding(
+            "shift+up",
+            "scroll_sparql_up",
+            "Scroll SPARQL",
+            key_display="⇧ ↑↓",
+        ),
+        Binding(
+            "shift+down", "scroll_sparql_down", "Scroll SPARQL", show=False
+        ),
     ]
 
     def __init__(
@@ -115,6 +126,30 @@ class MonitorQueriesApp(App):
             self.notify("Could not pretty-print this query", severity="error")
             return
         pane.pretty_text = result
+
+    def action_scroll_sparql_up(self) -> None:
+        """Scroll the overflowing SPARQL pane up one line."""
+        self.screen.query_one(SparqlScroll).scroll_up()
+
+    def action_scroll_sparql_down(self) -> None:
+        """Scroll the overflowing SPARQL pane down one line."""
+        self.screen.query_one(SparqlScroll).scroll_down()
+
+    def check_action(
+        self, action: str, parameters: tuple[object, ...]
+    ) -> bool | None:
+        """Show the scroll bindings only when the query overflows the pane.
+
+        Returns False (hidden) rather than None (grayed) so the footer
+        entry disappears entirely until there is something to scroll.
+        """
+        if action in ("scroll_sparql_up", "scroll_sparql_down"):
+            try:
+                scroll = self.screen.query_one(SparqlScroll)
+            except NoMatches:
+                return False
+            return scroll.max_scroll_y > 0
+        return True
 
     def action_cycle_themes(self) -> None:
         """Select the next theme on press of `t` binding"""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from textual.reactive import reactive
 from textual.widgets import Static
 
 from qlever.monitor.models import ControlsState
@@ -18,6 +19,13 @@ class SelectedWindow(Static):
 
     can_focus = False
 
+    state = reactive(None, init=False)
+
     def __init__(self, state: ControlsState) -> None:
         """Render the selected window range computed from `state`."""
         super().__init__(format_selected_window(state))
+        self.set_reactive(SelectedWindow.state, state)
+
+    def watch_state(self, value: ControlsState) -> None:
+        """Repaint the range summary when the window state changes."""
+        self.update(format_selected_window(value))

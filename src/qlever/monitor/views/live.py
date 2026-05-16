@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import Footer, Static
 
@@ -24,7 +25,12 @@ TITLE = "QLever monitor-queries: Live"
 class LiveScreen(Screen, inherit_bindings=False):
     """Live view: shows currently active queries tailed from the server log."""
 
-    BINDINGS = [Binding("tab", "app.swap_screen", "Historic>", priority=True)]
+    BINDINGS = [
+        Binding("tab", "app.swap_screen", "Historic>", priority=True),
+        Binding("f", "toggle_freeze", "Freeze/Unfreeze"),
+    ]
+
+    frozen = reactive(False, init=False)
 
     def compose(self) -> ComposeResult:
         yield HeaderRow(
@@ -38,6 +44,19 @@ class LiveScreen(Screen, inherit_bindings=False):
         yield Static("", id="table-status")
         yield SparqlPane()
         yield Footer()
+
+    def watch_frozen(self, frozen: bool) -> None:
+        """Reflect the frozen state in the table status line."""
+        status = "Frozen - press f to resume" if frozen else ""
+        self.query_one("#table-status", Static).update(status)
+
+    def action_toggle_freeze(self) -> None:
+        """Toggle the frozen state of the live view."""
+        self.frozen = not self.frozen
+
+    def on_resize(self) -> None:
+        """Re-evaluate the conditional scroll bindings after a resize."""
+        self.call_after_refresh(self.refresh_bindings)
 
     def on_nav_pill_clicked(self, message: NavPill.Clicked) -> None:
         """Switch to the screen named by the clicked pill."""

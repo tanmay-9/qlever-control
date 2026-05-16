@@ -105,6 +105,9 @@ class SparqlPane(Vertical):
         """Push the current content into the header and body widgets."""
         header = self.query_one("#sparql-header", Static)
         body = self.query_one("#sparql-body", SparqlBody)
+        # Body height changes here; re-evaluate the conditional scroll
+        # bindings once layout has settled.
+        self.call_after_refresh(self.refresh_bindings)
         if content is None:
             header.update(
                 "[dim]Press Enter or double-click a row to view its "

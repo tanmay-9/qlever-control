@@ -44,7 +44,33 @@ def get_timeline_bounds() -> TimelineBounds:
 def get_historic_query_rows() -> list[HistoricQueryRow]:
     """Finished queries matching the current mode in the current window."""
     start_ms = int(time.time() * 1000) - 15 * 60 * 1000
+    long_query = (
+        "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\n"
+        "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n"
+        "PREFIX wd: <http://www.wikidata.org/entity/>\n"
+        "PREFIX wdt: <http://www.wikidata.org/prop/direct/>\n"
+        "PREFIX schema: <http://schema.org/>\n"
+        "SELECT ?person ?personLabel ?birthPlaceLabel ?occupationLabel\n"
+        "       (COUNT(DISTINCT ?work) AS ?works)\n"
+        "WHERE {\n"
+        "  ?person wdt:P31 wd:Q5 .\n"
+        "  ?person wdt:P106 ?occupation .\n"
+        "  ?person wdt:P19 ?birthPlace .\n"
+        "  ?person rdfs:label ?personLabel .\n"
+        "  ?birthPlace rdfs:label ?birthPlaceLabel .\n"
+        "  ?occupation rdfs:label ?occupationLabel .\n"
+        "  OPTIONAL { ?work wdt:P50 ?person . }\n"
+        '  FILTER(LANG(?personLabel) = "en")\n'
+        '  FILTER(LANG(?birthPlaceLabel) = "en")\n'
+        '  FILTER(LANG(?occupationLabel) = "en")\n'
+        "}\n"
+        "GROUP BY ?person ?personLabel ?birthPlaceLabel ?occupationLabel\n"
+        "HAVING (COUNT(DISTINCT ?work) > 5)\n"
+        "ORDER BY DESC(?works)\n"
+        "LIMIT 1000"
+    )
     samples = [
+        (50_000, 99_000, "ok", long_query),
         (0, 42_000, "ok", "SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 1000"),
         (103_000, 8_000, "ok", "SELECT (COUNT(*) AS ?c) WHERE { ?s ?p ?o }"),
         (

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from textual import events
+from textual.message import Message
+from textual.reactive import reactive
 from textual.widgets import Static
 
 from qlever.monitor.models import TimelineBounds
@@ -51,6 +54,18 @@ def fraction_to_column(fraction: float, bar_width: int) -> int:
     """Map a 0..1 position along the log span to a bar column index."""
     clamped = min(max(fraction, 0.0), 1.0)
     return round(clamped * (bar_width - 1))
+
+
+def column_to_ms(col: int, bar_width: int, bounds: TimelineBounds) -> int:
+    """Epoch (ms) at a bar column; inverse of fraction_to_column.
+
+    Clamped to the log span so an edge click maps to an edge time.
+    """
+    if bar_width <= 1:
+        return bounds.log_start_ms
+    fraction = min(max(col / (bar_width - 1), 0.0), 1.0)
+    span = bounds.log_end_ms - bounds.log_start_ms
+    return bounds.log_start_ms + round(fraction * span)
 
 
 def render_track(bounds: TimelineBounds, bar_width: int) -> str:
@@ -113,14 +128,44 @@ class Timeline(Static):
 
     can_focus = False
 
+    class Recentered(Message):
+        """Posted when the bar is clicked; carries the clicked time."""
+
+        def __init__(self, center_ms: int) -> None:
+            super().__init__()
+            self.center_ms = center_ms
+
+    bounds = reactive(None, init=False)
+
     def __init__(self, bounds: TimelineBounds) -> None:
         """Hold the span/window snapshot to draw at render time."""
         super().__init__()
-        self.bounds = bounds
+        self.set_reactive(Timeline.bounds, bounds)
+
+    def watch_bounds(self) -> None:
+        """Redraw the bar when the span or window changes."""
+        self.refresh()
 
     def on_resize(self) -> None:
         """Repaint so the bar tracks the new width."""
         self.refresh()
+
+    def on_click(self, event: events.Click) -> None:
+        """Recenter the window on the clicked bar column.
+
+        Clicks on the edge stamps or gutter (outside the bar) are
+        ignored; the screen decides whether `all` makes it a no-op.
+        """
+        offset = STAMP_W + len(GUTTER)
+        bar_width = self.size.width - 2 * offset
+        if bar_width < 2:
+            return
+        col = event.x - offset
+        if col < 0 or col >= bar_width:
+            return
+        self.post_message(
+            self.Recentered(column_to_ms(col, bar_width, self.bounds))
+        )
 
     def render(self):
         bar_width = self.size.width - 2 * (STAMP_W + len(GUTTER))
