@@ -113,18 +113,14 @@ class HistoricScreen(Screen, inherit_bindings=False):
 
     def clamp_window_start(self, start: int, width: int) -> int:
         """Keep a window of `width` fully inside the log span."""
-        return min(
-            max(start, self.log_start_ms), self.log_end_ms - width
-        )
+        return min(max(start, self.log_start_ms), self.log_end_ms - width)
 
     def center_window_at(self, ms: int) -> None:
         """Center the window on `ms`; no-op when `all` (unbounded)."""
         width = preset_ms(self.window_size)
         if width is None:
             return
-        self.window_start_ms = self.clamp_window_start(
-            ms - width // 2, width
-        )
+        self.window_start_ms = self.clamp_window_start(ms - width // 2, width)
         self.window_end_ms = self.window_start_ms + width
         self.push_state()
 
@@ -211,9 +207,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Re-evaluate the conditional scroll bindings after a resize."""
         self.call_after_refresh(self.refresh_bindings)
 
-    def on_timeline_recentered(
-        self, message: Timeline.Recentered
-    ) -> None:
+    def on_timeline_recentered(self, message: Timeline.Recentered) -> None:
         """Recenter the window on the clicked timeline position."""
         self.center_window_at(message.center_ms)
 
