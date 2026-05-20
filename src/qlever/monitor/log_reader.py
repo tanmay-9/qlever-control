@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Iterator
-from typing import BinaryIO
+from typing import BinaryIO, NamedTuple
 
 TS_PREFIX = b'{"ts-ms":'
 EVENT_KEY = b'"event":"'
@@ -10,6 +10,20 @@ QID_KEY = b'"qid":"'
 STATUS_KEY = b'"status":"'
 
 STATUS_SET = frozenset({"ok", "failed", "cancelled", "timeout", "unknown"})
+
+
+class CompletedQuery(NamedTuple):
+    """One start event paired with its matching end event.
+
+    start_line_offset is the byte offset of the start line in the log,
+    kept so load_sparql_at can fetch the SPARQL text later.
+    """
+
+    start_ms: int
+    end_ms: int
+    duration_ms: int
+    status: str
+    start_line_offset: int
 
 
 def slice_string_value(line_bytes: bytes, key: bytes) -> str | None:
@@ -228,3 +242,62 @@ def scan_range(
         if parsed is not None:
             yield (parsed, offset)
         offset += len(line)
+
+
+def pair_start_end_events(
+    events: Iterator,
+) -> tuple[list[CompletedQuery], dict[str, tuple[int, int]]]:
+    """Pair start and end events from a scan into completed queries.
+
+    Walks the events once. Each end pops its matching start by qid into
+    completed_queries; whatever remains unmatched is still_open. Unmatched
+    ends are dropped (their start was outside the scanned range).
+
+    events: yields ((ts_ms, event, qid, status), line_offset) from
+    scan_range.
+
+    Returns (completed_queries, still_open). still_open maps qid to
+    (start_ms, start_line_offset) for queries with no end event seen yet.
+    """
+    completed_queries = []
+    still_open = {}
+    for (ts_ms, event, qid, status), line_offset in events:
+        if event == "start":
+            still_open[qid] = (ts_ms, line_offset)
+            continue
+        # event == "end"
+        matched_start = still_open.pop(qid, None)
+        if matched_start is None:
+            continue
+        start_ms, start_line_offset = matched_start
+        completed_queries.append(
+            CompletedQuery(
+                start_ms=start_ms,
+                end_ms=ts_ms,
+                duration_ms=ts_ms - start_ms,
+                status=status,
+                start_line_offset=start_line_offset,
+            )
+        )
+    return (completed_queries, still_open)
+
+
+def load_sparql_at(log_stream: BinaryIO, line_offset: int) -> str:
+    """Return the SPARQL text of the start line at line_offset.
+
+    Returns "" if the line is malformed or has no query field. Never
+    raises. Used only for the handful of rows that need their SPARQL
+    text shown, never on a bulk path.
+    """
+    log_stream.seek(line_offset)
+    line = log_stream.readline()
+    try:
+        obj = json.loads(line)
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(obj, dict):
+        return ""
+    query = obj.get("query")
+    if not isinstance(query, str):
+        return ""
+    return query

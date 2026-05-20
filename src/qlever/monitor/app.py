@@ -53,8 +53,7 @@ class MonitorQueriesApp(App):
         log_file: Path,
         sparql_endpoint: str,
         timeout: int,
-        warn_after: int,
-        warning_log: Path,
+        slow_threshold: int,
         repaint_interval: float = 0.5,
         system: str = "docker",
     ) -> None:
@@ -62,8 +61,8 @@ class MonitorQueriesApp(App):
         self.log_file = log_file
         self.sparql_endpoint = sparql_endpoint
         self.timeout = timeout
-        self.warn_after = warn_after
-        self.warning_log = warning_log
+        self.window_pad_ms = 2000 * timeout
+        self.slow_threshold = slow_threshold
         self.repaint_interval = repaint_interval
         self.system = system
 

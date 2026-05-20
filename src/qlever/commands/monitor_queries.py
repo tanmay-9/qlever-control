@@ -40,20 +40,15 @@ class MonitorQueriesCommand(QleverCommand):
         subparser.add_argument(
             "--qlever-server-log",
             type=Path,
-            help="The `qlever-server` log file (default = {name}.server-log.txt)",
+            help="The `qlever-server` log file (default = {name}.query_metrics.log)",
         )
         subparser.add_argument(
-            "--warn-after",
+            "--slow-threshold",
             type=int,
             default=None,
-            help="Duration in seconds after which an active query is logged"
-            " as slow (default = server timeout - 10s)",
-        )
-        subparser.add_argument(
-            "--warning-log",
-            type=Path,
-            help="File to append slow-query warnings to"
-            " (default = {name}.slow-queries.tsv)",
+            help="Duration in seconds above which a query (active or"
+            " completed) is counted as slow in the metrics"
+            " (default = server timeout - 10s)",
         )
         subparser.add_argument(
             "--screen_refresh_s",
@@ -67,7 +62,7 @@ class MonitorQueriesCommand(QleverCommand):
 
     def execute(self, args) -> bool:
         if not args.qlever_server_log:
-            args.qlever_server_log = Path.cwd() / f"{args.name}.server-log.txt"
+            args.qlever_server_log = Path.cwd() / f"{args.name}.query_metrics.log"
         show_msg = (
             f"Reading server logs from {args.qlever_server_log} to display the "
             "currently active queries on the server"
@@ -76,19 +71,21 @@ class MonitorQueriesCommand(QleverCommand):
         if args.show:
             return True
 
+        if not args.qlever_server_log.is_file():
+            log.error(f"Log file not found: {args.qlever_server_log}")
+            return False
+
         timeout_s = 30
-        if args.warn_after is None:
+        if args.slow_threshold is None:
             try:
                 timeout_s = int(args.timeout.rstrip("s"))
             except ValueError:
                 log.error(
                     f"Could not parse server timeout {args.timeout!r};"
-                    " pass --warn-after explicitly"
+                    " pass --slow-threshold explicitly"
                 )
                 return False
-            args.warn_after = max(1, timeout_s - 10)
-        if args.warning_log is None:
-            args.warning_log = Path.cwd() / f"{args.name}.slow-queries.tsv"
+            args.slow_threshold = max(1, timeout_s - 10)
 
         repaint_interval = max(0.5, args.screen_refresh_s)
         sparql_endpoint = (
@@ -101,8 +98,7 @@ class MonitorQueriesCommand(QleverCommand):
             log_file=args.qlever_server_log,
             sparql_endpoint=sparql_endpoint,
             timeout=timeout_s,
-            warn_after=args.warn_after,
-            warning_log=args.warning_log,
+            slow_threshold=args.slow_threshold,
             repaint_interval=repaint_interval,
             system=args.system,
         ).run()

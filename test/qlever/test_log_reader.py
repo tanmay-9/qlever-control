@@ -2,8 +2,11 @@ import pytest
 
 from qlever.monitor import log_reader
 from qlever.monitor.log_reader import (
+    CompletedQuery,
+    load_sparql_at,
     next_whole_line,
     offset_for_ts,
+    pair_start_end_events,
     parse_line,
     parse_line_fallback,
     peek_ts_ms,
@@ -287,3 +290,160 @@ def test_scan_range_from_eof_yields_nothing(open_log):
     data, _ = build_log([1000, 1010])
     log, size = open_log(data)
     assert list(scan_range(log, size, size)) == []
+
+
+def test_pair_start_end_events_empty_input_yields_empty_outputs():
+    completed, still_open = pair_start_end_events(iter([]))
+    assert completed == []
+    assert still_open == {}
+
+
+def test_pair_start_end_events_clean_pair():
+    events = [
+        ((1000, "start", "q1", None), 0),
+        ((1050, "end", "q1", "ok"), 100),
+    ]
+    completed, still_open = pair_start_end_events(iter(events))
+    assert completed == [
+        CompletedQuery(
+            start_ms=1000,
+            end_ms=1050,
+            duration_ms=50,
+            status="ok",
+            start_line_offset=0,
+        )
+    ]
+    assert still_open == {}
+
+
+def test_pair_start_end_events_start_without_end_stays_open():
+    events = [((1000, "start", "q1", None), 42)]
+    completed, still_open = pair_start_end_events(iter(events))
+    assert completed == []
+    assert still_open == {"q1": (1000, 42)}
+
+
+def test_pair_start_end_events_end_without_start_is_dropped():
+    events = [((1050, "end", "q1", "ok"), 0)]
+    completed, still_open = pair_start_end_events(iter(events))
+    assert completed == []
+    assert still_open == {}
+
+
+def test_pair_start_end_events_interleaved_queries_pair_in_end_order():
+    events = [
+        ((1000, "start", "qA", None), 0),
+        ((1010, "start", "qB", None), 100),
+        ((1020, "end", "qB", "ok"), 200),
+        ((1030, "end", "qA", "failed"), 300),
+    ]
+    completed, still_open = pair_start_end_events(iter(events))
+    assert completed == [
+        CompletedQuery(
+            start_ms=1010,
+            end_ms=1020,
+            duration_ms=10,
+            status="ok",
+            start_line_offset=100,
+        ),
+        CompletedQuery(
+            start_ms=1000,
+            end_ms=1030,
+            duration_ms=30,
+            status="failed",
+            start_line_offset=0,
+        ),
+    ]
+    assert still_open == {}
+
+
+def test_pair_start_end_events_pairs_by_qid_not_file_order():
+    # qA's end is written before qB's start (timestamps out of order),
+    # but pairing is by qid so each query gets its own duration.
+    events = [
+        ((1000, "start", "qA", None), 0),
+        ((1100, "start", "qB", None), 100),
+        ((1050, "end", "qA", "ok"), 200),
+        ((1150, "end", "qB", "ok"), 300),
+    ]
+    completed, _ = pair_start_end_events(iter(events))
+    assert completed == [
+        CompletedQuery(
+            start_ms=1000,
+            end_ms=1050,
+            duration_ms=50,
+            status="ok",
+            start_line_offset=0,
+        ),
+        CompletedQuery(
+            start_ms=1100,
+            end_ms=1150,
+            duration_ms=50,
+            status="ok",
+            start_line_offset=100,
+        ),
+    ]
+
+
+@pytest.mark.parametrize("status", VALID_STATUSES)
+def test_pair_start_end_events_status_flows_through(status):
+    events = [
+        ((1000, "start", "q1", None), 0),
+        ((1050, "end", "q1", status), 100),
+    ]
+    completed, _ = pair_start_end_events(iter(events))
+    assert completed[0].status == status
+
+
+def test_load_sparql_at_returns_query_text(open_log):
+    line = (
+        b'{"ts-ms":1,"event":"start","qid":"q1",'
+        b'"client-ip":"1.2.3.4","query":"SELECT * WHERE { ?s ?p ?o }"}\n'
+    )
+    log, _ = open_log(line)
+    assert load_sparql_at(log, 0) == "SELECT * WHERE { ?s ?p ?o }"
+
+
+def test_load_sparql_at_handles_escaped_quotes_and_backslashes(open_log):
+    # The JSON value encodes a literal " and a literal \ in the query.
+    line = (
+        b'{"ts-ms":1,"event":"start","qid":"q1",'
+        b'"query":"SELECT ?x WHERE { ?x ?p \\"a\\\\b\\" }"}\n'
+    )
+    log, _ = open_log(line)
+    assert load_sparql_at(log, 0) == 'SELECT ?x WHERE { ?x ?p "a\\b" }'
+
+
+def test_load_sparql_at_handles_unicode(open_log):
+    line = (
+        b'{"ts-ms":1,"event":"start","qid":"q1",'
+        b'"query":"SELECT ?s WHERE { ?s ?p \xe2\x98\x83 }"}\n'
+    )
+    log, _ = open_log(line)
+    assert load_sparql_at(log, 0) == "SELECT ?s WHERE { ?s ?p ☃ }"
+
+
+def test_load_sparql_at_end_line_has_no_query_returns_empty(open_log):
+    log, _ = open_log(END + b"\n")
+    assert load_sparql_at(log, 0) == ""
+
+
+def test_load_sparql_at_malformed_json_returns_empty(open_log):
+    log, _ = open_log(b"this is not json\n")
+    assert load_sparql_at(log, 0) == ""
+
+
+def test_load_sparql_at_top_level_non_object_returns_empty(open_log):
+    log, _ = open_log(b"42\n")
+    assert load_sparql_at(log, 0) == ""
+
+
+def test_load_sparql_at_reads_the_line_at_the_given_offset(open_log):
+    first = (
+        b'{"ts-ms":1,"event":"start","qid":"q1","query":"FIRST"}\n'
+    )
+    second = (
+        b'{"ts-ms":2,"event":"start","qid":"q2","query":"SECOND"}\n'
+    )
+    log, _ = open_log(first + second)
+    assert load_sparql_at(log, len(first)) == "SECOND"
