@@ -113,6 +113,7 @@ def get_historic_metrics() -> MetricsCounts:
         failed=11,
         timeout=2,
         cancelled=9,
+        unknown=0,
         p50=120,
         p95=1840,
         slow=4,

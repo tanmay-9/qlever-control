@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class LiveSubtitle:
+    endpoint: str
     state: str
     n_active: int | None
 
@@ -23,6 +24,7 @@ class MetricsCounts:
     failed: int | None
     timeout: int | None
     cancelled: int | None
+    unknown: int | None
     p50: int | None
     p95: int | None
     slow: int | None

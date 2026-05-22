@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from textual import work
 from textual.app import App
 from textual.binding import Binding
 from textual.css.query import NoMatches
+from textual.worker import get_current_worker
 
+from qlever.monitor.live_engine import (
+    LiveLogReader,
+    LiveState,
+    find_active_queries,
+    load_completed_history,
+)
 from qlever.monitor.util import clipboard_install_hint, copy_text
 from qlever.monitor.views.historic import HistoricScreen
 from qlever.monitor.views.live import LiveScreen
@@ -65,10 +73,39 @@ class MonitorQueriesApp(App):
         self.slow_threshold = slow_threshold
         self.repaint_interval = repaint_interval
         self.system = system
+        self.server_status = "checking"
+        self.live_state = LiveState()
 
     def on_mount(self) -> None:
-        """Open the Live screen on startup."""
+        """Boot the live engine, then open the Live screen."""
+        state, cut_offset, _ = find_active_queries(
+            self.log_file, self.window_pad_ms
+        )
+        self.live_state = state
+        self.cut_offset = cut_offset
+        self.tail_live_log()
+        self.load_metrics_history()
         self.push_screen("live")
+
+    @work(thread=True, exclusive=True)
+    def tail_live_log(self) -> None:
+        """Poll the log forever, dispatching new events into LiveState."""
+        tailer = LiveLogReader(
+            self.log_file,
+            self.live_state,
+            self.cut_offset,
+            self.window_pad_ms,
+        )
+        worker = get_current_worker()
+        with self.log_file.open("rb") as log_stream:
+            while not worker.is_cancelled:
+                tailer.poll(log_stream)
+                time.sleep(tailer.poll_interval)
+
+    @work(thread=True)
+    def load_metrics_history(self) -> None:
+        """Prepend the hour before cut_offset into completed history so metrics aren't empty at boot."""
+        load_completed_history(self.log_file, self.live_state, self.cut_offset)
 
     def action_swap_screen(self) -> None:
         """Toggle between Live and Historic (bound to Tab on each screen)."""

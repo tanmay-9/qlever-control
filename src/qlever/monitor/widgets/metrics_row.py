@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.reactive import reactive
 from textual.widgets import Static
 
 from qlever.monitor.models import MetricsCounts
@@ -11,6 +12,7 @@ METRIC_COLORS = {
     "failed": "$error",
     "timeout": "$error",
     "cancelled": "$warning",
+    "unknown": "$warning",
     "slow": "$warning",
 }
 
@@ -21,6 +23,7 @@ COLUMNS = [
     ("failed", "count"),
     ("timeout", "count"),
     ("cancelled", "count"),
+    ("unknown", "count"),
     ("p50", "ms"),
     ("p95", "ms"),
     ("slow", "count"),
@@ -95,12 +98,20 @@ class MetricsRow(Vertical):
 
     can_focus = False
 
+    rows = reactive(list, init=False)
+
     def __init__(self, rows: list[MetricsCounts]) -> None:
         """Render each row in `rows` as one formatted text line."""
         super().__init__()
-        self.rows = rows
+        self.set_reactive(MetricsRow.rows, rows)
 
     def compose(self) -> ComposeResult:
         widths = column_widths(self.rows)
         for row in self.rows:
             yield Static(format_row(row, widths))
+
+    def watch_rows(self, rows: list[MetricsCounts]) -> None:
+        """Repaint each line static when the row data changes."""
+        widths = column_widths(rows)
+        for line, row in zip(self.query(Static), rows):
+            line.update(format_row(row, widths))

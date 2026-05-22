@@ -1,0 +1,424 @@
+"""Tests for CompletedQueries and the metrics snapshot helpers."""
+
+import threading
+import time
+
+from qlever.monitor.live_engine import (
+    LIVE_HORIZON_MS,
+    CompletedQueries,
+    LiveLogReader,
+    LiveState,
+    MetricsSnapshot,
+    compute_live_metrics,
+    find_active_queries,
+    load_completed_history,
+    percentiles,
+)
+from qlever.monitor.log_reader import CompletedQuery
+
+NOW_MS = 1_700_000_000_000
+MIN_MS = 60_000
+WINDOW_5M = 5 * MIN_MS
+WINDOW_15M = 15 * MIN_MS
+
+
+def make_completed(end_ms, status="ok", duration_ms=100):
+    """Build a CompletedQuery with a self-consistent start_ms."""
+    return CompletedQuery(
+        start_ms=end_ms - duration_ms,
+        end_ms=end_ms,
+        duration_ms=duration_ms,
+        status=status,
+        start_line_offset=0,
+    )
+
+
+def test_empty_history_returns_empty_snapshot():
+    history = CompletedQueries()
+    [snap] = history.metrics_for_windows(
+        now_ms=NOW_MS,
+        windows_ms=[WINDOW_5M],
+        slow_threshold_ms=10_000,
+        data_start_ms=NOW_MS - WINDOW_5M,
+    )
+    assert snap == MetricsSnapshot(
+        seen=0, ok=0, failed=0, timeout=0, cancelled=0, unknown=0,
+        slow=0, p50=None, p95=None,
+    )
+
+
+def test_status_counts_split_correctly():
+    history = CompletedQueries()
+    for status in ("ok", "failed", "timeout", "cancelled", "unknown"):
+        history.add(make_completed(NOW_MS - MIN_MS, status=status))
+    [snap] = history.metrics_for_windows(
+        now_ms=NOW_MS,
+        windows_ms=[WINDOW_5M],
+        slow_threshold_ms=10_000,
+        data_start_ms=NOW_MS - WINDOW_5M,
+    )
+    assert snap.seen == 5
+    assert snap.ok == 1
+    assert snap.failed == 1
+    assert snap.timeout == 1
+    assert snap.cancelled == 1
+    assert snap.unknown == 1
+
+
+def test_window_excludes_old_entries():
+    history = CompletedQueries()
+    history.add(make_completed(NOW_MS - 2 * MIN_MS))
+    history.add(make_completed(NOW_MS - WINDOW_5M))
+    history.add(make_completed(NOW_MS - 10 * MIN_MS))
+    [snap] = history.metrics_for_windows(
+        now_ms=NOW_MS,
+        windows_ms=[WINDOW_5M],
+        slow_threshold_ms=10_000,
+        data_start_ms=NOW_MS - WINDOW_5M,
+    )
+    assert snap.seen == 2
+
+
+def test_partial_coverage_returns_none():
+    history = CompletedQueries()
+    history.add(make_completed(NOW_MS - 2 * MIN_MS))
+    snaps = history.metrics_for_windows(
+        now_ms=NOW_MS,
+        windows_ms=[WINDOW_5M, WINDOW_15M],
+        slow_threshold_ms=10_000,
+        data_start_ms=NOW_MS - 10 * MIN_MS,
+    )
+    assert snaps[0] is not None
+    assert snaps[0].seen == 1
+    assert snaps[1] is None
+
+
+def test_slow_threshold_independent_of_status():
+    history = CompletedQueries()
+    history.add(make_completed(NOW_MS - MIN_MS, status="ok", duration_ms=12_000))
+    [snap] = history.metrics_for_windows(
+        now_ms=NOW_MS,
+        windows_ms=[WINDOW_5M],
+        slow_threshold_ms=10_000,
+        data_start_ms=NOW_MS - WINDOW_5M,
+    )
+    assert snap.ok == 1
+    assert snap.slow == 1
+
+
+def test_drop_older_than_pops_left():
+    history = CompletedQueries()
+    history.add(make_completed(NOW_MS - 30 * MIN_MS))
+    history.add(make_completed(NOW_MS - 20 * MIN_MS))
+    history.add(make_completed(NOW_MS - MIN_MS))
+    history.drop_older_than(NOW_MS - 15 * MIN_MS)
+    assert len(history.entries) == 1
+    assert history.entries[0].end_ms == NOW_MS - MIN_MS
+
+
+def test_percentiles_with_known_values():
+    durations = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    p50, p95 = percentiles(durations)
+    assert 450 <= p50 <= 600
+    assert 900 <= p95 <= 1100
+
+
+def test_data_start_equal_to_cutoff_returns_snapshot():
+    history = CompletedQueries()
+    history.add(make_completed(NOW_MS - 2 * MIN_MS))
+    cutoff = NOW_MS - WINDOW_5M
+    [snap] = history.metrics_for_windows(
+        now_ms=NOW_MS,
+        windows_ms=[WINDOW_5M],
+        slow_threshold_ms=10_000,
+        data_start_ms=cutoff,
+    )
+    assert snap is not None
+    assert snap.seen == 1
+
+
+def start_line(ts_ms, qid, query="SELECT 1"):
+    return (
+        f'{{"ts-ms":{ts_ms},"event":"start","qid":"{qid}",'
+        f'"client-ip":"x","query":"{query}"}}\n'
+    ).encode()
+
+
+def end_line(ts_ms, qid, status="ok"):
+    return (
+        f'{{"ts-ms":{ts_ms},"event":"end","qid":"{qid}",'
+        f'"status":"{status}"}}\n'
+    ).encode()
+
+
+def test_find_active_queries_picks_up_unmatched_starts(write_log):
+    path = write_log(
+        start_line(1000, "q1", "SELECT a")
+        + start_line(2000, "q2", "SELECT b")
+        + end_line(3000, "q1")
+    )
+    state, cut_offset, eof_ts = find_active_queries(path, window_pad_ms=10_000)
+    assert list(state.active) == ["q2"]
+    assert state.active["q2"] == (2000, "SELECT b")
+    assert cut_offset == path.stat().st_size
+    assert eof_ts == 3000
+
+
+def test_find_active_queries_loads_sparql_for_each_survivor(write_log):
+    path = write_log(
+        start_line(1000, "a", "SELECT alpha")
+        + start_line(2000, "b", "SELECT beta")
+    )
+    state, _, _ = find_active_queries(path, window_pad_ms=10_000)
+    assert state.active["a"] == (1000, "SELECT alpha")
+    assert state.active["b"] == (2000, "SELECT beta")
+
+
+def test_find_active_queries_empty_log_returns_empty_state(write_log):
+    path = write_log(b"")
+    state, cut_offset, eof_ts = find_active_queries(path, window_pad_ms=10_000)
+    assert state.active == {}
+    assert cut_offset == 0
+    assert eof_ts == 0
+
+
+def make_reader(path, state, cut_offset=0, window_pad_ms=10_000, now_ms=3000):
+    """Build a LiveLogReader with a frozen clock for poll tests."""
+    return LiveLogReader(
+        log_path=path,
+        state=state,
+        cut_offset=cut_offset,
+        window_pad_ms=window_pad_ms,
+        now_ms=lambda: now_ms,
+    )
+
+
+def test_poll_pairs_a_clean_start_and_end(write_log):
+    path = write_log(start_line(1000, "q1", "SELECT a") + end_line(2000, "q1"))
+    state = LiveState()
+    reader = make_reader(path, state)
+    with path.open("rb") as log_stream:
+        reader.poll(log_stream)
+    assert state.active == {}
+    [done] = state.completed.entries
+    assert done.start_ms == 1000
+    assert done.end_ms == 2000
+    assert done.duration_ms == 1000
+    assert done.status == "ok"
+    assert done.start_line_offset is None
+
+
+def test_poll_keeps_start_in_active_until_end_arrives(write_log):
+    path = write_log(start_line(1000, "q1", "SELECT a"))
+    state = LiveState()
+    reader = make_reader(path, state)
+    with path.open("rb") as log_stream:
+        reader.poll(log_stream)
+    assert state.active == {"q1": (1000, "SELECT a")}
+    assert len(state.completed.entries) == 0
+
+
+def test_poll_advances_cursor_so_second_poll_sees_new_lines(write_log):
+    first = start_line(1000, "q1") + end_line(2000, "q1")
+    path = write_log(first)
+    state = LiveState()
+    reader = make_reader(path, state)
+    with path.open("rb") as log_stream:
+        reader.poll(log_stream)
+    assert len(state.completed.entries) == 1
+
+    path.write_bytes(first + start_line(3000, "q2") + end_line(4000, "q2", "failed"))
+    with path.open("rb") as log_stream:
+        reader.poll(log_stream)
+    assert len(state.completed.entries) == 2
+    assert state.completed.entries[-1].status == "failed"
+
+
+def test_poll_partial_trailing_line_is_left_for_next_poll(write_log):
+    full = start_line(1000, "q1") + end_line(2000, "q1")
+    truncated = full[:-5]
+    path = write_log(truncated)
+    state = LiveState()
+    reader = make_reader(path, state)
+    with path.open("rb") as log_stream:
+        reader.poll(log_stream)
+    assert "q1" in state.active
+    assert len(state.completed.entries) == 0
+
+    path.write_bytes(full)
+    with path.open("rb") as log_stream:
+        reader.poll(log_stream)
+    assert state.active == {}
+    assert len(state.completed.entries) == 1
+
+
+def test_poll_skips_malformed_line_and_continues(write_log):
+    path = write_log(
+        b"not json at all\n"
+        + start_line(1000, "q1")
+        + end_line(2000, "q1")
+    )
+    state = LiveState()
+    reader = make_reader(path, state)
+    with path.open("rb") as log_stream:
+        reader.poll(log_stream)
+    assert len(state.completed.entries) == 1
+
+
+def test_poll_drops_end_without_matching_start(write_log):
+    path = write_log(end_line(2000, "ghost"))
+    state = LiveState()
+    reader = make_reader(path, state)
+    with path.open("rb") as log_stream:
+        reader.poll(log_stream)
+    assert state.active == {}
+    assert len(state.completed.entries) == 0
+
+
+def test_evict_stale_drops_actives_older_than_window_pad(write_log):
+    state = LiveState()
+    now = 1_000_000
+    pad = 10_000
+    state.active["fresh"] = (now - 1_000, "")
+    state.active["old"] = (now - 20_000, "")
+    reader = LiveLogReader(
+        log_path=write_log(b""), state=state, cut_offset=0,
+        window_pad_ms=pad, now_ms=lambda: now,
+    )
+    reader.evict_stale()
+    assert list(state.active) == ["fresh"]
+
+
+def test_evict_stale_drops_completed_older_than_one_hour(write_log):
+    state = LiveState()
+    now = 10_000_000
+    state.completed.add(CompletedQuery(
+        start_ms=now - LIVE_HORIZON_MS - 1_000,
+        end_ms=now - LIVE_HORIZON_MS - 500,
+        duration_ms=500, status="ok", start_line_offset=None,
+    ))
+    state.completed.add(CompletedQuery(
+        start_ms=now - 1_000, end_ms=now - 500,
+        duration_ms=500, status="ok", start_line_offset=None,
+    ))
+    reader = LiveLogReader(
+        log_path=write_log(b""), state=state, cut_offset=0,
+        window_pad_ms=10_000, now_ms=lambda: now,
+    )
+    reader.evict_stale()
+    assert len(state.completed.entries) == 1
+    assert state.completed.entries[0].end_ms == now - 500
+
+
+def test_compute_live_metrics_returns_three_snapshots_when_data_covers_an_hour():
+    state = LiveState()
+    state.completed.add(CompletedQuery(
+        start_ms=NOW_MS - 65 * MIN_MS, end_ms=NOW_MS - 60 * MIN_MS,
+        duration_ms=5 * MIN_MS, status="ok", start_line_offset=None,
+    ))
+    state.completed.add(make_completed(NOW_MS - 10 * MIN_MS))
+    state.completed.add(make_completed(NOW_MS - 1 * MIN_MS))
+
+    snaps = compute_live_metrics(state, slow_threshold_ms=10_000, now_ms=NOW_MS)
+    assert len(snaps) == 3
+    assert all(snap is not None for snap in snaps)
+    snap_5m, snap_15m, snap_1h = snaps
+    assert snap_5m.seen == 1
+    assert snap_15m.seen == 2
+    assert snap_1h.seen == 3
+
+
+def test_compute_live_metrics_returns_none_for_windows_past_oldest_entry():
+    state = LiveState()
+    state.completed.add(make_completed(NOW_MS - 11 * MIN_MS))
+    state.completed.add(make_completed(NOW_MS - 2 * MIN_MS))
+
+    snap_5m, snap_15m, snap_1h = compute_live_metrics(
+        state, slow_threshold_ms=10_000, now_ms=NOW_MS,
+    )
+    assert snap_5m is not None
+    assert snap_5m.seen == 1
+    assert snap_15m is None
+    assert snap_1h is None
+
+
+def test_load_completed_history_loads_pairs_from_history(write_log):
+    path = write_log(
+        start_line(1000, "q1") + end_line(2000, "q1")
+        + start_line(3000, "q2") + end_line(4000, "q2", "failed")
+    )
+    state = LiveState()
+    load_completed_history(
+        log_path=path, state=state,
+        cut_offset=path.stat().st_size,
+        now_ms=lambda: 5000,
+    )
+    assert len(state.completed.entries) == 2
+    assert state.completed.entries[0].start_ms == 1000
+    assert state.completed.entries[0].end_ms == 2000
+    assert state.completed.entries[1].status == "failed"
+
+
+def test_load_completed_history_prepends_before_existing_tailer_entries(write_log):
+    path = write_log(start_line(1000, "old") + end_line(2000, "old"))
+    state = LiveState()
+    state.completed.add(CompletedQuery(
+        start_ms=5000, end_ms=6000, duration_ms=1000,
+        status="ok", start_line_offset=None,
+    ))
+    load_completed_history(
+        log_path=path, state=state,
+        cut_offset=path.stat().st_size,
+        now_ms=lambda: 7000,
+    )
+    assert len(state.completed.entries) == 2
+    assert state.completed.entries[0].end_ms == 2000
+    assert state.completed.entries[1].end_ms == 6000
+
+
+def test_load_completed_history_drops_starts_without_a_matching_end(write_log):
+    path = write_log(
+        start_line(1000, "q1") + end_line(2000, "q1")
+        + start_line(3000, "orphan")
+    )
+    state = LiveState()
+    load_completed_history(
+        log_path=path, state=state,
+        cut_offset=path.stat().st_size,
+        now_ms=lambda: 5000,
+    )
+    assert len(state.completed.entries) == 1
+    assert state.completed.entries[0].start_ms == 1000
+
+
+def test_poll_loop_picks_up_lines_appended_to_the_file(write_log):
+    path = write_log(b"")
+    state = LiveState()
+    reader = LiveLogReader(
+        log_path=path, state=state, cut_offset=0,
+        window_pad_ms=10_000, poll_interval=0.02,
+        now_ms=lambda: 0,
+    )
+    stop_event = threading.Event()
+
+    def run_loop():
+        with path.open("rb") as stream:
+            while not stop_event.is_set():
+                reader.poll(stream)
+                stop_event.wait(reader.poll_interval)
+
+    thread = threading.Thread(target=run_loop, daemon=True)
+    thread.start()
+    try:
+        with path.open("ab") as appender:
+            appender.write(start_line(1000, "q1"))
+            appender.write(end_line(2000, "q1"))
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if len(state.completed.entries) == 1:
+                break
+            time.sleep(0.02)
+        assert len(state.completed.entries) == 1
+    finally:
+        stop_event.set()
+        thread.join()

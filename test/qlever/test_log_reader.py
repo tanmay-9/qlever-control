@@ -3,6 +3,7 @@ import pytest
 from qlever.monitor import log_reader
 from qlever.monitor.log_reader import (
     CompletedQuery,
+    extract_query,
     load_sparql_at,
     next_whole_line,
     offset_for_ts,
@@ -10,6 +11,7 @@ from qlever.monitor.log_reader import (
     parse_line,
     parse_line_fallback,
     peek_ts_ms,
+    read_last_timestamp,
     scan_range,
 )
 
@@ -107,26 +109,6 @@ SECOND_LINE = b'{"ts-ms":2000,"event":"end","qid":"q1","status":"ok"}\n'
 THIRD_LINE = b'{"ts-ms":3000,"event":"start","qid":"q2","query":"SELECT 2"}\n'
 SECOND_OFFSET = len(FIRST_LINE)
 THIRD_OFFSET = len(FIRST_LINE) + len(SECOND_LINE)
-
-
-@pytest.fixture
-def open_log(tmp_path):
-    """Write bytes to a log file and hand back an open (handle, size).
-
-    Closes every handle it produced when the test finishes.
-    """
-    handles = []
-
-    def make(data):
-        path = tmp_path / "q.log"
-        path.write_bytes(data)
-        handle = path.open("rb")
-        handles.append(handle)
-        return handle, len(data)
-
-    yield make
-    for handle in handles:
-        handle.close()
 
 
 def test_next_whole_line_probe_zero_returns_first_line(open_log):
@@ -395,6 +377,30 @@ def test_pair_start_end_events_status_flows_through(status):
     assert completed[0].status == status
 
 
+def test_extract_query_returns_query_field():
+    line = (
+        b'{"ts-ms":1,"event":"start","qid":"q1",'
+        b'"query":"SELECT * WHERE { ?s ?p ?o }"}\n'
+    )
+    assert extract_query(line) == "SELECT * WHERE { ?s ?p ?o }"
+
+
+def test_extract_query_handles_escaped_quote_in_query():
+    line = (
+        b'{"ts-ms":1,"event":"start","qid":"q1",'
+        b'"query":"SELECT ?x WHERE { ?x ?p \\"a\\" }"}\n'
+    )
+    assert extract_query(line) == 'SELECT ?x WHERE { ?x ?p "a" }'
+
+
+def test_extract_query_missing_field_returns_empty():
+    assert extract_query(END + b"\n") == ""
+
+
+def test_extract_query_malformed_json_returns_empty():
+    assert extract_query(b"this is not json\n") == ""
+
+
 def test_load_sparql_at_returns_query_text(open_log):
     line = (
         b'{"ts-ms":1,"event":"start","qid":"q1",'
@@ -447,3 +453,29 @@ def test_load_sparql_at_reads_the_line_at_the_given_offset(open_log):
     )
     log, _ = open_log(first + second)
     assert load_sparql_at(log, len(first)) == "SECOND"
+
+
+def test_read_last_timestamp_empty_file_returns_none(open_log):
+    log, size = open_log(b"")
+    assert read_last_timestamp(log, size) is None
+
+
+def test_read_last_timestamp_returns_last_complete_line_ts(open_log):
+    log, size = open_log(FIRST_LINE + SECOND_LINE)
+    assert read_last_timestamp(log, size) == 2000
+
+
+def test_read_last_timestamp_skips_trailing_partial_line(open_log):
+    partial = b'{"ts-ms":3000,"event":"end","qid":"q2","status'
+    log, size = open_log(FIRST_LINE + SECOND_LINE + partial)
+    assert read_last_timestamp(log, size) == 2000
+
+
+def test_read_last_timestamp_grows_buffer_for_long_lines(open_log):
+    long_query = b"x" * (40 * 1024)
+    line = (
+        b'{"ts-ms":1000,"event":"start","qid":"q1",'
+        b'"query":"' + long_query + b'"}\n'
+    )
+    log, size = open_log(line)
+    assert read_last_timestamp(log, size) == 1000

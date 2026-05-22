@@ -176,15 +176,18 @@ def pretty_printed_query(
         return None
 
 
-def is_qlever_server_alive(endpoint_url: str) -> bool:
-    """
-    Helper function that checks if a QLever server is running on the given
-    endpoint. Return `True` if the server is alive, `False` otherwise.
-    """
+def is_qlever_server_alive(
+    endpoint_url: str, max_time: int | None = None
+) -> bool:
+    """Check if a QLever server is running on the given endpoint.
 
+    `max_time` (seconds) caps the curl invocation when set; default is
+    unbounded so existing callers behave as before.
+    """
     message = "from the `qlever` CLI"
+    max_time_flag = f"--max-time {max_time} " if max_time is not None else ""
     curl_cmd = (
-        f"curl -s {endpoint_url}/ping"
+        f"curl -s {max_time_flag}{endpoint_url}/ping"
         f" --data-urlencode msg={shlex.quote(message)}"
     )
     log.debug(curl_cmd)

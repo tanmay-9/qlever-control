@@ -16,14 +16,17 @@ class CompletedQuery(NamedTuple):
     """One start event paired with its matching end event.
 
     start_line_offset is the byte offset of the start line in the log,
-    kept so load_sparql_at can fetch the SPARQL text later.
+    kept so load_sparql_at can fetch the SPARQL text later. None when
+    the pair was built without scanning the file (the live tailer),
+    since those completions feed metrics only and never need their
+    SPARQL text re-read.
     """
 
     start_ms: int
     end_ms: int
     duration_ms: int
     status: str
-    start_line_offset: int
+    start_line_offset: int | None
 
 
 def slice_string_value(line_bytes: bytes, key: bytes) -> str | None:
@@ -159,6 +162,32 @@ def next_whole_line(
     return (line_start, ts_ms)
 
 
+def read_last_timestamp(log_stream: BinaryIO, file_size: int) -> int | None:
+    """Return the ts_ms of the last complete line, or None.
+
+    Reads a 32KB tail buffer and walks its lines backward, returning
+    the first ts_ms that parses. A trailing partial line is skipped by
+    its missing newline; a leading mid-line fragment is skipped because
+    it does not start with the ts_ms prefix. Doubles the buffer and
+    retries if nothing parses, capped at the whole file.
+    """
+    if file_size == 0:
+        return None
+    tail_bytes = 32 * 1024
+    while True:
+        probe = max(0, file_size - tail_bytes)
+        log_stream.seek(probe)
+        for line in reversed(log_stream.readlines()):
+            if not line.endswith(b"\n"):
+                continue
+            ts_ms = peek_ts_ms(line)
+            if ts_ms is not None:
+                return ts_ms
+        if probe == 0:
+            return None
+        tail_bytes *= 2
+
+
 GALLOP_START = 128 * 1024
 
 
@@ -282,17 +311,15 @@ def pair_start_end_events(
     return (completed_queries, still_open)
 
 
-def load_sparql_at(log_stream: BinaryIO, line_offset: int) -> str:
-    """Return the SPARQL text of the start line at line_offset.
+def extract_query(line_bytes: bytes) -> str:
+    """Return the query field from a start line's bytes, or "".
 
-    Returns "" if the line is malformed or has no query field. Never
-    raises. Used only for the handful of rows that need their SPARQL
-    text shown, never on a bulk path.
+    The byte-slice fast path is unsafe for the query field because user
+    SPARQL can contain escaped quotes, so this path uses real json.loads.
+    Returns "" on any malformed input or missing field; never raises.
     """
-    log_stream.seek(line_offset)
-    line = log_stream.readline()
     try:
-        obj = json.loads(line)
+        obj = json.loads(line_bytes)
     except (ValueError, TypeError):
         return ""
     if not isinstance(obj, dict):
@@ -301,3 +328,13 @@ def load_sparql_at(log_stream: BinaryIO, line_offset: int) -> str:
     if not isinstance(query, str):
         return ""
     return query
+
+
+def load_sparql_at(log_stream: BinaryIO, line_offset: int) -> str:
+    """Return the SPARQL text of the start line at line_offset.
+
+    Used by callers that have only the offset, not the line bytes:
+    find_active_queries on survivors, and Historic on displayed rows.
+    """
+    log_stream.seek(line_offset)
+    return extract_query(log_stream.readline())

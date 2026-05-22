@@ -54,6 +54,30 @@ class LiveQueryTable(QueryTable):
         self.add_column("Query ID")
         self.add_column("Duration", width=8)
         self.add_column("SPARQL")
+        self.repaint_rows()
+
+    def set_rows(self, rows: list[LiveQueryRow]) -> None:
+        """Replace the table rows, preserving the cursor position by qid."""
+        cursor_qid = None
+        old_index = self.cursor_row
+        if self.query_rows and 0 <= old_index < len(self.query_rows):
+            cursor_qid = self.query_rows[old_index].qid
+
+        self.query_rows = rows
+        self.clear(columns=False)
+        self.repaint_rows()
+
+        if not self.query_rows:
+            return
+        if cursor_qid is not None:
+            for index, row in enumerate(self.query_rows):
+                if row.qid == cursor_qid:
+                    self.move_cursor(row=index)
+                    return
+        self.move_cursor(row=min(old_index, len(self.query_rows) - 1))
+
+    def repaint_rows(self) -> None:
+        """Add one DataTable row per entry in self.query_rows."""
         now_ms = int(time.time() * 1000)
         for row in self.query_rows:
             self.add_row(
