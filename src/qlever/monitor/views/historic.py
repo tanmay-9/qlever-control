@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Footer, Static
 
-from qlever.monitor.historic_stubs import (
-    get_controls_state,
-    get_historic_metrics,
-    get_historic_query_rows,
-    get_timeline_bounds,
+from qlever.monitor.historic_data import read_window, render_window
+from qlever.monitor.log_reader import (
+    read_first_timestamp,
+    read_last_timestamp,
 )
+from qlever.monitor.metrics import EMPTY_FIELDS
 from qlever.monitor.models import (
     ControlsState,
+    HistoricQueryRow,
+    MetricsCounts,
     SparqlContent,
     TimelineBounds,
 )
@@ -32,6 +35,12 @@ from qlever.monitor.widgets.window_stepper import (
 )
 
 TITLE = "QLever monitor-queries: Historic"
+
+MODE_PHRASES = {
+    "ACTIVE": "were active during",
+    "STARTS": "started in",
+    "ENDS": "ended in",
+}
 
 
 class HistoricScreen(Screen, inherit_bindings=False):
@@ -53,20 +62,33 @@ class HistoricScreen(Screen, inherit_bindings=False):
     ]
 
     def compose(self) -> ComposeResult:
-        controls = get_controls_state()
-        bounds = get_timeline_bounds()
-        # Fixed once: the log span never changes during a session.
-        self.log_start_ms = bounds.log_start_ms
-        self.log_end_ms = bounds.log_end_ms
+        self.log_start_ms = None
+        self.log_end_ms = None
+        self.read_log_span()
         # Presets longer than the log span are pointless; `all` covers it.
         self.available_presets = available_presets(
             self.log_end_ms - self.log_start_ms
         )
-        # The screen owns the mutable window state from here on.
-        self.window_size = controls.window_size
-        self.mode = controls.mode
-        self.window_start_ms = controls.start_ms
-        self.window_end_ms = controls.end_ms
+        self.window_size = self.available_presets[0]
+        self.mode = "ACTIVE"
+        width = preset_ms(self.window_size)
+        self.window_start_ms = (
+            self.log_start_ms if width is None else self.log_end_ms - width
+        )
+        self.window_end_ms = self.log_end_ms
+        self.window_data = None
+        controls = ControlsState(
+            window_size=self.window_size,
+            mode=self.mode,
+            start_ms=self.window_start_ms,
+            end_ms=self.window_end_ms,
+        )
+        bounds = TimelineBounds(
+            log_start_ms=self.log_start_ms,
+            log_end_ms=self.log_end_ms,
+            window_start_ms=self.window_start_ms,
+            window_end_ms=self.window_end_ms,
+        )
 
         yield HeaderRow(
             left=NavPill("< Live", target="live"),
@@ -74,25 +96,41 @@ class HistoricScreen(Screen, inherit_bindings=False):
         )
         yield HistoricControlsRow(controls)
         yield Timeline(bounds)
-        yield MetricsRow([get_historic_metrics()])
-        rows = sorted(
-            get_historic_query_rows(),
-            key=lambda r: r.duration_ms,
-            reverse=True,
+        yield MetricsRow(
+            [MetricsCounts(label=self.window_size, **EMPTY_FIELDS)]
         )
-        yield HistoricQueryTable(rows)
-        yield Static(
-            f"Showing {len(rows)} queries sorted by duration desc",
-            id="table-status",
-        )
+        yield HistoricQueryTable([])
+        yield Static("", id="table-status")
         yield SparqlPane()
         yield Footer(show_command_palette=False)
 
-    def push_state(self) -> None:
-        """Rebuild the controls/timeline models and push them to the widgets.
+    def on_screen_resume(self) -> None:
+        """Catch up on log growth, then push state and rescan."""
+        self.read_log_span()
+        self.available_presets = available_presets(
+            self.log_end_ms - self.log_start_ms
+        )
+        self.clamp_window()
+        self.refresh_view(rescan=True)
+
+    def read_log_span(self) -> None:
+        """Refresh log_end_ms from the file; read log_start_ms only once."""
+        log_path = self.app.log_file
+        with log_path.open("rb") as log_stream:
+            file_size = log_path.stat().st_size
+            if self.log_start_ms is None:
+                self.log_start_ms = read_first_timestamp(
+                    log_stream, file_size
+                )
+            self.log_end_ms = read_last_timestamp(log_stream, file_size)
+
+    def refresh_view(self, rescan: bool) -> None:
+        """Rebuild the controls/timeline widgets and kick the data refresh.
 
         The single update path: every key/click action mutates the
-        screen's window fields and then calls this.
+        screen's window fields and then calls this. `rescan=True` reads
+        a fresh window from the log; `rescan=False` reuses the cached
+        scan and only re-filters by the current mode.
         """
         controls = ControlsState(
             window_size=self.window_size,
@@ -110,6 +148,50 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.query_one(ModePicker).selected = self.mode
         self.query_one(SelectedWindow).state = controls
         self.query_one(Timeline).bounds = bounds
+        self.refresh_data(rescan)
+
+    @work(thread=True, exclusive=True)
+    def refresh_data(self, rescan: bool) -> None:
+        """Scan and/or re-filter the window, push rows + metrics + status.
+
+        On `rescan` the log is read into a fresh `WindowData` cached on
+        the screen; otherwise the cached scan is reused. Render always
+        runs, so a mode change pays only an in-memory filter.
+        """
+        if rescan:
+            self.window_data = read_window(
+                self.app.log_file,
+                self.window_start_ms,
+                self.window_end_ms,
+                self.app.window_pad_ms,
+                self.app.slow_threshold * 1000,
+                self.log_end_ms,
+            )
+        controls = ControlsState(
+            window_size=self.window_size,
+            mode=self.mode,
+            start_ms=self.window_start_ms,
+            end_ms=self.window_end_ms,
+        )
+        rows, metrics = render_window(
+            self.window_data, controls, self.log_end_ms
+        )
+        rows = sorted(rows, key=lambda row: row.duration_ms, reverse=True)
+        self.app.call_from_thread(self.apply_window_result, rows, metrics)
+
+    def apply_window_result(
+        self,
+        rows: list[HistoricQueryRow],
+        metrics: MetricsCounts,
+    ) -> None:
+        """Push fresh rows, metrics, and status line into the widgets."""
+        self.query_one(HistoricQueryTable).set_rows(rows)
+        self.query_one(MetricsRow).rows = [metrics]
+        phrase = MODE_PHRASES[self.mode]
+        self.query_one("#table-status", Static).update(
+            f"Showing {len(rows)} queries that {phrase} the time window "
+            "(sorted by longest duration)"
+        )
 
     def clamp_window_start(self, start: int, width: int) -> int:
         """Keep a window of `width` fully inside the log span."""
@@ -122,35 +204,36 @@ class HistoricScreen(Screen, inherit_bindings=False):
             return
         self.window_start_ms = self.clamp_window_start(ms - width // 2, width)
         self.window_end_ms = self.window_start_ms + width
-        self.push_state()
+        self.refresh_view(rescan=True)
 
-    def reframe_window(self) -> None:
-        """Recompute the window range from its size, then push state.
+    def clamp_window(self) -> None:
+        """Fit the window into the log span, anchored to its right edge.
 
         `all` spans the whole log; any fixed size keeps the current
-        start but is clamped so the window stays inside the log span.
+        `window_end_ms` put and walks `window_start_ms` left, clamped
+        so the window stays inside the log span.
         """
         width = preset_ms(self.window_size)
         if width is None:
             self.window_start_ms = self.log_start_ms
             self.window_end_ms = self.log_end_ms
-        else:
-            start = self.clamp_window_start(self.window_start_ms, width)
-            self.window_start_ms = start
-            self.window_end_ms = start + width
-        self.push_state()
+            return
+        start = self.clamp_window_start(self.window_end_ms - width, width)
+        self.window_start_ms = start
+        self.window_end_ms = start + width
 
     def step_window(self, direction: int) -> None:
         """Move the window size one preset in `direction` (wraps)."""
         presets = self.available_presets
         index = presets.index(self.window_size)
         self.window_size = presets[(index + direction) % len(presets)]
-        self.reframe_window()
+        self.clamp_window()
+        self.refresh_view(rescan=True)
 
     def set_mode(self, mode: str) -> None:
-        """Select an exact match mode, then push state."""
+        """Select an exact match mode, then refresh the view (no rescan)."""
         self.mode = mode
-        self.push_state()
+        self.refresh_view(rescan=False)
 
     def action_cycle_window(self) -> None:
         """Step to the next window-size preset (wraps)."""
@@ -169,7 +252,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         start = self.window_start_ms + direction * width
         self.window_start_ms = self.clamp_window_start(start, width)
         self.window_end_ms = self.window_start_ms + width
-        self.push_state()
+        self.refresh_view(rescan=True)
 
     def action_shift_earlier(self) -> None:
         """Shift the window one width toward the log start."""
@@ -181,13 +264,23 @@ class HistoricScreen(Screen, inherit_bindings=False):
 
     def action_snap_start(self) -> None:
         """Snap the window to the log start."""
+        width = preset_ms(self.window_size)
         self.window_start_ms = self.log_start_ms
-        self.reframe_window()
+        self.window_end_ms = (
+            self.log_end_ms if width is None
+            else self.log_start_ms + width
+        )
+        self.refresh_view(rescan=True)
 
     def action_snap_end(self) -> None:
         """Snap the window to the log end."""
-        self.window_start_ms = self.log_end_ms
-        self.reframe_window()
+        width = preset_ms(self.window_size)
+        self.window_end_ms = self.log_end_ms
+        self.window_start_ms = (
+            self.log_start_ms if width is None
+            else self.log_end_ms - width
+        )
+        self.refresh_view(rescan=True)
 
     def on_nav_pill_clicked(self, message: NavPill.Clicked) -> None:
         """Switch to the screen named by the clicked pill."""

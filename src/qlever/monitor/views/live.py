@@ -8,11 +8,11 @@ from textual.screen import Screen
 from textual.widgets import Footer, Static
 
 from qlever.monitor.live_data import (
+    current_ms,
     get_live_metrics,
     get_live_query_rows,
     get_live_subtitle,
 )
-from qlever.monitor.live_engine import current_ms
 from qlever.monitor.models import SparqlContent
 from qlever.monitor.widgets.header_row import HeaderRow
 from qlever.monitor.widgets.metrics_row import MetricsRow

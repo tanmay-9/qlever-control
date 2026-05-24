@@ -1,0 +1,193 @@
+"""Data layer for the Historic screen.
+
+Reads one time window of the log into a cached `WindowData`, filters
+that cache by display mode, and maps the survivors into the
+`models.py` dataclasses the screen renders. A window change reruns
+the scan; a mode change reuses the cache.
+"""
+
+from pathlib import Path
+from typing import NamedTuple
+
+from qlever.monitor.log_reader import (
+    load_sparql_at,
+    offset_for_ts,
+    pair_start_end_events,
+    scan_range,
+)
+from qlever.monitor.metrics import MetricsSnapshot, metrics_for_ranges
+from qlever.monitor.models import (
+    ControlsState,
+    HistoricQueryRow,
+    MetricsCounts,
+)
+
+# Used as the duration of orphaned queries. Negative so they sort last.
+DURATION_UNKNOWN = -1
+
+
+class LoggedQuery(NamedTuple):
+    """One SPARQL query observed in the log over the current window.
+
+    `end_ms` is `None` when the query started but has not ended yet,
+    either because it is still running or the server crashed before
+    writing the end event. `status` carries the raw end status, or
+    `"running"` for a still-open survivor.
+    """
+
+    start_ms: int
+    end_ms: int | None
+    status: str
+    qid: str
+    sparql: str
+
+
+class WindowData(NamedTuple):
+    """Cached scan of one time window, reused across mode flips.
+
+    `queries` is every `LoggedQuery` overlapping the window in any
+    mode (the ACTIVE superset), already loaded with `qid` and SPARQL
+    so a mode change is a pure in-memory filter. `metrics` is computed
+    over completions whose `end_ms` lies inside the window, so it is
+    the same for every mode.
+    """
+
+    queries: list[LoggedQuery]
+    metrics: MetricsSnapshot
+
+
+def read_window(
+    log_path: Path,
+    window_start_ms: int,
+    window_end_ms: int,
+    pad_ms: int,
+    slow_threshold_ms: int,
+    log_end_ms: int,
+) -> WindowData:
+    """Scan one time window of the log into a `WindowData` snapshot.
+
+    The byte range scanned is the window padded by `pad_ms` on each
+    side so both events of a query straddling the window edge are
+    recovered. Pairs that lie entirely inside the pad are dropped
+    before `qid` and SPARQL are loaded, so the cache holds only rows
+    a mode predicate could keep. Metrics count completions whose
+    `end_ms` lies inside `[window_start_ms, window_end_ms]`.
+
+    A still-open query is labelled `"running"` when its start sits
+    within `pad_ms` of `log_end_ms` (recent enough to plausibly still
+    be executing) and `"orphaned"` otherwise (the server must have
+    crashed before writing the end event).
+    """
+    with log_path.open("rb") as log_stream:
+        file_size = log_path.stat().st_size
+        lo_offset = offset_for_ts(
+            log_stream, window_start_ms - pad_ms, file_size
+        )
+        hi_bound = offset_for_ts(log_stream, window_end_ms + pad_ms, file_size)
+        events = scan_range(log_stream, lo_offset, hi_bound)
+        completed, still_open = pair_start_end_events(events)
+
+        queries = []
+        for pair in completed:
+            if pair.start_ms > window_end_ms or pair.end_ms < window_start_ms:
+                continue
+            qid, sparql = load_sparql_at(log_stream, pair.start_line_offset)
+            queries.append(
+                LoggedQuery(
+                    start_ms=pair.start_ms,
+                    end_ms=pair.end_ms,
+                    status=pair.status,
+                    qid=qid,
+                    sparql=sparql,
+                )
+            )
+        running_cutoff_ms = log_end_ms - pad_ms
+        for start_ms, start_line_offset in still_open.values():
+            if start_ms > window_end_ms:
+                continue
+            qid, sparql = load_sparql_at(log_stream, start_line_offset)
+            status = "running" if start_ms >= running_cutoff_ms else "orphaned"
+            queries.append(
+                LoggedQuery(
+                    start_ms=start_ms,
+                    end_ms=None,
+                    status=status,
+                    qid=qid,
+                    sparql=sparql,
+                )
+            )
+
+    metrics = metrics_for_ranges(
+        completed, [(window_start_ms, window_end_ms)], slow_threshold_ms
+    )[0]
+    return WindowData(queries=queries, metrics=metrics)
+
+
+def filter_queries(
+    window_data: WindowData,
+    mode: str,
+    window_start_ms: int,
+    window_end_ms: int,
+) -> list[LoggedQuery]:
+    """Select queries from a cached `WindowData` for the given mode.
+
+    The cache is already the ACTIVE set (every query overlaps the
+    window), so ACTIVE is the fallthrough that returns it unchanged.
+    STARTS narrows to queries that began inside the window; ENDS
+    narrows to queries that finished inside it. Still-running queries
+    (`end_ms is None`) can satisfy STARTS but never ENDS.
+    """
+    if mode == "STARTS":
+        return [
+            query
+            for query in window_data.queries
+            if window_start_ms <= query.start_ms <= window_end_ms
+        ]
+    if mode == "ENDS":
+        return [
+            query
+            for query in window_data.queries
+            if query.end_ms is not None
+            and window_start_ms <= query.end_ms <= window_end_ms
+        ]
+    return window_data.queries
+
+
+def display_duration_ms(query: LoggedQuery, log_end_ms: int) -> int:
+    """Duration to show for a query row; DURATION_UNKNOWN for orphans."""
+    if query.status == "orphaned":
+        return DURATION_UNKNOWN
+    return (query.end_ms or log_end_ms) - query.start_ms
+
+
+def render_window(
+    window_data: WindowData,
+    controls: ControlsState,
+    log_end_ms: int,
+) -> tuple[list[HistoricQueryRow], MetricsCounts]:
+    """Map a cached `WindowData` into the rows and metrics the UI consumes.
+
+    Runs `filter_queries` for the current mode and translates each
+    surviving `LoggedQuery` into a `HistoricQueryRow`. `duration_ms`
+    is measured against `log_end_ms` for still-running queries,
+    against the recorded `end_ms` for completed ones, and reported as
+    DURATION_UNKNOWN for crash orphans. Metrics come straight from
+    `window_data.metrics`, labelled with the current window size.
+    """
+    queries = filter_queries(
+        window_data, controls.mode, controls.start_ms, controls.end_ms
+    )
+    historic_rows = [
+        HistoricQueryRow(
+            qid=query.qid,
+            started_at_ms=query.start_ms,
+            duration_ms=display_duration_ms(query, log_end_ms),
+            status=query.status,
+            sparql=query.sparql,
+        )
+        for query in queries
+    ]
+    metrics = MetricsCounts(
+        label=controls.window_size, **window_data.metrics._asdict()
+    )
+    return historic_rows, metrics

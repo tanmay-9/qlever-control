@@ -162,6 +162,25 @@ def next_whole_line(
     return (line_start, ts_ms)
 
 
+def read_first_timestamp(log_stream: BinaryIO, file_size: int) -> int | None:
+    """Return the ts_ms of the first complete line, or None.
+
+    Scans forward from the start of the file, skipping malformed
+    lines, and returns the first ts_ms that parses.
+    """
+    if file_size == 0:
+        return None
+    log_stream.seek(0)
+    while True:
+        line = log_stream.readline()
+        # No newline means EOF or a partial line: nothing complete left.
+        if not line.endswith(b"\n"):
+            return None
+        ts_ms = peek_ts_ms(line)
+        if ts_ms is not None:
+            return ts_ms
+
+
 def read_last_timestamp(log_stream: BinaryIO, file_size: int) -> int | None:
     """Return the ts_ms of the last complete line, or None.
 
@@ -311,30 +330,36 @@ def pair_start_end_events(
     return (completed_queries, still_open)
 
 
-def extract_query(line_bytes: bytes) -> str:
-    """Return the query field from a start line's bytes, or "".
+def extract_qid_and_query(line_bytes: bytes) -> tuple[str, str]:
+    """Return (qid, query) from a start line's bytes, or ("", "").
 
     The byte-slice fast path is unsafe for the query field because user
     SPARQL can contain escaped quotes, so this path uses real json.loads.
-    Returns "" on any malformed input or missing field; never raises.
+    Both fields come from the same parse so cost is one json.loads per
+    call. Returns ("", "") on any malformed input or missing field;
+    never raises.
     """
     try:
         obj = json.loads(line_bytes)
     except (ValueError, TypeError):
-        return ""
+        return ("", "")
     if not isinstance(obj, dict):
-        return ""
+        return ("", "")
+    qid = obj.get("qid")
     query = obj.get("query")
-    if not isinstance(query, str):
-        return ""
-    return query
+    if not isinstance(qid, str) or not isinstance(query, str):
+        return ("", "")
+    return (qid, query)
 
 
-def load_sparql_at(log_stream: BinaryIO, line_offset: int) -> str:
-    """Return the SPARQL text of the start line at line_offset.
+def load_sparql_at(
+    log_stream: BinaryIO, line_offset: int
+) -> tuple[str, str]:
+    """Return (qid, sparql) for the start line at line_offset.
 
     Used by callers that have only the offset, not the line bytes:
-    find_active_queries on survivors, and Historic on displayed rows.
+    find_active_queries on survivors (qid already known, ignored), and
+    Historic on displayed rows (needs both).
     """
     log_stream.seek(line_offset)
-    return extract_query(log_stream.readline())
+    return extract_qid_and_query(log_stream.readline())

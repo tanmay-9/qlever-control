@@ -1,0 +1,112 @@
+"""Summarises a group of finished queries into one metrics row.
+
+The Live and Historic screens both display these counts and timings.
+Keeping the math here lets both engines share it without importing
+each other.
+"""
+
+import statistics
+from collections.abc import Iterable
+from typing import NamedTuple
+
+from qlever.monitor.log_reader import CompletedQuery
+
+
+class MetricsSnapshot(NamedTuple):
+    """One metrics row: counts and timings for a group of finished queries.
+
+    Every finished query has exactly one status, so the status counts
+    always add up to seen:
+        seen == ok + failed + timeout + cancelled + unknown
+    slow is counted separately, since a query can be both ok and slow.
+    p50 and p95 are the median and 95th-percentile run times in
+    milliseconds, or None when there are no queries to measure.
+    """
+
+    seen: int
+    ok: int
+    failed: int
+    timeout: int
+    cancelled: int
+    unknown: int
+    slow: int
+    p50: int | None
+    p95: int | None
+
+
+# All-None counts, spread into MetricsCounts when a row has no data yet.
+EMPTY_FIELDS = dict.fromkeys(MetricsSnapshot._fields)
+
+
+def percentiles(durations_ms: list[int]) -> tuple[int | None, int | None]:
+    """Return the median (p50) and 95th-percentile (p95) run times.
+
+    Both are in milliseconds. Returns (None, None) when the list is
+    empty.
+    """
+    if not durations_ms:
+        return (None, None)
+    if len(durations_ms) == 1:
+        only = durations_ms[0]
+        return (only, only)
+    cuts = statistics.quantiles(durations_ms, n=100)
+    return (round(cuts[49]), round(cuts[94]))
+
+
+def build_snapshot(
+    counts: dict[str, int],
+    slow: int,
+    durations_ms: list[int],
+) -> MetricsSnapshot:
+    """Build one MetricsSnapshot from already-counted query results.
+
+    counts holds the per-status totals, slow is how many queries ran
+    longer than the slow threshold, and durations_ms is every query's
+    run time (its length is the total seen).
+    """
+    p50, p95 = percentiles(durations_ms)
+    return MetricsSnapshot(
+        seen=len(durations_ms),
+        ok=counts["ok"],
+        failed=counts["failed"],
+        timeout=counts["timeout"],
+        cancelled=counts["cancelled"],
+        unknown=counts["unknown"],
+        slow=slow,
+        p50=p50,
+        p95=p95,
+    )
+
+
+def metrics_for_ranges(
+    completed: Iterable[CompletedQuery],
+    ranges: list[tuple[int, int]],
+    slow_threshold_ms: int,
+) -> list[MetricsSnapshot]:
+    """Summarise completed queries into one snapshot per time range.
+
+    Each range is an absolute (lo_ms, hi_ms) interval; a completed
+    query counts toward a range when its end_ms falls inside it. Walks
+    completed once, filling every range's tally in parallel, so N
+    ranges still cost a single pass. Returns one snapshot per range, in
+    the order the ranges were given.
+    """
+    counts = [
+        {"ok": 0, "failed": 0, "timeout": 0, "cancelled": 0, "unknown": 0}
+        for _ in ranges
+    ]
+    slow = [0] * len(ranges)
+    durations = [[] for _ in ranges]
+
+    for entry in completed:
+        for index, (lo_ms, hi_ms) in enumerate(ranges):
+            if lo_ms <= entry.end_ms <= hi_ms:
+                counts[index][entry.status] += 1
+                if entry.duration_ms >= slow_threshold_ms:
+                    slow[index] += 1
+                durations[index].append(entry.duration_ms)
+
+    return [
+        build_snapshot(counts[index], slow[index], durations[index])
+        for index in range(len(ranges))
+    ]

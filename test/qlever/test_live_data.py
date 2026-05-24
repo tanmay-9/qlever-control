@@ -1,20 +1,19 @@
-"""Tests for CompletedQueries and the metrics snapshot helpers."""
+"""Tests for the Live data layer: state, tailer, boot, metrics."""
 
 import threading
 import time
 
-from qlever.monitor.live_engine import (
+from qlever.monitor.live_data import (
     LIVE_HORIZON_MS,
     CompletedQueries,
     LiveLogReader,
     LiveState,
-    MetricsSnapshot,
-    compute_live_metrics,
     find_active_queries,
+    get_live_metrics,
     load_completed_history,
-    percentiles,
 )
 from qlever.monitor.log_reader import CompletedQuery
+from qlever.monitor.metrics import MetricsSnapshot, percentiles
 
 NOW_MS = 1_700_000_000_000
 MIN_MS = 60_000
@@ -310,7 +309,7 @@ def test_evict_stale_drops_completed_older_than_one_hour(write_log):
     assert state.completed.entries[0].end_ms == now - 500
 
 
-def test_compute_live_metrics_returns_three_snapshots_when_data_covers_an_hour():
+def test_get_live_metrics_returns_three_rows_when_data_covers_an_hour():
     state = LiveState()
     state.completed.add(CompletedQuery(
         start_ms=NOW_MS - 65 * MIN_MS, end_ms=NOW_MS - 60 * MIN_MS,
@@ -319,27 +318,25 @@ def test_compute_live_metrics_returns_three_snapshots_when_data_covers_an_hour()
     state.completed.add(make_completed(NOW_MS - 10 * MIN_MS))
     state.completed.add(make_completed(NOW_MS - 1 * MIN_MS))
 
-    snaps = compute_live_metrics(state, slow_threshold_ms=10_000, now_ms=NOW_MS)
-    assert len(snaps) == 3
-    assert all(snap is not None for snap in snaps)
-    snap_5m, snap_15m, snap_1h = snaps
-    assert snap_5m.seen == 1
-    assert snap_15m.seen == 2
-    assert snap_1h.seen == 3
+    rows = get_live_metrics(state, slow_threshold_ms=10_000, now_ms=NOW_MS)
+    assert [row.label for row in rows] == ["last 5m", "last 15m", "last 1h"]
+    row_5m, row_15m, row_1h = rows
+    assert row_5m.seen == 1
+    assert row_15m.seen == 2
+    assert row_1h.seen == 3
 
 
-def test_compute_live_metrics_returns_none_for_windows_past_oldest_entry():
+def test_get_live_metrics_blanks_windows_past_oldest_entry():
     state = LiveState()
     state.completed.add(make_completed(NOW_MS - 11 * MIN_MS))
     state.completed.add(make_completed(NOW_MS - 2 * MIN_MS))
 
-    snap_5m, snap_15m, snap_1h = compute_live_metrics(
+    row_5m, row_15m, row_1h = get_live_metrics(
         state, slow_threshold_ms=10_000, now_ms=NOW_MS,
     )
-    assert snap_5m is not None
-    assert snap_5m.seen == 1
-    assert snap_15m is None
-    assert snap_1h is None
+    assert row_5m.seen == 1
+    assert row_15m.seen is None
+    assert row_1h.seen is None
 
 
 def test_load_completed_history_loads_pairs_from_history(write_log):

@@ -1,9 +1,8 @@
 """Shared data models for the monitor-queries TUI.
 
 These frozen dataclasses are the contract between the data layer and the
-UI. Widgets render them; the stub modules (and later the real log-reader)
-produce them. Neither side imports the other: both depend on this module,
-so swapping stubs for the real reader never touches a widget.
+UI. Widgets render them; the data adapters produce them. Neither side
+imports the other: both depend on this module.
 """
 
 from dataclasses import dataclass

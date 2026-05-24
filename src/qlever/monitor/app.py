@@ -9,7 +9,7 @@ from textual.binding import Binding
 from textual.css.query import NoMatches
 from textual.worker import get_current_worker
 
-from qlever.monitor.live_engine import (
+from qlever.monitor.live_data import (
     LiveLogReader,
     LiveState,
     find_active_queries,
@@ -45,6 +45,7 @@ class MonitorQueriesApp(App):
         ("t", "cycle_themes", "Change theme"),
         ("y", "copy_query", "Copy SPARQL"),
         ("p", "pretty_print", "Pretty print"),
+        ("c", "clear_query", "Clear SPARQL"),
         Binding(
             "shift+up",
             "scroll_sparql_up",
@@ -162,6 +163,13 @@ class MonitorQueriesApp(App):
             self.notify("Could not pretty-print this query", severity="error")
             return
         pane.pretty_text = result
+
+    def action_clear_query(self) -> None:
+        """Drop the displayed query, restoring the empty-state hint."""
+        pane = self.screen.query_one(SparqlPane)
+        if pane.content is None:
+            return
+        pane.content = None
 
     def action_scroll_sparql_up(self) -> None:
         """Scroll the overflowing SPARQL pane up one line."""

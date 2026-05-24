@@ -25,8 +25,10 @@ def truncate(text: str, width: int) -> str:
 
 
 def format_duration(ms: int) -> str:
-    """Render a duration as whole seconds."""
-    return f"{max(ms, 0) // 1000}s"
+    """Render a duration in seconds to one decimal, or '?' when unknown."""
+    if ms < 0:
+        return "?"
+    return f"{ms / 1000:.1f}s"
 
 
 class QueryTable(DataTable):
@@ -37,26 +39,12 @@ class QueryTable(DataTable):
     its own columns, since the two column sets differ.
     """
 
-    def __init__(self, rows: list) -> None:
+    def __init__(self, rows: list[LiveQueryRow] | list[HistoricQueryRow]) -> None:
         """Hold the rows to paint once the table is mounted."""
         super().__init__(cursor_type="row")
         self.query_rows = rows
 
-
-class LiveQueryTable(QueryTable):
-    """Active queries on the Live screen; the only focusable widget."""
-
-    def __init__(self, rows: list[LiveQueryRow]) -> None:
-        super().__init__(rows)
-
-    def on_mount(self) -> None:
-        """Add the columns and one table row per active query."""
-        self.add_column("Query ID")
-        self.add_column("Duration", width=8)
-        self.add_column("SPARQL")
-        self.repaint_rows()
-
-    def set_rows(self, rows: list[LiveQueryRow]) -> None:
+    def set_rows(self, rows: list[LiveQueryRow] | list[HistoricQueryRow]) -> None:
         """Replace the table rows, preserving the cursor position by qid."""
         cursor_qid = None
         old_index = self.cursor_row
@@ -76,6 +64,17 @@ class LiveQueryTable(QueryTable):
                     return
         self.move_cursor(row=min(old_index, len(self.query_rows) - 1))
 
+
+class LiveQueryTable(QueryTable):
+    """Active queries on the Live screen; the only focusable widget."""
+
+    def on_mount(self) -> None:
+        """Add the columns and one table row per active query."""
+        self.add_column("Query ID")
+        self.add_column("Duration", width=8)
+        self.add_column("SPARQL")
+        self.repaint_rows()
+
     def repaint_rows(self) -> None:
         """Add one DataTable row per entry in self.query_rows."""
         now_ms = int(time.time() * 1000)
@@ -90,15 +89,16 @@ class LiveQueryTable(QueryTable):
 class HistoricQueryTable(QueryTable):
     """Finished queries in the current window on the Historic screen."""
 
-    def __init__(self, rows: list[HistoricQueryRow]) -> None:
-        super().__init__(rows)
-
     def on_mount(self) -> None:
         """Add the columns and one table row per finished query."""
         self.add_column("Started")
         self.add_column("Duration", width=8)
         self.add_column("Status")
         self.add_column("SPARQL")
+        self.repaint_rows()
+
+    def repaint_rows(self) -> None:
+        """Add one DataTable row per entry in self.query_rows."""
         for row in self.query_rows:
             self.add_row(
                 format_clock(row.started_at_ms),
