@@ -42,7 +42,8 @@ class MonitorQueriesApp(App):
 
     BINDINGS = [
         ("q", "quit", "Quit/Exit"),
-        ("t", "cycle_themes", "Change theme"),
+        Binding("t", "cycle_themes", "Change theme", key_display="T/t"),
+        Binding("T", "cycle_themes(-1)", "Previous theme", show=False),
         ("y", "copy_query", "Copy SPARQL"),
         ("p", "pretty_print", "Pretty print"),
         ("c", "clear_query", "Clear SPARQL"),
@@ -195,8 +196,8 @@ class MonitorQueriesApp(App):
             return scroll.max_scroll_y > 0
         return True
 
-    def action_cycle_themes(self) -> None:
-        """Select the next theme on press of `t` binding"""
-        themes = [t for t in self.available_themes if "ansi" not in t]
+    def action_cycle_themes(self, direction: int = 1) -> None:
+        """Step through themes; `direction` is +1 for `t`, -1 for `T`."""
+        themes = list(self.available_themes)
         selected_theme_idx = themes.index(self.theme)
-        self.theme = themes[(selected_theme_idx + 1) % len(themes)]
+        self.theme = themes[(selected_theme_idx + direction) % len(themes)]

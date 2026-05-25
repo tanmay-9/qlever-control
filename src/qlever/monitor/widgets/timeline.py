@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import ceil
 
 from textual import events
 from textual.message import Message
@@ -68,6 +69,21 @@ def column_to_ms(col: int, bar_width: int, bounds: TimelineBounds) -> int:
     return bounds.log_start_ms + round(fraction * span)
 
 
+def window_width_cells(bounds: TimelineBounds, bar_width: int) -> int:
+    """Cells the window block should occupy, based on its duration.
+
+    Width depends only on how long the window is relative to the log
+    span, never on where it sits. Floors at one cell so a tiny window
+    is still visible.
+    """
+    log_span = bounds.log_end_ms - bounds.log_start_ms
+    if log_span <= 0:
+        return 1
+    window_span = bounds.window_end_ms - bounds.window_start_ms
+    fraction = window_span / log_span
+    return max(1, ceil(fraction * bar_width))
+
+
 def render_track(bounds: TimelineBounds, bar_width: int) -> str:
     """The bar line: full-span track with the window span marked.
 
@@ -75,12 +91,14 @@ def render_track(bounds: TimelineBounds, bar_width: int) -> str:
     when the window reaches an edge.
     """
     chars = ["─"] * bar_width
+    width = window_width_cells(bounds, bar_width)
     start = fraction_to_column(
         span_fraction(bounds.window_start_ms, bounds), bar_width
     )
-    end = fraction_to_column(
-        span_fraction(bounds.window_end_ms, bounds), bar_width
-    )
+    end = start + width - 1
+    if end > bar_width - 1:
+        end = bar_width - 1
+        start = end - width + 1
     for col in range(start, end + 1):
         chars[col] = "█"
     chars[0] = "├"
