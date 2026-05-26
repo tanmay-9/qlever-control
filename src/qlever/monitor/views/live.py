@@ -46,7 +46,11 @@ class LiveScreen(Screen, inherit_bindings=False):
         )
         state = self.app.live_state
         slow_ms = self.app.slow_threshold * 1000
-        rows = sorted(get_live_query_rows(state), key=lambda row: row.ts_ms)
+        rows = sorted(
+            get_live_query_rows(state, current_ms()),
+            key=lambda row: row.duration_ms,
+            reverse=True,
+        )
 
         self.liveness = (
             "reachable" if is_log_fresh(state, current_ms()) else "checking"
@@ -85,6 +89,8 @@ class LiveScreen(Screen, inherit_bindings=False):
 
     def on_screen_resume(self) -> None:
         """Resume periodic UI work; recheck server unless already reachable."""
+        # Drop flashes accumulated while suspended.
+        take_unseen_finished(self.app.live_state)
         self.table_timer.resume()
         self.update_liveness_visuals()
         if self.ping_timer is not None:
@@ -132,9 +138,7 @@ class LiveScreen(Screen, inherit_bindings=False):
     @work(thread=True, exclusive=True)
     def ping_server(self) -> None:
         """Curl the server's /ping off the UI thread."""
-        ok = is_qlever_server_alive(
-            self.app.sparql_endpoint, max_time=2
-        )
+        ok = is_qlever_server_alive(self.app.sparql_endpoint, max_time=2)
         self.app.call_from_thread(self.apply_ping_result, ok)
 
     def apply_ping_result(self, ok: bool) -> None:
@@ -182,7 +186,10 @@ class LiveScreen(Screen, inherit_bindings=False):
         stop ticking on stale rows; otherwise trust real time.
         """
         state = self.app.live_state
-        if self.liveness == "unreachable" and state.latest_event_ms is not None:
+        if (
+            self.liveness == "unreachable"
+            and state.latest_event_ms is not None
+        ):
             return state.latest_event_ms
         return current_ms()
 
@@ -192,11 +199,14 @@ class LiveScreen(Screen, inherit_bindings=False):
         if self.frozen:
             return
         state = self.app.live_state
-        rows = get_live_query_rows(state) + take_unseen_finished(state)
-        rows = sorted(rows, key=lambda row: row.ts_ms)
-        table = self.query_one(LiveQueryTable)
-        table.clock_ms = self.display_clock_ms()
-        table.set_rows(rows)
+        active_rows = get_live_query_rows(state, self.display_clock_ms())
+        flashed_rows = take_unseen_finished(state)
+        rows = sorted(
+            active_rows + flashed_rows,
+            key=lambda row: row.duration_ms,
+            reverse=True,
+        )
+        self.query_one(LiveQueryTable).set_rows(rows)
         self.refresh_subtitle()
 
     def refresh_metrics(self) -> None:
@@ -241,7 +251,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         row = message.data_table.query_rows[message.cursor_row]
         self.query_one(SparqlPane).content = SparqlContent(
             qid=row.qid,
-            started_at_ms=row.ts_ms,
+            started_at_ms=row.started_at_ms,
             status=None,
             sparql_text=row.sparql,
             client_ip=row.client_ip,

@@ -101,9 +101,7 @@ class CompletedQueries:
         not-yet-ready. Returns snapshots in the same order as windows_ms.
         """
         ranges = [(now_ms - width, now_ms) for width in windows_ms]
-        snapshots = metrics_for_ranges(
-            self.entries, ranges, slow_threshold_ms
-        )
+        snapshots = metrics_for_ranges(self.entries, ranges, slow_threshold_ms)
         return [
             None if lo_ms < data_start_ms else snapshot
             for (lo_ms, _), snapshot in zip(ranges, snapshots)
@@ -157,7 +155,9 @@ def find_active_queries(
         _, still_open = pair_start_end_events(events)
 
         for qid, (start_ms, start_line_offset) in still_open.items():
-            _, client_ip, sparql = load_sparql_at(log_stream, start_line_offset)
+            _, client_ip, sparql = load_sparql_at(
+                log_stream, start_line_offset
+            )
             state.active[qid] = (start_ms, client_ip, sparql)
 
     return (state, file_size, eof_ts)
@@ -297,7 +297,8 @@ class LiveLogReader:
                     self.state.unseen_finished.append(
                         LiveQueryRow(
                             qid=qid,
-                            ts_ms=start_ms,
+                            started_at_ms=start_ms,
+                            duration_ms=duration_ms,
                             sparql=sparql,
                             client_ip=client_ip,
                         )
@@ -316,13 +317,21 @@ def take_unseen_finished(state: LiveState) -> list[LiveQueryRow]:
     return snapshot
 
 
-def get_live_query_rows(state: LiveState) -> list[LiveQueryRow]:
-    """Snapshot the active set as a list of UI rows; no sort."""
+def get_live_query_rows(state: LiveState, now_ms: int) -> list[LiveQueryRow]:
+    """Snapshot the active set as table rows with their current duration.
+
+    The caller chooses the clock: the Live screen passes
+    display_clock_ms() so freeze-on-unreachable freezes durations too.
+    """
     with state.lock:
         active_snapshot = list(state.active.items())
     return [
         LiveQueryRow(
-            qid=qid, ts_ms=start_ms, sparql=sparql, client_ip=client_ip
+            qid=qid,
+            started_at_ms=start_ms,
+            duration_ms=now_ms - start_ms,
+            sparql=sparql,
+            client_ip=client_ip,
         )
         for qid, (start_ms, client_ip, sparql) in active_snapshot
     ]
@@ -367,9 +376,11 @@ def get_live_metrics(
         if snap is None and coverage_start_ms is not None:
             eta_ms = coverage_start_ms + width_ms - now_ms
             message = f"ready in {format_eta(eta_ms)}"
-        rows.append(MetricsCounts(
-            label=label,
-            **(snap._asdict() if snap is not None else EMPTY_FIELDS),
-            not_ready_message=message,
-        ))
+        rows.append(
+            MetricsCounts(
+                label=label,
+                **(snap._asdict() if snap is not None else EMPTY_FIELDS),
+                not_ready_message=message,
+            )
+        )
     return rows

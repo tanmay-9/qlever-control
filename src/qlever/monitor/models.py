@@ -43,19 +43,14 @@ class MetricsCounts:
 @dataclass(frozen=True)
 class LiveQueryRow:
     qid: str
-    ts_ms: int
+    started_at_ms: int
+    duration_ms: int
     sparql: str
     client_ip: str = ""
 
 
 @dataclass(frozen=True)
 class HistoricQueryRow:
-    """A finished query in the current window.
-
-    Unlike LiveQueryRow these carry a terminal `status` and a stored
-    `duration_ms` (not an elapsed `now - ts`).
-    """
-
     qid: str
     started_at_ms: int
     duration_ms: int

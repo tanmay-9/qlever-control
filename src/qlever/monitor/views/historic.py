@@ -7,6 +7,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Static
 
 from qlever.monitor.historic_data import read_window, render_window
+from qlever.monitor.live_data import current_ms
 from qlever.monitor.metrics import EMPTY_FIELDS
 from qlever.monitor.models import (
     ControlsState,
@@ -171,6 +172,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
                 self.app.window_pad_ms,
                 self.app.slow_threshold * 1000,
                 self.log_end_ms,
+                current_ms(),
             )
         controls = ControlsState(
             window_size=self.window_size,
@@ -272,8 +274,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         width = preset_ms(self.window_size)
         self.window_start_ms = self.log_start_ms
         self.window_end_ms = (
-            self.log_end_ms if width is None
-            else self.log_start_ms + width
+            self.log_end_ms if width is None else self.log_start_ms + width
         )
         self.refresh_view(rescan=True)
 
@@ -282,8 +283,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         width = preset_ms(self.window_size)
         self.window_end_ms = self.log_end_ms
         self.window_start_ms = (
-            self.log_start_ms if width is None
-            else self.log_end_ms - width
+            self.log_start_ms if width is None else self.log_end_ms - width
         )
         self.refresh_view(rescan=True)
 

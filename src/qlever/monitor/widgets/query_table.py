@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-
 from rich.text import Text
 from textual.widgets import DataTable
 
@@ -39,12 +37,16 @@ class QueryTable(DataTable):
     its own columns, since the two column sets differ.
     """
 
-    def __init__(self, rows: list[LiveQueryRow] | list[HistoricQueryRow]) -> None:
+    def __init__(
+        self, rows: list[LiveQueryRow] | list[HistoricQueryRow]
+    ) -> None:
         """Hold the rows to paint once the table is mounted."""
         super().__init__(cursor_type="row")
         self.query_rows = rows
 
-    def set_rows(self, rows: list[LiveQueryRow] | list[HistoricQueryRow]) -> None:
+    def set_rows(
+        self, rows: list[LiveQueryRow] | list[HistoricQueryRow]
+    ) -> None:
         """Replace the table rows, preserving the cursor position by qid."""
         cursor_qid = None
         old_index = self.cursor_row
@@ -68,8 +70,6 @@ class QueryTable(DataTable):
 class LiveQueryTable(QueryTable):
     """Active queries on the Live screen; the only focusable widget."""
 
-    clock_ms: int | None = None
-
     def on_mount(self) -> None:
         """Add the columns and one table row per active query."""
         self.add_column("Query ID")
@@ -78,16 +78,11 @@ class LiveQueryTable(QueryTable):
         self.repaint_rows()
 
     def repaint_rows(self) -> None:
-        """Add one DataTable row per entry in self.query_rows.
-
-        clock_ms freezes the duration math when the screen has lost
-        contact with the server; None falls back to wall clock.
-        """
-        now_ms = self.clock_ms if self.clock_ms is not None else int(time.time() * 1000)
+        """Add one DataTable row per entry in self.query_rows."""
         for row in self.query_rows:
             self.add_row(
                 truncate(row.qid, QID_WIDTH),
-                Text(format_duration(now_ms - row.ts_ms), justify="right"),
+                Text(format_duration(row.duration_ms), justify="right"),
                 truncate(oneline(row.sparql), SPARQL_WIDTH),
             )
 

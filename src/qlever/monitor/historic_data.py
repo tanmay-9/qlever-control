@@ -64,6 +64,7 @@ def read_window(
     pad_ms: int,
     slow_threshold_ms: int,
     log_end_ms: int,
+    now_ms: int,
 ) -> WindowData:
     """Scan one time window of the log into a `WindowData` snapshot.
 
@@ -74,10 +75,9 @@ def read_window(
     a mode predicate could keep. Metrics count completions whose
     `end_ms` lies inside `[window_start_ms, window_end_ms]`.
 
-    A still-open query is labelled `"running"` when its start sits
-    within `pad_ms` of `log_end_ms` (recent enough to plausibly still
-    be executing) and `"orphaned"` otherwise (the server must have
-    crashed before writing the end event).
+    A still-open query is `"running"` only if its start is within
+    `pad_ms` of `log_end_ms` and the log itself is fresh
+    (`now_ms - log_end_ms <= pad_ms`); otherwise `"orphaned"`.
     """
     with log_path.open("rb") as log_stream:
         file_size = log_path.stat().st_size
@@ -105,6 +105,7 @@ def read_window(
                     client_ip=client_ip,
                 )
             )
+        log_is_fresh = now_ms - log_end_ms <= pad_ms
         running_cutoff_ms = log_end_ms - pad_ms
         for start_ms, start_line_offset in still_open.values():
             if start_ms > window_end_ms:
@@ -112,7 +113,11 @@ def read_window(
             qid, client_ip, sparql = load_sparql_at(
                 log_stream, start_line_offset
             )
-            status = "running" if start_ms >= running_cutoff_ms else "orphaned"
+            status = (
+                "running"
+                if log_is_fresh and start_ms >= running_cutoff_ms
+                else "orphaned"
+            )
             queries.append(
                 LoggedQuery(
                     start_ms=start_ms,
