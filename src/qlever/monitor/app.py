@@ -10,11 +10,14 @@ from textual.css.query import NoMatches
 from textual.worker import get_current_worker
 
 from qlever.monitor.live_data import (
+    LIVE_HORIZON_MS,
     LiveLogReader,
     LiveState,
+    current_ms,
     find_active_queries,
     load_completed_history,
 )
+from qlever.monitor.log_reader import read_first_timestamp
 from qlever.monitor.util import clipboard_install_hint, copy_text
 from qlever.monitor.views.historic import HistoricScreen
 from qlever.monitor.views.live import LiveScreen
@@ -80,11 +83,16 @@ class MonitorQueriesApp(App):
 
     def on_mount(self) -> None:
         """Boot the live engine, then open the Live screen."""
+        self.boot_time_ms = current_ms()
         state, cut_offset, _ = find_active_queries(
             self.log_file, self.window_pad_ms
         )
         self.live_state = state
         self.cut_offset = cut_offset
+        with self.log_file.open("rb") as log_stream:
+            self.log_start_ms = read_first_timestamp(
+                log_stream, self.log_file.stat().st_size
+            )
         self.tail_live_log()
         self.load_metrics_history()
         self.push_screen("live")
@@ -108,6 +116,11 @@ class MonitorQueriesApp(App):
     def load_metrics_history(self) -> None:
         """Prepend the hour before cut_offset into completed history so metrics aren't empty at boot."""
         load_completed_history(self.log_file, self.live_state, self.cut_offset)
+        # Backfill is done; record how far back metrics have data.
+        log_start_or_boot = self.log_start_ms or self.boot_time_ms
+        self.live_state.metrics_known_from_ms = max(
+            log_start_or_boot, self.boot_time_ms - LIVE_HORIZON_MS
+        )
 
     def action_swap_screen(self) -> None:
         """Toggle between Live and Historic (bound to Tab on each screen)."""

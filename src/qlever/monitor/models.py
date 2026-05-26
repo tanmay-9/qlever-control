@@ -27,6 +27,7 @@ class MetricsCounts:
     p50: int | None
     p95: int | None
     slow: int | None
+    not_ready_message: str | None = None
 
 
 @dataclass(frozen=True)

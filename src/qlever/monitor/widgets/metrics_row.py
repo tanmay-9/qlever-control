@@ -86,6 +86,8 @@ def render_cell(label: str, value: int | None, width: int, kind: str) -> str:
 
 def format_row(row: MetricsCounts, widths: list[int]) -> str:
     """Format one rolling-window row as a single line with markup."""
+    if row.not_ready_message:
+        return f"[bold]{row.label:<8}[/] │ [dim]{row.not_ready_message}[/]"
     cells = [
         render_cell(name, getattr(row, name), width, kind)
         for (name, kind), width in zip(COLUMNS, widths)

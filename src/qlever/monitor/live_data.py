@@ -107,6 +107,7 @@ class LiveState:
     completed: CompletedQueries = field(default_factory=CompletedQueries)
     active: dict[str, tuple[int, str]] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    metrics_known_from_ms: int | None = None
 
 
 def find_active_queries(
@@ -287,6 +288,13 @@ def get_live_query_rows(state: LiveState) -> list[LiveQueryRow]:
     ]
 
 
+def format_eta(ms: int) -> str:
+    """Coarse countdown for a not-ready metric row; sub-minute reads "<1m"."""
+    if ms < 60_000:
+        return "<1m"
+    return f"{ms // 60_000}m"
+
+
 def get_live_metrics(
     state: LiveState,
     slow_threshold_ms: int,
@@ -295,26 +303,33 @@ def get_live_metrics(
     """Three rolling-window metric rows for the Live screen.
 
     Takes a short-locked deque copy so the metric scan and percentile
-    work runs lock-free while the tailer keeps appending. Windows whose
-    cutoff predates the oldest entry render as an all-None row so the
-    widget shows "..." until the deque covers that range.
+    work runs lock-free while the tailer keeps appending. A window
+    whose start predates metrics_known_from_ms renders as an all-None
+    row so the widget shows "..." until coverage reaches that range.
     """
     with state.lock:
         history = CompletedQueries()
         history.entries = deque(state.completed.entries)
-    oldest_ms = (
-        history.entries[0].start_ms if history.entries else now_ms
-    )
+        coverage_start_ms = state.metrics_known_from_ms
     snapshots = history.metrics_for_windows(
         now_ms=now_ms,
         windows_ms=LIVE_METRIC_WINDOWS_MS,
         slow_threshold_ms=slow_threshold_ms,
-        data_start_ms=oldest_ms,
+        data_start_ms=coverage_start_ms or now_ms,
     )
-    return [
-        MetricsCounts(
+    rows = []
+    for label, width_ms, snap in zip(
+        LIVE_METRIC_LABELS, LIVE_METRIC_WINDOWS_MS, snapshots
+    ):
+        # Show "ready in Nm" only once we know when coverage arrives;
+        # during boot ramp coverage_start_ms is None and rows just read "…".
+        message = None
+        if snap is None and coverage_start_ms is not None:
+            eta_ms = coverage_start_ms + width_ms - now_ms
+            message = f"ready in {format_eta(eta_ms)}"
+        rows.append(MetricsCounts(
             label=label,
             **(snap._asdict() if snap is not None else EMPTY_FIELDS),
-        )
-        for label, snap in zip(LIVE_METRIC_LABELS, snapshots)
-    ]
+            not_ready_message=message,
+        ))
+    return rows

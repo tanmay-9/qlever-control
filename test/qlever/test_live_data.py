@@ -309,8 +309,9 @@ def test_evict_stale_drops_completed_older_than_one_hour(write_log):
     assert state.completed.entries[0].end_ms == now - 500
 
 
-def test_get_live_metrics_returns_three_rows_when_data_covers_an_hour():
+def test_get_live_metrics_returns_three_rows_when_coverage_spans_an_hour():
     state = LiveState()
+    state.metrics_known_from_ms = NOW_MS - 65 * MIN_MS
     state.completed.add(CompletedQuery(
         start_ms=NOW_MS - 65 * MIN_MS, end_ms=NOW_MS - 60 * MIN_MS,
         duration_ms=5 * MIN_MS, status="ok", start_line_offset=None,
@@ -326,8 +327,9 @@ def test_get_live_metrics_returns_three_rows_when_data_covers_an_hour():
     assert row_1h.seen == 3
 
 
-def test_get_live_metrics_blanks_windows_past_oldest_entry():
+def test_get_live_metrics_blanks_windows_past_coverage_start():
     state = LiveState()
+    state.metrics_known_from_ms = NOW_MS - 11 * MIN_MS
     state.completed.add(make_completed(NOW_MS - 11 * MIN_MS))
     state.completed.add(make_completed(NOW_MS - 2 * MIN_MS))
 
@@ -335,8 +337,24 @@ def test_get_live_metrics_blanks_windows_past_oldest_entry():
         state, slow_threshold_ms=10_000, now_ms=NOW_MS,
     )
     assert row_5m.seen == 1
+    assert row_5m.not_ready_message is None
     assert row_15m.seen is None
+    assert row_15m.not_ready_message == "ready in 4m"
     assert row_1h.seen is None
+    assert row_1h.not_ready_message == "ready in 49m"
+
+
+def test_get_live_metrics_masks_everything_before_coverage_is_announced():
+    state = LiveState()
+    state.completed.add(make_completed(NOW_MS - 30 * MIN_MS))
+
+    row_5m, row_15m, row_1h = get_live_metrics(
+        state, slow_threshold_ms=10_000, now_ms=NOW_MS,
+    )
+    # During boot ramp we don't know when coverage arrives, so no ETA.
+    for row in (row_5m, row_15m, row_1h):
+        assert row.seen is None
+        assert row.not_ready_message is None
 
 
 def test_load_completed_history_loads_pairs_from_history(write_log):
