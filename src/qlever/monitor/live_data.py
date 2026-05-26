@@ -30,11 +30,13 @@ from qlever.monitor.metrics import (
     MetricsSnapshot,
     metrics_for_ranges,
 )
-from qlever.monitor.models import LiveQueryRow, LiveSubtitle, MetricsCounts
+from qlever.monitor.models import LiveQueryRow, MetricsCounts
 
 LIVE_METRIC_WINDOWS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000]
 LIVE_HORIZON_MS = LIVE_METRIC_WINDOWS_MS[2]
 LIVE_METRIC_LABELS = ["last 5m", "last 15m", "last 1h"]
+LIVE_REPAINT_S = 0.25
+FLASH_THRESHOLD_MS = int(LIVE_REPAINT_S * 1000)
 
 
 def current_ms() -> int:
@@ -106,6 +108,7 @@ class LiveState:
 
     completed: CompletedQueries = field(default_factory=CompletedQueries)
     active: dict[str, tuple[int, str]] = field(default_factory=dict)
+    unseen_finished: list[LiveQueryRow] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
     metrics_known_from_ms: int | None = None
 
@@ -257,25 +260,35 @@ class LiveLogReader:
                 start = self.state.active.pop(qid, None)
                 if start is None:
                     return
-                start_ms, _ = start
+                start_ms, sparql = start
+                duration_ms = ts_ms - start_ms
                 self.state.completed.add(
                     CompletedQuery(
                         start_ms=start_ms,
                         end_ms=ts_ms,
-                        duration_ms=ts_ms - start_ms,
+                        duration_ms=duration_ms,
                         status=status,
                         start_line_offset=None,
                     )
                 )
+                if duration_ms < FLASH_THRESHOLD_MS:
+                    self.state.unseen_finished.append(
+                        LiveQueryRow(
+                            qid=qid, ts_ms=start_ms, sparql=sparql
+                        )
+                    )
 
 
-def get_live_subtitle(
-    state: LiveState, server_status: str, endpoint: str
-) -> LiveSubtitle:
-    """Subtitle line: server-reachable status plus current active count."""
-    return LiveSubtitle(
-        endpoint=endpoint, state=server_status, n_active=len(state.active)
-    )
+def take_unseen_finished(state: LiveState) -> list[LiveQueryRow]:
+    """Snapshot the unseen-finished queue and clear it atomically.
+
+    Called once per repaint by the Live screen so each sub-repaint
+    query is shown for exactly one tick before being dropped.
+    """
+    with state.lock:
+        snapshot = list(state.unseen_finished)
+        state.unseen_finished.clear()
+    return snapshot
 
 
 def get_live_query_rows(state: LiveState) -> list[LiveQueryRow]:

@@ -67,7 +67,6 @@ class MonitorQueriesApp(App):
         sparql_endpoint: str,
         timeout: int,
         slow_threshold: int,
-        repaint_interval: float = 0.5,
         system: str = "docker",
     ) -> None:
         super().__init__()
@@ -76,7 +75,6 @@ class MonitorQueriesApp(App):
         self.timeout = timeout
         self.window_pad_ms = 2000 * timeout
         self.slow_threshold = slow_threshold
-        self.repaint_interval = repaint_interval
         self.system = system
         self.server_status = "checking"
         self.live_state = LiveState()

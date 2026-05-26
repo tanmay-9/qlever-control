@@ -50,15 +50,6 @@ class MonitorQueriesCommand(QleverCommand):
             " completed) is counted as slow in the metrics"
             " (default = server timeout - 10s)",
         )
-        subparser.add_argument(
-            "--screen_refresh_s",
-            type=float,
-            default=0.5,
-            help="Duration in seconds after which the live view is refreshed "
-            "with the new queries from server log file. This only affects the "
-            "screen refresh and not the interval at which the queries are "
-            "read from the log file (default = 0.5s)",
-        )
 
     def execute(self, args) -> bool:
         if not args.qlever_server_log:
@@ -87,7 +78,6 @@ class MonitorQueriesCommand(QleverCommand):
                 return False
             args.slow_threshold = max(1, timeout_s - 10)
 
-        repaint_interval = max(0.5, args.screen_refresh_s)
         sparql_endpoint = (
             args.sparql_endpoint
             if args.sparql_endpoint
@@ -99,7 +89,6 @@ class MonitorQueriesCommand(QleverCommand):
             sparql_endpoint=sparql_endpoint,
             timeout=timeout_s,
             slow_threshold=args.slow_threshold,
-            repaint_interval=repaint_interval,
             system=args.system,
         ).run()
         return True

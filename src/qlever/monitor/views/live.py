@@ -8,12 +8,13 @@ from textual.screen import Screen
 from textual.widgets import Footer, Static
 
 from qlever.monitor.live_data import (
+    LIVE_REPAINT_S,
     current_ms,
     get_live_metrics,
     get_live_query_rows,
-    get_live_subtitle,
+    take_unseen_finished,
 )
-from qlever.monitor.models import SparqlContent
+from qlever.monitor.models import LiveSubtitle, SparqlContent
 from qlever.monitor.widgets.header_row import HeaderRow
 from qlever.monitor.widgets.metrics_row import MetricsRow
 from qlever.monitor.widgets.nav_pill import NavPill
@@ -42,13 +43,15 @@ class LiveScreen(Screen, inherit_bindings=False):
         )
         state = self.app.live_state
         slow_ms = self.app.slow_threshold * 1000
+        rows = sorted(get_live_query_rows(state), key=lambda row: row.ts_ms)
         yield LiveStatusRow(
-            get_live_subtitle(
-                state, self.app.server_status, self.app.sparql_endpoint
+            LiveSubtitle(
+                endpoint=self.app.sparql_endpoint,
+                state=self.app.server_status,
+                n_active=len(rows),
             )
         )
         yield MetricsRow(get_live_metrics(state, slow_ms, current_ms()))
-        rows = sorted(get_live_query_rows(state), key=lambda row: row.ts_ms)
         yield LiveQueryTable(rows)
         yield Static("", id="table-status")
         yield SparqlPane()
@@ -57,7 +60,7 @@ class LiveScreen(Screen, inherit_bindings=False):
     def on_mount(self) -> None:
         """Start the periodic refresh of table, metrics, and server ping."""
         self.table_timer = self.set_interval(
-            self.app.repaint_interval, self.refresh_table
+            LIVE_REPAINT_S, self.refresh_table
         )
         self.metrics_timer = self.set_interval(2.0, self.refresh_metrics)
         self.live_server_check()
@@ -92,19 +95,21 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.refresh_subtitle()
 
     def refresh_subtitle(self) -> None:
-        """Rebuild the subtitle from the currently cached app state."""
-        self.query_one(LiveStatusRow).subtitle = get_live_subtitle(
-            self.app.live_state,
-            self.app.server_status,
-            self.app.sparql_endpoint,
+        """Rebuild the subtitle to match the table currently on screen."""
+        rows = self.query_one(LiveQueryTable).query_rows
+        self.query_one(LiveStatusRow).subtitle = LiveSubtitle(
+            endpoint=self.app.sparql_endpoint,
+            state=self.app.server_status,
+            n_active=len(rows),
         )
 
     def refresh_table(self) -> None:
-        """Push the current active set into the table; no-op when frozen."""
+        """Push active + just-finished sub-repaint rows; no-op when frozen."""
         if self.frozen:
             return
         state = self.app.live_state
-        rows = sorted(get_live_query_rows(state), key=lambda row: row.ts_ms)
+        rows = get_live_query_rows(state) + take_unseen_finished(state)
+        rows = sorted(rows, key=lambda row: row.ts_ms)
         self.query_one(LiveQueryTable).set_rows(rows)
         self.refresh_subtitle()
 
