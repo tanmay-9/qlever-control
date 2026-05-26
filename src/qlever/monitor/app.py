@@ -76,8 +76,21 @@ class MonitorQueriesApp(App):
         self.window_pad_ms = 2000 * timeout
         self.slow_threshold = slow_threshold
         self.system = system
-        self.server_status = "checking"
         self.live_state = LiveState()
+        self.log_start_ms = None
+
+    def set_log_start_ms(self) -> None:
+        """Read the log's first timestamp and cache it on the app.
+
+        Re-reads only while the value is still None (empty log at boot);
+        once set, the value is immutable and subsequent calls no-op.
+        """
+        if self.log_start_ms is not None:
+            return
+        with self.log_file.open("rb") as log_stream:
+            self.log_start_ms = read_first_timestamp(
+                log_stream, self.log_file.stat().st_size
+            )
 
     def on_mount(self) -> None:
         """Boot the live engine, then open the Live screen."""
@@ -87,10 +100,7 @@ class MonitorQueriesApp(App):
         )
         self.live_state = state
         self.cut_offset = cut_offset
-        with self.log_file.open("rb") as log_stream:
-            self.log_start_ms = read_first_timestamp(
-                log_stream, self.log_file.stat().st_size
-            )
+        self.set_log_start_ms()
         self.tail_live_log()
         self.load_metrics_history()
         self.push_screen("live")
@@ -123,6 +133,14 @@ class MonitorQueriesApp(App):
     def action_swap_screen(self) -> None:
         """Toggle between Live and Historic (bound to Tab on each screen)."""
         target = "historic" if isinstance(self.screen, LiveScreen) else "live"
+        if target == "historic":
+            self.set_log_start_ms()
+            if self.log_start_ms is None:
+                self.notify(
+                    "Log is empty - nothing to show in Historic yet",
+                    severity="warning",
+                )
+                return
         self.switch_screen(target)
 
     def action_copy_query(self) -> None:

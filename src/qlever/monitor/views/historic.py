@@ -7,9 +7,6 @@ from textual.screen import Screen
 from textual.widgets import Footer, Static
 
 from qlever.monitor.historic_data import read_window, render_window
-from qlever.monitor.log_reader import (
-    read_last_timestamp,
-)
 from qlever.monitor.metrics import EMPTY_FIELDS
 from qlever.monitor.models import (
     ControlsState,
@@ -113,11 +110,10 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.refresh_view(rescan=True)
 
     def refresh_log_end(self) -> None:
-        """Re-read the log's latest timestamp so the screen tracks file growth."""
-        log_path = self.app.log_file
-        with log_path.open("rb") as log_stream:
-            file_size = log_path.stat().st_size
-            self.log_end_ms = read_last_timestamp(log_stream, file_size)
+        """Read the freshest log timestamp the tailer has seen."""
+        state = self.app.live_state
+        with state.lock:
+            self.log_end_ms = state.latest_event_ms
 
     def show_loading_state(self) -> None:
         """Blank the table and metrics row while a rescan is in flight."""

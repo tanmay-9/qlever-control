@@ -9,9 +9,12 @@ from textual.widgets import Footer, Static
 
 from qlever.monitor.live_data import (
     LIVE_REPAINT_S,
+    PING_FAILS_TO_UNREACHABLE,
+    PING_INTERVAL_S,
     current_ms,
     get_live_metrics,
     get_live_query_rows,
+    is_log_fresh,
     take_unseen_finished,
 )
 from qlever.monitor.models import LiveSubtitle, SparqlContent
@@ -44,10 +47,17 @@ class LiveScreen(Screen, inherit_bindings=False):
         state = self.app.live_state
         slow_ms = self.app.slow_threshold * 1000
         rows = sorted(get_live_query_rows(state), key=lambda row: row.ts_ms)
+
+        self.liveness = (
+            "reachable" if is_log_fresh(state, current_ms()) else "checking"
+        )
+        self.consecutive_ping_fails = 0
+        self.ping_timer = None
+
         yield LiveStatusRow(
             LiveSubtitle(
                 endpoint=self.app.sparql_endpoint,
-                state=self.app.server_status,
+                state=self.liveness,
                 n_active=len(rows),
             )
         )
@@ -58,59 +68,135 @@ class LiveScreen(Screen, inherit_bindings=False):
         yield Footer()
 
     def on_mount(self) -> None:
-        """Start the periodic refresh of table, metrics, and server ping."""
+        """Start periodic refreshes; kick off boot pings if the log is stale."""
         self.table_timer = self.set_interval(
             LIVE_REPAINT_S, self.refresh_table
         )
         self.metrics_timer = self.set_interval(2.0, self.refresh_metrics)
-        self.live_server_check()
-        self.ping_timer = self.set_interval(5.0, self.live_server_check)
+        if self.liveness == "checking":
+            self.start_pinging(initial=True)
 
     def on_screen_suspend(self) -> None:
         """Pause periodic UI work while Live isn't the active screen."""
         self.table_timer.pause()
         self.metrics_timer.pause()
-        self.ping_timer.pause()
+        if self.ping_timer is not None:
+            self.ping_timer.pause()
 
     def on_screen_resume(self) -> None:
-        """Resume periodic UI work and refresh server status immediately."""
+        """Resume periodic UI work; recheck server unless already reachable."""
         self.table_timer.resume()
-        self.metrics_timer.resume()
-        self.ping_timer.resume()
-        self.live_server_check()
+        self.update_liveness_visuals()
+        if self.ping_timer is not None:
+            self.ping_timer.resume()
+        if self.liveness != "reachable":
+            self.ping_server()
+
+    def start_pinging(self, initial: bool) -> None:
+        """Enter the ping cycle when the log goes quiet or at a cold boot.
+
+        `initial` distinguishes boot's "checking" subtitle from the
+        invisible "pinging" recheck that follows a reachable period.
+        Fires one ping immediately so the first verification doesn't
+        wait the full interval.
+        """
+        self.liveness = "checking" if initial else "pinging"
+        self.consecutive_ping_fails = 0
+        if self.ping_timer is None:
+            self.ping_timer = self.set_interval(
+                PING_INTERVAL_S, self.ping_server
+            )
+        self.ping_server()
+        self.refresh_subtitle()
+
+    def mark_reachable(self) -> None:
+        """Confirm the server is alive and tear down the ping cycle."""
+        self.liveness = "reachable"
+        self.consecutive_ping_fails = 0
+        if self.ping_timer is not None:
+            self.ping_timer.stop()
+            self.ping_timer = None
+        self.refresh_subtitle()
+        self.update_liveness_visuals()
+
+    def update_liveness_visuals(self) -> None:
+        """Sync the dim style and metric freeze with self.liveness."""
+        stale = self.liveness == "unreachable"
+        self.query_one(LiveQueryTable).set_class(stale, "stale")
+        self.query_one(MetricsRow).set_class(stale, "stale")
+        if stale:
+            self.metrics_timer.pause()
+        else:
+            self.metrics_timer.resume()
 
     @work(thread=True, exclusive=True)
-    def live_server_check(self) -> None:
-        """Ping the server off the UI thread and push the result back."""
-        server_alive = is_qlever_server_alive(
+    def ping_server(self) -> None:
+        """Curl the server's /ping off the UI thread."""
+        ok = is_qlever_server_alive(
             self.app.sparql_endpoint, max_time=2
         )
-        self.app.call_from_thread(self.apply_server_status, server_alive)
+        self.app.call_from_thread(self.apply_ping_result, ok)
 
-    def apply_server_status(self, server_alive: bool) -> None:
-        """Cache the latest ping result, then redraw the subtitle once."""
-        self.app.server_status = (
-            "reachable" if server_alive else "unreachable"
-        )
+    def apply_ping_result(self, ok: bool) -> None:
+        """Advance the state machine using one ping outcome."""
+        if self.liveness == "reachable":
+            return
+        if is_log_fresh(self.app.live_state, current_ms()):
+            self.mark_reachable()
+            return
+        if ok:
+            self.mark_reachable()
+            return
+        self.consecutive_ping_fails += 1
+        if self.consecutive_ping_fails >= PING_FAILS_TO_UNREACHABLE:
+            self.liveness = "unreachable"
         self.refresh_subtitle()
+        self.update_liveness_visuals()
 
     def refresh_subtitle(self) -> None:
         """Rebuild the subtitle to match the table currently on screen."""
         rows = self.query_one(LiveQueryTable).query_rows
         self.query_one(LiveStatusRow).subtitle = LiveSubtitle(
             endpoint=self.app.sparql_endpoint,
-            state=self.app.server_status,
+            state=self.liveness,
             n_active=len(rows),
         )
 
+    def update_liveness_from_log(self) -> None:
+        """Re-evaluate the reachability state from log freshness alone.
+
+        Runs every 0.25s via refresh_table. A fresh log line is enough
+        evidence to flip back to reachable from any non-reachable state;
+        a long quiet log moves us from reachable into pinging.
+        """
+        log_fresh = is_log_fresh(self.app.live_state, current_ms())
+        if self.liveness == "reachable" and not log_fresh:
+            self.start_pinging(initial=False)
+        elif self.liveness != "reachable" and log_fresh:
+            self.mark_reachable()
+
+    def display_clock_ms(self) -> int:
+        """The clock used for live duration math.
+
+        When unreachable, freeze at the last log timestamp so durations
+        stop ticking on stale rows; otherwise trust real time.
+        """
+        state = self.app.live_state
+        if self.liveness == "unreachable" and state.latest_event_ms is not None:
+            return state.latest_event_ms
+        return current_ms()
+
     def refresh_table(self) -> None:
         """Push active + just-finished sub-repaint rows; no-op when frozen."""
+        self.update_liveness_from_log()
         if self.frozen:
             return
         state = self.app.live_state
         rows = get_live_query_rows(state) + take_unseen_finished(state)
         rows = sorted(rows, key=lambda row: row.ts_ms)
-        self.query_one(LiveQueryTable).set_rows(rows)
+        table = self.query_one(LiveQueryTable)
+        table.clock_ms = self.display_clock_ms()
+        table.set_rows(rows)
         self.refresh_subtitle()
 
     def refresh_metrics(self) -> None:
@@ -137,8 +223,16 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.call_after_refresh(self.refresh_bindings)
 
     def on_nav_pill_clicked(self, message: NavPill.Clicked) -> None:
-        """Switch to the screen named by the clicked pill."""
-        self.app.switch_screen(message.target)
+        """Switch to the screen named by the clicked pill.
+
+        Routes through `action_swap_screen` when the pill points at the
+        other tab so the empty-log guard for Historic entry stays in one
+        place; any other target falls through to a plain screen switch.
+        """
+        if message.target == "historic":
+            self.app.action_swap_screen()
+        else:
+            self.app.switch_screen(message.target)
 
     def on_data_table_row_selected(
         self, message: LiveQueryTable.RowSelected

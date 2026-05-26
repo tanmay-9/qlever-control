@@ -68,6 +68,8 @@ class QueryTable(DataTable):
 class LiveQueryTable(QueryTable):
     """Active queries on the Live screen; the only focusable widget."""
 
+    clock_ms: int | None = None
+
     def on_mount(self) -> None:
         """Add the columns and one table row per active query."""
         self.add_column("Query ID")
@@ -76,8 +78,12 @@ class LiveQueryTable(QueryTable):
         self.repaint_rows()
 
     def repaint_rows(self) -> None:
-        """Add one DataTable row per entry in self.query_rows."""
-        now_ms = int(time.time() * 1000)
+        """Add one DataTable row per entry in self.query_rows.
+
+        clock_ms freezes the duration math when the screen has lost
+        contact with the server; None falls back to wall clock.
+        """
+        now_ms = self.clock_ms if self.clock_ms is not None else int(time.time() * 1000)
         for row in self.query_rows:
             self.add_row(
                 truncate(row.qid, QID_WIDTH),

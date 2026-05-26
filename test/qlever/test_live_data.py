@@ -181,6 +181,21 @@ def test_find_active_queries_empty_log_returns_empty_state(write_log):
     assert eof_ts == 0
 
 
+def test_find_active_queries_seeds_latest_event_ms_from_eof(write_log):
+    path = write_log(
+        start_line(1000, "q1") + end_line(2000, "q1")
+        + start_line(3000, "q2")
+    )
+    state, _, eof_ts = find_active_queries(path, window_pad_ms=10_000)
+    assert state.latest_event_ms == eof_ts == 3000
+
+
+def test_find_active_queries_empty_log_leaves_latest_event_ms_none(write_log):
+    path = write_log(b"")
+    state, _, _ = find_active_queries(path, window_pad_ms=10_000)
+    assert state.latest_event_ms is None
+
+
 def make_reader(path, state, cut_offset=0, window_pad_ms=10_000, now_ms=3000):
     """Build a LiveLogReader with a frozen clock for poll tests."""
     return LiveLogReader(
@@ -272,6 +287,26 @@ def test_poll_drops_end_without_matching_start(write_log):
         reader.poll(log_stream)
     assert state.active == {}
     assert len(state.completed.entries) == 0
+
+
+def test_poll_advances_latest_event_ms_to_the_newest_line(write_log):
+    path = write_log(start_line(1000, "q1") + end_line(2500, "q1"))
+    state = LiveState()
+    reader = make_reader(path, state)
+    with path.open("rb") as log_stream:
+        reader.poll(log_stream)
+    assert state.latest_event_ms == 2500
+
+
+def test_poll_keeps_latest_event_ms_monotonic_under_out_of_order_writes(write_log):
+    # Sub-millisecond jitter on the server can write an older ts_ms
+    # after a newer one; the field must stay at the larger value.
+    path = write_log(start_line(2000, "q_late") + start_line(1500, "q_early"))
+    state = LiveState()
+    reader = make_reader(path, state)
+    with path.open("rb") as log_stream:
+        reader.poll(log_stream)
+    assert state.latest_event_ms == 2000
 
 
 def test_evict_stale_drops_actives_older_than_window_pad(write_log):

@@ -10,6 +10,16 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class LiveSubtitle:
+    """Subtitle line shown under the Live HeaderRow.
+
+    state is one of:
+      'checking'    boot, no evidence yet
+      'reachable'   server confirmed alive (log fresh or ping ok)
+      'pinging'     was reachable, log went quiet, silently rechecking;
+                    renders the same as reachable
+      'unreachable' three consecutive pings failed
+    """
+
     endpoint: str
     state: str
     n_active: int | None

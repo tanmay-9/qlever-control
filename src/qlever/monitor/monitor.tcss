@@ -56,6 +56,10 @@ MetricsRow {
     margin-left: 1;
 }
 
+LiveQueryTable.stale, MetricsRow.stale {
+    color: $text-muted;
+}
+
 /* Timeline (Historic only) */
 
 Timeline {

@@ -37,11 +37,24 @@ LIVE_HORIZON_MS = LIVE_METRIC_WINDOWS_MS[2]
 LIVE_METRIC_LABELS = ["last 5m", "last 15m", "last 1h"]
 LIVE_REPAINT_S = 0.25
 FLASH_THRESHOLD_MS = int(LIVE_REPAINT_S * 1000)
+LOG_IDLE_THRESHOLD_MS = 10_000
+PING_INTERVAL_S = 5.0
+PING_FAILS_TO_UNREACHABLE = 3
 
 
 def current_ms() -> int:
     """Wall-clock now in epoch milliseconds."""
     return time.time_ns() // 1_000_000
+
+
+def is_log_fresh(state: "LiveState", now_ms: int) -> bool:
+    """True iff the log produced a line within LOG_IDLE_THRESHOLD_MS.
+
+    The live screen's reachability state machine uses this as the
+    cheap evidence stream; while it's True we skip pinging the server.
+    """
+    last_ms = state.latest_event_ms
+    return last_ms is not None and now_ms - last_ms <= LOG_IDLE_THRESHOLD_MS
 
 
 class CompletedQueries:
@@ -111,6 +124,7 @@ class LiveState:
     unseen_finished: list[LiveQueryRow] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
     metrics_known_from_ms: int | None = None
+    latest_event_ms: int | None = None
 
 
 def find_active_queries(
@@ -135,6 +149,7 @@ def find_active_queries(
         if eof_ts is None:
             return (state, file_size, 0)
 
+        state.latest_event_ms = eof_ts
         lo_offset = offset_for_ts(
             log_stream, eof_ts - window_pad_ms, file_size
         )
@@ -250,6 +265,9 @@ class LiveLogReader:
                 sparql = ""
             with self.state.lock:
                 self.state.active[qid] = (ts_ms, sparql)
+                self.state.latest_event_ms = max(
+                    self.state.latest_event_ms or 0, ts_ms
+                )
             return
 
         if event == "end":
@@ -257,6 +275,9 @@ class LiveLogReader:
             if status not in STATUS_SET:
                 return
             with self.state.lock:
+                self.state.latest_event_ms = max(
+                    self.state.latest_event_ms or 0, ts_ms
+                )
                 start = self.state.active.pop(qid, None)
                 if start is None:
                     return
