@@ -330,36 +330,29 @@ def pair_start_end_events(
     return (completed_queries, still_open)
 
 
-def extract_qid_and_query(line_bytes: bytes) -> tuple[str, str]:
-    """Return (qid, query) from a start line's bytes, or ("", "").
+def extract_qid_ip_query(line_bytes: bytes) -> tuple[str, str, str]:
+    """Return (qid, client_ip, query) from a start line, or ("", "", "").
 
-    The byte-slice fast path is unsafe for the query field because user
-    SPARQL can contain escaped quotes, so this path uses real json.loads.
-    Both fields come from the same parse so cost is one json.loads per
-    call. Returns ("", "") on any malformed input or missing field;
-    never raises.
+    All three fields come from one json.loads. The caller has already
+    validated this is a start line via parse_line, so qid and query are
+    guaranteed present strings. client-ip falls back to "" so log lines
+    written before the field existed still produce usable rows.
     """
     try:
         obj = json.loads(line_bytes)
     except (ValueError, TypeError):
-        return ("", "")
-    if not isinstance(obj, dict):
-        return ("", "")
-    qid = obj.get("qid")
-    query = obj.get("query")
-    if not isinstance(qid, str) or not isinstance(query, str):
-        return ("", "")
-    return (qid, query)
+        return ("", "", "")
+    return (obj["qid"], obj.get("client-ip", ""), obj["query"])
 
 
 def load_sparql_at(
     log_stream: BinaryIO, line_offset: int
-) -> tuple[str, str]:
-    """Return (qid, sparql) for the start line at line_offset.
+) -> tuple[str, str, str]:
+    """Return (qid, client_ip, sparql) for the start line at line_offset.
 
     Used by callers that have only the offset, not the line bytes:
     find_active_queries on survivors (qid already known, ignored), and
-    Historic on displayed rows (needs both).
+    Historic on displayed rows (needs all three for the SparqlPane).
     """
     log_stream.seek(line_offset)
-    return extract_qid_and_query(log_stream.readline())
+    return extract_qid_ip_query(log_stream.readline())

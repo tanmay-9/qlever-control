@@ -52,6 +52,7 @@ def test_read_window_keeps_pair_entirely_inside_window(write_log):
             status="ok",
             qid="q1",
             sparql="SELECT a",
+            client_ip="x",
         )
     ]
     assert data.metrics.seen == 1
@@ -111,6 +112,7 @@ def test_read_window_includes_still_open_with_running_status(write_log):
             status="running",
             qid="live",
             sparql="SELECT live",
+            client_ip="x",
         )
     ]
 
@@ -129,6 +131,7 @@ def test_read_window_marks_still_open_as_orphaned_when_log_advanced_past_pad(
             status="orphaned",
             qid="ghost",
             sparql="SELECT ghost",
+            client_ip="x",
         )
     ]
 
@@ -162,7 +165,7 @@ def test_read_window_metrics_count_only_ends_inside_window(write_log):
 def make_query(qid, start_ms, end_ms, status="ok"):
     return LoggedQuery(
         start_ms=start_ms, end_ms=end_ms, status=status,
-        qid=qid, sparql=f"SELECT {qid}",
+        qid=qid, sparql=f"SELECT {qid}", client_ip="",
     )
 
 

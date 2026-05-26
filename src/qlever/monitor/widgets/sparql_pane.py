@@ -17,6 +17,7 @@ def format_header(content: SparqlContent) -> str:
     """One-line query identity shown above the SPARQL body."""
     parts = [
         f"[b]Server Query ID:[/b] {content.qid}",
+        f"[b]Client IP:[/b] {content.client_ip or '-'}",
         f"[b]Started at:[/b] {format_timestamp(content.started_at_ms)}",
     ]
     if content.status is not None:

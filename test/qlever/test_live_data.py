@@ -158,7 +158,7 @@ def test_find_active_queries_picks_up_unmatched_starts(write_log):
     )
     state, cut_offset, eof_ts = find_active_queries(path, window_pad_ms=10_000)
     assert list(state.active) == ["q2"]
-    assert state.active["q2"] == (2000, "SELECT b")
+    assert state.active["q2"] == (2000, "x", "SELECT b")
     assert cut_offset == path.stat().st_size
     assert eof_ts == 3000
 
@@ -169,8 +169,8 @@ def test_find_active_queries_loads_sparql_for_each_survivor(write_log):
         + start_line(2000, "b", "SELECT beta")
     )
     state, _, _ = find_active_queries(path, window_pad_ms=10_000)
-    assert state.active["a"] == (1000, "SELECT alpha")
-    assert state.active["b"] == (2000, "SELECT beta")
+    assert state.active["a"] == (1000, "x", "SELECT alpha")
+    assert state.active["b"] == (2000, "x", "SELECT beta")
 
 
 def test_find_active_queries_empty_log_returns_empty_state(write_log):
@@ -228,7 +228,7 @@ def test_poll_keeps_start_in_active_until_end_arrives(write_log):
     reader = make_reader(path, state)
     with path.open("rb") as log_stream:
         reader.poll(log_stream)
-    assert state.active == {"q1": (1000, "SELECT a")}
+    assert state.active == {"q1": (1000, "x", "SELECT a")}
     assert len(state.completed.entries) == 0
 
 
@@ -313,8 +313,8 @@ def test_evict_stale_drops_actives_older_than_window_pad(write_log):
     state = LiveState()
     now = 1_000_000
     pad = 10_000
-    state.active["fresh"] = (now - 1_000, "")
-    state.active["old"] = (now - 20_000, "")
+    state.active["fresh"] = (now - 1_000, "", "")
+    state.active["old"] = (now - 20_000, "", "")
     reader = LiveLogReader(
         log_path=write_log(b""), state=state, cut_offset=0,
         window_pad_ms=pad, now_ms=lambda: now,

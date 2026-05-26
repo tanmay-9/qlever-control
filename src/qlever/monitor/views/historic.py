@@ -319,4 +319,5 @@ class HistoricScreen(Screen, inherit_bindings=False):
             started_at_ms=row.started_at_ms,
             status=row.status,
             sparql_text=row.sparql,
+            client_ip=row.client_ip,
         )

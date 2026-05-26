@@ -157,8 +157,8 @@ def find_active_queries(
         _, still_open = pair_start_end_events(events)
 
         for qid, (start_ms, start_line_offset) in still_open.items():
-            _, sparql = load_sparql_at(log_stream, start_line_offset)
-            state.active[qid] = (start_ms, sparql)
+            _, client_ip, sparql = load_sparql_at(log_stream, start_line_offset)
+            state.active[qid] = (start_ms, client_ip, sparql)
 
     return (state, file_size, eof_ts)
 
@@ -239,7 +239,7 @@ class LiveLogReader:
             self.state.completed.drop_older_than(completed_cutoff)
             stale = [
                 qid
-                for qid, (start_ms, _) in self.state.active.items()
+                for qid, (start_ms, _, _) in self.state.active.items()
                 if start_ms < active_cutoff
             ]
             for qid in stale:
@@ -263,8 +263,9 @@ class LiveLogReader:
             sparql = obj.get("query")
             if not isinstance(sparql, str):
                 sparql = ""
+            client_ip = obj.get("client-ip", "")
             with self.state.lock:
-                self.state.active[qid] = (ts_ms, sparql)
+                self.state.active[qid] = (ts_ms, client_ip, sparql)
                 self.state.latest_event_ms = max(
                     self.state.latest_event_ms or 0, ts_ms
                 )
@@ -281,7 +282,7 @@ class LiveLogReader:
                 start = self.state.active.pop(qid, None)
                 if start is None:
                     return
-                start_ms, sparql = start
+                start_ms, client_ip, sparql = start
                 duration_ms = ts_ms - start_ms
                 self.state.completed.add(
                     CompletedQuery(
@@ -295,7 +296,10 @@ class LiveLogReader:
                 if duration_ms < FLASH_THRESHOLD_MS:
                     self.state.unseen_finished.append(
                         LiveQueryRow(
-                            qid=qid, ts_ms=start_ms, sparql=sparql
+                            qid=qid,
+                            ts_ms=start_ms,
+                            sparql=sparql,
+                            client_ip=client_ip,
                         )
                     )
 
@@ -317,8 +321,10 @@ def get_live_query_rows(state: LiveState) -> list[LiveQueryRow]:
     with state.lock:
         active_snapshot = list(state.active.items())
     return [
-        LiveQueryRow(qid=qid, ts_ms=start_ms, sparql=sparql)
-        for qid, (start_ms, sparql) in active_snapshot
+        LiveQueryRow(
+            qid=qid, ts_ms=start_ms, sparql=sparql, client_ip=client_ip
+        )
+        for qid, (start_ms, client_ip, sparql) in active_snapshot
     ]
 
 

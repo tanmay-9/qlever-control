@@ -244,4 +244,5 @@ class LiveScreen(Screen, inherit_bindings=False):
             started_at_ms=row.ts_ms,
             status=None,
             sparql_text=row.sparql,
+            client_ip=row.client_ip,
         )

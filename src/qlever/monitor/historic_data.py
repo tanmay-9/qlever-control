@@ -40,6 +40,7 @@ class LoggedQuery(NamedTuple):
     status: str
     qid: str
     sparql: str
+    client_ip: str
 
 
 class WindowData(NamedTuple):
@@ -91,7 +92,9 @@ def read_window(
         for pair in completed:
             if pair.start_ms > window_end_ms or pair.end_ms < window_start_ms:
                 continue
-            qid, sparql = load_sparql_at(log_stream, pair.start_line_offset)
+            qid, client_ip, sparql = load_sparql_at(
+                log_stream, pair.start_line_offset
+            )
             queries.append(
                 LoggedQuery(
                     start_ms=pair.start_ms,
@@ -99,13 +102,16 @@ def read_window(
                     status=pair.status,
                     qid=qid,
                     sparql=sparql,
+                    client_ip=client_ip,
                 )
             )
         running_cutoff_ms = log_end_ms - pad_ms
         for start_ms, start_line_offset in still_open.values():
             if start_ms > window_end_ms:
                 continue
-            qid, sparql = load_sparql_at(log_stream, start_line_offset)
+            qid, client_ip, sparql = load_sparql_at(
+                log_stream, start_line_offset
+            )
             status = "running" if start_ms >= running_cutoff_ms else "orphaned"
             queries.append(
                 LoggedQuery(
@@ -114,6 +120,7 @@ def read_window(
                     status=status,
                     qid=qid,
                     sparql=sparql,
+                    client_ip=client_ip,
                 )
             )
 
@@ -184,6 +191,7 @@ def render_window(
             duration_ms=display_duration_ms(query, log_end_ms),
             status=query.status,
             sparql=query.sparql,
+            client_ip=query.client_ip,
         )
         for query in queries
     ]

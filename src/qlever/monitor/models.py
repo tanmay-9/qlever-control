@@ -45,6 +45,7 @@ class LiveQueryRow:
     qid: str
     ts_ms: int
     sparql: str
+    client_ip: str = ""
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,7 @@ class HistoricQueryRow:
     duration_ms: int
     status: str
     sparql: str
+    client_ip: str = ""
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,7 @@ class SparqlContent:
     started_at_ms: int
     status: str | None
     sparql_text: str
+    client_ip: str = ""
 
 
 @dataclass(frozen=True)

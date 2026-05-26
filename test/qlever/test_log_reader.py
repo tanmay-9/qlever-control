@@ -3,7 +3,7 @@ import pytest
 from qlever.monitor import log_reader
 from qlever.monitor.log_reader import (
     CompletedQuery,
-    extract_qid_and_query,
+    extract_qid_ip_query,
     load_sparql_at,
     next_whole_line,
     offset_for_ts,
@@ -378,44 +378,56 @@ def test_pair_start_end_events_status_flows_through(status):
     assert completed[0].status == status
 
 
-def test_extract_qid_and_query_returns_both_fields():
+def test_extract_qid_ip_query_returns_all_three_fields():
     line = (
-        b'{"ts-ms":1,"event":"start","qid":"q1",'
+        b'{"ts-ms":1,"event":"start","qid":"q1","client-ip":"1.2.3.4",'
         b'"query":"SELECT * WHERE { ?s ?p ?o }"}\n'
     )
-    assert extract_qid_and_query(line) == (
+    assert extract_qid_ip_query(line) == (
         "q1",
+        "1.2.3.4",
         "SELECT * WHERE { ?s ?p ?o }",
     )
 
 
-def test_extract_qid_and_query_handles_escaped_quote_in_query():
+def test_extract_qid_ip_query_handles_escaped_quote_in_query():
     line = (
-        b'{"ts-ms":1,"event":"start","qid":"q1",'
+        b'{"ts-ms":1,"event":"start","qid":"q1","client-ip":"1.2.3.4",'
         b'"query":"SELECT ?x WHERE { ?x ?p \\"a\\" }"}\n'
     )
-    assert extract_qid_and_query(line) == (
+    assert extract_qid_ip_query(line) == (
         "q1",
+        "1.2.3.4",
         'SELECT ?x WHERE { ?x ?p "a" }',
     )
 
 
-def test_extract_qid_and_query_missing_field_returns_empty():
-    assert extract_qid_and_query(END + b"\n") == ("", "")
-
-
-def test_extract_qid_and_query_malformed_json_returns_empty():
-    assert extract_qid_and_query(b"this is not json\n") == ("", "")
-
-
-def test_load_sparql_at_returns_qid_and_query(open_log):
+def test_extract_qid_ip_query_missing_client_ip_falls_back_to_empty():
+    # Older log lines written before the client-ip field existed.
     line = (
         b'{"ts-ms":1,"event":"start","qid":"q1",'
-        b'"client-ip":"1.2.3.4","query":"SELECT * WHERE { ?s ?p ?o }"}\n'
+        b'"query":"SELECT * WHERE { ?s ?p ?o }"}\n'
+    )
+    assert extract_qid_ip_query(line) == (
+        "q1",
+        "",
+        "SELECT * WHERE { ?s ?p ?o }",
+    )
+
+
+def test_extract_qid_ip_query_malformed_json_returns_empty():
+    assert extract_qid_ip_query(b"this is not json\n") == ("", "", "")
+
+
+def test_load_sparql_at_returns_qid_ip_and_query(open_log):
+    line = (
+        b'{"ts-ms":1,"event":"start","qid":"q1","client-ip":"1.2.3.4",'
+        b'"query":"SELECT * WHERE { ?s ?p ?o }"}\n'
     )
     log, _ = open_log(line)
     assert load_sparql_at(log, 0) == (
         "q1",
+        "1.2.3.4",
         "SELECT * WHERE { ?s ?p ?o }",
     )
 
@@ -423,49 +435,46 @@ def test_load_sparql_at_returns_qid_and_query(open_log):
 def test_load_sparql_at_handles_escaped_quotes_and_backslashes(open_log):
     # The JSON value encodes a literal " and a literal \ in the query.
     line = (
-        b'{"ts-ms":1,"event":"start","qid":"q1",'
+        b'{"ts-ms":1,"event":"start","qid":"q1","client-ip":"1.2.3.4",'
         b'"query":"SELECT ?x WHERE { ?x ?p \\"a\\\\b\\" }"}\n'
     )
     log, _ = open_log(line)
     assert load_sparql_at(log, 0) == (
         "q1",
+        "1.2.3.4",
         'SELECT ?x WHERE { ?x ?p "a\\b" }',
     )
 
 
 def test_load_sparql_at_handles_unicode(open_log):
     line = (
-        b'{"ts-ms":1,"event":"start","qid":"q1",'
+        b'{"ts-ms":1,"event":"start","qid":"q1","client-ip":"1.2.3.4",'
         b'"query":"SELECT ?s WHERE { ?s ?p \xe2\x98\x83 }"}\n'
     )
     log, _ = open_log(line)
-    assert load_sparql_at(log, 0) == ("q1", "SELECT ?s WHERE { ?s ?p ☃ }")
-
-
-def test_load_sparql_at_end_line_has_no_query_returns_empty(open_log):
-    log, _ = open_log(END + b"\n")
-    assert load_sparql_at(log, 0) == ("", "")
+    assert load_sparql_at(log, 0) == (
+        "q1",
+        "1.2.3.4",
+        "SELECT ?s WHERE { ?s ?p ☃ }",
+    )
 
 
 def test_load_sparql_at_malformed_json_returns_empty(open_log):
     log, _ = open_log(b"this is not json\n")
-    assert load_sparql_at(log, 0) == ("", "")
-
-
-def test_load_sparql_at_top_level_non_object_returns_empty(open_log):
-    log, _ = open_log(b"42\n")
-    assert load_sparql_at(log, 0) == ("", "")
+    assert load_sparql_at(log, 0) == ("", "", "")
 
 
 def test_load_sparql_at_reads_the_line_at_the_given_offset(open_log):
     first = (
-        b'{"ts-ms":1,"event":"start","qid":"q1","query":"FIRST"}\n'
+        b'{"ts-ms":1,"event":"start","qid":"q1","client-ip":"1.2.3.4",'
+        b'"query":"FIRST"}\n'
     )
     second = (
-        b'{"ts-ms":2,"event":"start","qid":"q2","query":"SECOND"}\n'
+        b'{"ts-ms":2,"event":"start","qid":"q2","client-ip":"5.6.7.8",'
+        b'"query":"SECOND"}\n'
     )
     log, _ = open_log(first + second)
-    assert load_sparql_at(log, len(first)) == ("q2", "SECOND")
+    assert load_sparql_at(log, len(first)) == ("q2", "5.6.7.8", "SECOND")
 
 
 def test_read_last_timestamp_empty_file_returns_none(open_log):
