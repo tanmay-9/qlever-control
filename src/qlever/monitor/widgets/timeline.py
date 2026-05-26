@@ -87,8 +87,9 @@ def window_width_cells(bounds: TimelineBounds, bar_width: int) -> int:
 def render_track(bounds: TimelineBounds, bar_width: int) -> str:
     """The bar line: full-span track with the window span marked.
 
-    `████` marks the window; `├`/`┤` always cap the log span, even
-    when the window reaches an edge.
+    `████` marks the window; `├`/`┤` cap the log edges, but only when
+    the window does not already sit on that edge (the window block
+    is its own edge marker).
     """
     chars = ["─"] * bar_width
     width = window_width_cells(bounds, bar_width)
@@ -101,8 +102,10 @@ def render_track(bounds: TimelineBounds, bar_width: int) -> str:
         start = end - width + 1
     for col in range(start, end + 1):
         chars[col] = "█"
-    chars[0] = "├"
-    chars[-1] = "┤"
+    if chars[0] != "█":
+        chars[0] = "├"
+    if chars[-1] != "█":
+        chars[-1] = "┤"
     return "".join(chars)
 
 
