@@ -38,9 +38,12 @@ class MonitorQueriesCommand(QleverCommand):
             help="URL of the SPARQL endpoint (default = {host_name}:{port})",
         )
         subparser.add_argument(
-            "--qlever-server-log",
+            "--metrics-log",
             type=Path,
-            help="The `qlever-server` log file (default = {name}.query_metrics.log)",
+            help=(
+                "QLever's `metrics-log.jsonl` log file "
+                "(default = {name}.metrics-log.jsonl)"
+            ),
         )
         subparser.add_argument(
             "--slow-threshold",
@@ -52,18 +55,18 @@ class MonitorQueriesCommand(QleverCommand):
         )
 
     def execute(self, args) -> bool:
-        if not args.qlever_server_log:
-            args.qlever_server_log = Path.cwd() / f"{args.name}.query_metrics.log"
+        if not args.metrics_log:
+            args.metrics_log = Path.cwd() / f"{args.name}.metrics-log.jsonl"
         show_msg = (
-            f"Reading server logs from {args.qlever_server_log} to display the "
+            f"Reading server logs from {args.metrics_log} to display the "
             "currently active queries on the server"
         )
         self.show(show_msg, only_show=args.show)
         if args.show:
             return True
 
-        if not args.qlever_server_log.is_file():
-            log.error(f"Log file not found: {args.qlever_server_log}")
+        if not args.metrics_log.is_file():
+            log.error(f"Log file not found: {args.metrics_log}")
             return False
 
         timeout_s = 30
@@ -85,7 +88,7 @@ class MonitorQueriesCommand(QleverCommand):
         )
 
         MonitorQueriesApp(
-            log_file=args.qlever_server_log,
+            log_file=args.metrics_log,
             sparql_endpoint=sparql_endpoint,
             timeout=timeout_s,
             slow_threshold=args.slow_threshold,
