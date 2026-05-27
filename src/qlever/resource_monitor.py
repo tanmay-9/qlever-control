@@ -31,7 +31,7 @@ class Sample:
     stay `None` and are written as empty columns in the TSV.
     """
 
-    elapsed_s: float = 0.0
+    elapsed_s: float | None = None
     rss: int | None = None
     cpu_percent: float | None = None
 
@@ -228,8 +228,8 @@ def read_tsv(path: Path) -> dict:
 def downsample_for_plot(data: dict, max_points: int) -> dict:
     """
     Bucket consecutive samples and reduce each bucket to one point so
-    the plot stays readable on long builds. RSS, swap and CPU are
-    reduced with `nanmax` so memory peaks survive; `elapsed_s` uses
+    the plot stays readable on long builds. RSS and CPU are reduced
+    with `nanmax` so memory peaks survive; `elapsed_s` uses
     `nanmin` so the x-axis stays monotone. Returns `data` unchanged
     if it already has at most `max_points` rows. Note: `peak_rss`
     is tracked separately at full sampling resolution, so this
@@ -408,7 +408,7 @@ def plot_usage(
 
 def render_usage_plot(
     dataset: str,
-    output_dir: Path = Path.cwd(),
+    output_dir: Path | None = None,
     plot_max_points: int = 500,
 ) -> Path | None:
     """
@@ -416,7 +416,7 @@ def render_usage_plot(
     in `output_dir`. Returns the plot path on success, None if the
     TSV is missing or the plot could not be rendered.
     """
-    output_dir = Path(output_dir)
+    output_dir = output_dir or Path.cwd()
     tsv_path = output_dir / f"{dataset}.usage-log.tsv"
     log_path = output_dir / f"{dataset}.index-log.txt"
     qleverfile_path = Path.cwd() / "Qleverfile"
@@ -441,7 +441,7 @@ def render_usage_plot(
 
 class ResourceMonitor:
     """
-    Monitor resource usage (memory, swap, CPU) of an index-building
+    Monitor resource usage (memory, CPU) of an index-building
     process. Works in both native mode (via psutil) and container mode
     (via docker/podman stats).
 
@@ -466,7 +466,7 @@ class ResourceMonitor:
         system: str | None = None,
         interval: float = 1.0,
         plot_max_points: int = 500,
-        output_dir: Path = Path.cwd(),
+        output_dir: Path | None = None,
         parent_pid: int | None = None,
     ):
         """
@@ -492,17 +492,17 @@ class ResourceMonitor:
                              daemonized process that re-parents away
                              from us (e.g. virtuoso-t).
         """
-        self.engine = engine_name
         self.dataset = dataset
         self.binary = binary
         self.container = container
         self.system = system
         self.interval = interval
         self.plot_max_points = plot_max_points
-        self.output_dir = Path(output_dir)
+        self.output_dir = output_dir or Path.cwd()
         self.parent_pid = parent_pid
         self.peak_rss = 0
         self.worker_proc = None
+        self.log_file = None
         self.stop_event = threading.Event()
         self.start_time = 0
 
@@ -604,7 +604,8 @@ class ResourceMonitor:
         self.stop_event.set()
         self.thread.join()
         self.log_file.close()
-        log.info(f"Peak memory: RSS {format_gb(self.peak_rss)}")
+        if self.peak_rss > 0:
+            log.info(f"Peak memory: RSS {format_gb(self.peak_rss)}")
         plot_path = render_usage_plot(
             self.dataset, self.output_dir, self.plot_max_points
         )
