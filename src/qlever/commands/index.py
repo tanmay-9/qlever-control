@@ -8,7 +8,8 @@ import shlex
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.resource_monitor import ResourceMonitor, render_usage_plot
+from qlever.resource_monitor import ResourceMonitor
+from qlever.usage_plot import render_usage_plot
 from qlever.util import (
     binary_exists,
     get_existing_index_files,
