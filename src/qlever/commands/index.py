@@ -202,7 +202,7 @@ class IndexCommand(QleverCommand):
             )
             if plot_path is None:
                 return False
-            log.info(f"Usage plot saved to {plot_path}")
+            log.info(f"Resource-usage plot saved to {plot_path}")
             return True
 
         # The mandatory part of the command line (specifying the input, the
@@ -352,11 +352,17 @@ class IndexCommand(QleverCommand):
                 container=args.index_container,
                 system=args.system,
                 interval=args.resource_monitor_interval,
-                plot_max_points=args.resource_monitor_plot_max_points,
             ):
                 run_command(index_cmd, show_output=True)
         except Exception as e:
             log.error(f"Building the index failed: {e}")
             return False
+
+        plot_path = render_usage_plot(
+            args.name,
+            plot_max_points=args.resource_monitor_plot_max_points,
+        )
+        if plot_path is not None:
+            log.info(f"Resource-usage plot saved to {plot_path}")
 
         return True

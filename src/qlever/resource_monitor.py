@@ -61,7 +61,7 @@ def parse_container_mem_usage(usage: str) -> int:
     return 0
 
 
-def format_row(sample: Sample) -> str:
+def sample_to_tsv_row(sample: Sample) -> str:
     """Format a Sample as a TSV row; None fields become empty columns."""
     values = [getattr(sample, f.name) for f in fields(sample)]
     return "\t".join("" if v is None else str(v) for v in values) + "\n"
@@ -439,6 +439,58 @@ def render_usage_plot(
         return None
 
 
+def find_process_by_binary(
+    parent_pid: int | None, binary: str
+) -> psutil.Process | None:
+    """Find a descendant of parent_pid whose argv[0] basename matches binary."""
+    try:
+        root = psutil.Process(parent_pid)
+        candidates = [root] + root.children(recursive=True)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return None
+    # Both sides use Path(...).name so any path form (relative, absolute,
+    # bare, symlink) matches as long as argv[0] preserves the binary's name.
+    target = Path(binary).name
+    for proc in candidates:
+        try:
+            cmdline = proc.cmdline()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if cmdline and Path(cmdline[0]).name == target:
+            return proc
+    return None
+
+
+def sample_process(proc: psutil.Process) -> Sample:
+    """One RSS+CPU read from a psutil.Process; empty Sample on access errors."""
+    try:
+        mem = proc.memory_info()
+        cpu_pct = proc.cpu_percent(interval=None)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return Sample()
+    return Sample(rss=mem.rss, cpu_percent=cpu_pct)
+
+
+def sample_container(system: str, container: str) -> Sample:
+    """One RSS+CPU read via `<system> stats --no-stream` on a named container."""
+    try:
+        output = run_command(
+            f"{system} stats --no-stream"
+            f" --format '{{{{.MemUsage}}}}\t{{{{.CPUPerc}}}}'"
+            f" {container}",
+            return_output=True,
+        )
+        mem_str, cpu_str = output.strip().split("\t")
+        usage = mem_str.split("/")[0].strip()
+        cpu_pct = float(cpu_str.strip().rstrip("%"))
+        return Sample(
+            rss=parse_container_mem_usage(usage),
+            cpu_percent=cpu_pct,
+        )
+    except Exception:
+        return Sample()
+
+
 class ResourceMonitor:
     """
     Monitor resource usage (memory, CPU) of an index-building
@@ -465,7 +517,6 @@ class ResourceMonitor:
         container: str | None = None,
         system: str | None = None,
         interval: float = 1.0,
-        plot_max_points: int = 500,
         output_dir: Path | None = None,
         parent_pid: int | None = None,
     ):
@@ -482,9 +533,6 @@ class ResourceMonitor:
                              psutil.
             system:          Container runtime ("docker" or "podman").
             interval:        Seconds between samples (default 1.0).
-            plot_max_points: Cap on dots drawn per series in the plot
-                             (default 500). Raw samples are bucketed
-                             with max so memory peaks survive.
             output_dir:      Directory for the TSV usage log file.
             parent_pid:      PID whose descendants are searched for the
                              index process. Defaults to the current
@@ -497,7 +545,6 @@ class ResourceMonitor:
         self.container = container
         self.system = system
         self.interval = interval
-        self.plot_max_points = plot_max_points
         self.output_dir = output_dir or Path.cwd()
         self.parent_pid = parent_pid
         self.peak_rss = 0
@@ -506,31 +553,14 @@ class ResourceMonitor:
         self.stop_event = threading.Event()
         self.start_time = 0
 
-    def find_worker(self) -> psutil.Process | None:
-        """Find the index worker among descendants of `parent_pid`."""
-        try:
-            root = psutil.Process(self.parent_pid)
-            candidates = [root] + root.children(recursive=True)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return None
-        target = Path(self.binary).name
-        for proc in candidates:
-            try:
-                cmdline = proc.cmdline()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-            if cmdline and Path(cmdline[0]).name == target:
-                return proc
-        return None
-
-    def sample_native(self) -> Sample:
-        """
-        Read RSS + CPU usage of the index worker. Caches the
-        psutil.Process so `cpu_percent` returns a meaningful delta
-        between samples rather than always 0 on a fresh Process.
-        """
+    def take_sample(self) -> Sample:
+        """Dispatch to container or native sampling, caching the resolved process."""
+        if self.system in Containerize.supported_systems():
+            return sample_container(self.system, self.container)
         if self.worker_proc is None or not self.worker_proc.is_running():
-            self.worker_proc = self.find_worker()
+            self.worker_proc = find_process_by_binary(
+                self.parent_pid, self.binary
+            )
             if self.worker_proc is None:
                 return Sample()
             try:
@@ -538,52 +568,19 @@ class ResourceMonitor:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 self.worker_proc = None
                 return Sample()
-        try:
-            mem = self.worker_proc.memory_info()
-            cpu_pct = self.worker_proc.cpu_percent(interval=None)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            self.worker_proc = None
-            return Sample()
-        return Sample(rss=mem.rss, cpu_percent=cpu_pct)
-
-    def sample_container(self) -> Sample:
-        """
-        Query the container runtime for memory + CPU usage of the
-        index container.
-        """
-        try:
-            output = run_command(
-                f"{self.system} stats --no-stream"
-                f" --format '{{{{.MemUsage}}}}\t{{{{.CPUPerc}}}}'"
-                f" {self.container}",
-                return_output=True,
-            )
-            mem_str, cpu_str = output.strip().split("\t")
-            usage = mem_str.split("/")[0].strip()
-            cpu_pct = float(cpu_str.strip().rstrip("%"))
-            return Sample(
-                rss=parse_container_mem_usage(usage),
-                cpu_percent=cpu_pct,
-            )
-        except Exception:
-            return Sample()
+        return sample_process(self.worker_proc)
 
     def run_loop(self):
         """
         Polling loop on a background thread. Samples resource usage
         and appends one TSV row per iteration until stop_event is set.
         """
-        take_sample = (
-            self.sample_container
-            if self.system in Containerize.supported_systems()
-            else self.sample_native
-        )
         while not self.stop_event.is_set():
-            sample = take_sample()
+            sample = self.take_sample()
             sample.elapsed_s = round(time.monotonic() - self.start_time, 1)
             if sample.rss is not None and self.log_file is not None:
                 self.peak_rss = max(self.peak_rss, sample.rss)
-                self.log_file.write(format_row(sample))
+                self.log_file.write(sample_to_tsv_row(sample))
                 self.log_file.flush()
             self.stop_event.wait(self.interval)
 
@@ -600,15 +597,10 @@ class ResourceMonitor:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Stop sampling, close the log, render the plot, log peaks."""
+        """Stop sampling, close the log, log peak RSS."""
         self.stop_event.set()
         self.thread.join()
         self.log_file.close()
         if self.peak_rss > 0:
             log.info(f"Peak memory: RSS {format_gb(self.peak_rss)}")
-        plot_path = render_usage_plot(
-            self.dataset, self.output_dir, self.plot_max_points
-        )
-        if plot_path is not None:
-            log.info(f"Usage plot saved to {plot_path}")
         return False
