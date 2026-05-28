@@ -3,7 +3,7 @@ import pytest
 from qlever.resource_monitor import (
     Sample,
     format_gb,
-    parse_container_mem_usage,
+    parse_memory_to_bytes,
     sample_to_tsv_row,
 )
 
@@ -47,8 +47,8 @@ def test_format_gb(bytes_val, expected):
         ("garbage", 0),
     ],
 )
-def test_parse_container_mem_usage(usage, expected):
-    assert parse_container_mem_usage(usage) == expected
+def test_parse_memory_to_bytes(usage, expected):
+    assert parse_memory_to_bytes(usage) == expected
 
 
 @pytest.mark.parametrize(

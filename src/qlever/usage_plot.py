@@ -18,7 +18,7 @@ from qlever.log import log
 from qlever.resource_monitor import GB
 
 
-def read_usage_tsv(path: Path) -> dict:
+def read_usage_tsv(path: Path) -> dict[str, np.ndarray]:
     """
     Read a usage-log TSV into a dict of numpy arrays keyed by column
     name. Empty cells become NaN so matplotlib can skip them.
@@ -37,7 +37,9 @@ def read_usage_tsv(path: Path) -> dict:
     return {name: np.array(values) for name, values in columns.items()}
 
 
-def downsample_for_plot(data: dict, max_points: int) -> dict:
+def downsample_for_plot(
+    data: dict[str, np.ndarray], max_points: int
+) -> dict[str, np.ndarray]:
     """
     Bucket consecutive samples and reduce each bucket to one point so
     the plot stays readable on long builds. Returns `data` unchanged
@@ -60,9 +62,9 @@ def downsample_for_plot(data: dict, max_points: int) -> dict:
             if pad_length:
                 series = np.concatenate([series, np.full(pad_length, np.nan)])
             buckets = series.reshape(n_buckets, bucket_size)
-            # elapsed_s uses nanmin so the x-axis stays monotone (first
-            # timestamp of each bucket); rss/cpu use nanmax so peaks
-            # survive the bucketing.
+            # elapsed_s uses nanmin so each plotted x marks the start of its
+            # bucket's time window and the curve begins at the build start
+            # rss/cpu use nanmax so peaks survive the bucketing.
             reducer = np.nanmin if column_name == "elapsed_s" else np.nanmax
             downsampled[column_name] = reducer(buckets, axis=1)
     return downsampled
@@ -102,20 +104,18 @@ def annotate_peak(
 
 def compute_phase_boundaries(
     log_path: Path,
-) -> tuple[datetime | None, dict[str, tuple[float, float]]]:
+) -> dict[str, tuple[float, float]]:
     """
-    Parse the index build log for phase timestamps. Returns
-    (overall_begin, phases), where `overall_begin` is the datetime
-    of the first "INFO: Processing" line, and `phases` maps each
-    phase name to (start_s, end_s) elapsed seconds relative to
-    `overall_begin`. Returns (None, {}) if the log is missing or
-    the first phase cannot be located. Phases with incomplete
-    timestamps are skipped.
+    Parse the index build log for phase timestamps. Maps each phase
+    name to (start_s, end_s) elapsed seconds relative to the first
+    "INFO: Processing" line. Returns {} if the log is missing or the
+    first phase cannot be located. Phases with incomplete timestamps
+    are skipped.
     """
     try:
         lines = log_path.read_text().splitlines()
     except OSError:
-        return None, {}
+        return {}
 
     ts_regex = r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"
     ts_format = "%Y-%m-%d %H:%M:%S"
@@ -135,7 +135,7 @@ def compute_phase_boundaries(
 
     overall_begin, idx = find(r"INFO:\s*Processing")
     if overall_begin is None:
-        return None, {}
+        return {}
 
     merge_begin, idx = find(r"INFO:\s*Merging partial vocab", idx)
     convert_begin, idx = find(r"INFO:\s*Converting triples", idx)
@@ -194,7 +194,7 @@ def compute_phase_boundaries(
         add("Convert to global IDs", convert_begin, normal_end)
     add("Text index", text_begin, text_end)
 
-    return overall_begin, phases
+    return phases
 
 
 def parse_git_hash(log_path: Path) -> str | None:
@@ -250,32 +250,27 @@ def draw_usage_plot(
     out_path: Path,
     title: str,
     plot_max_points: int = 500,
-) -> None:
+) -> bool:
     """
     Read the usage TSV and index log, render a dual-axis plot of
     memory and CPU over time with phase bands from the index log,
-    and save it to `out_path`. Silently returns if the TSV is empty
-    or unreadable. `plot_max_points` caps the number of dots drawn
-    per series; raw samples are bucketed and reduced with max so
-    memory peaks survive the downsampling.
+    and save it to `out_path`. Returns True if a plot was saved,
+    False if the TSV has no usable samples. `plot_max_points` caps
+    the number of points drawn per series.
     """
     data = read_usage_tsv(tsv_path)
     if not data or len(data.get("elapsed_s", [])) == 0:
-        return
+        return False
 
     # drop leading rows where rss was never sampled so the plot starts
     # at the first real measurement rather than a flat NaN run.
     valid = np.where(~np.isnan(data["rss"]))[0]
     if len(valid) == 0:
-        return
+        return False
     data = {name: values[valid[0] :] for name, values in data.items()}
     data["elapsed_s"] = data["elapsed_s"] - data["elapsed_s"][0]
 
-    _, phases = compute_phase_boundaries(log_path)
-
-    elapsed_s = data["elapsed_s"]
-    if len(elapsed_s) == 0:
-        return
+    phases = compute_phase_boundaries(log_path)
 
     data = downsample_for_plot(data, plot_max_points)
     elapsed_s = data["elapsed_s"]
@@ -284,6 +279,8 @@ def draw_usage_plot(
     x_values = elapsed_s / x_factor
     rss_gb = data["rss"] / GB
     cores = psutil.cpu_count() or 1
+    # cpu_percent is per-core (100% == one fully used core), so dividing
+    # by 100 converts it to a count of cores for the CPU axis.
     cpu_cores = data["cpu_percent"] / 100.0
 
     fig, ax_mem = plt.subplots(figsize=(12, 6), constrained_layout=True)
@@ -357,6 +354,7 @@ def draw_usage_plot(
     ax_mem.set_title(f"{title}\n{subtitle}" if subtitle else title)
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
+    return True
 
 
 def render_usage_plot(
@@ -378,7 +376,7 @@ def render_usage_plot(
         log.warning(f"Resource-usage TSV not found: {tsv_path}")
         return None
     try:
-        draw_usage_plot(
+        rendered = draw_usage_plot(
             tsv_path=tsv_path,
             log_path=log_path,
             qleverfile_path=qleverfile_path,
@@ -386,7 +384,12 @@ def render_usage_plot(
             title=f"{engine_name} index build: {dataset}",
             plot_max_points=plot_max_points,
         )
-        return plot_path
     except Exception as error:
         log.warning(f"Could not render usage plot: {error}")
         return None
+    if not rendered:
+        log.warning(
+            f"Resource-usage plot not rendered, no usable samples in {tsv_path}"
+        )
+        return None
+    return plot_path

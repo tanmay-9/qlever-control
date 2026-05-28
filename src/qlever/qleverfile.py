@@ -256,8 +256,8 @@ class Qleverfile:
             "--resource-monitor-interval",
             type=float,
             default=1.0,
-            help="Seconds between resource-usage samples (memory, swap, "
-            "CPU) collected during the index build",
+            help="Seconds between resource-usage samples (memory, CPU) "
+            "collected during the index build",
         )
         index_args["resource_monitor_plot_max_points"] = arg(
             "--resource-monitor-plot-max-points",

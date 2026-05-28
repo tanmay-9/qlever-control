@@ -8,6 +8,7 @@ from qlever.usage_plot import (
     parse_qleverfile,
     pick_time_unit,
     read_usage_tsv,
+    render_usage_plot,
 )
 
 
@@ -142,15 +143,13 @@ def test_downsample_for_plot_caps_points_and_keeps_peak():
 
 
 def test_compute_phase_boundaries_missing_file(tmp_path):
-    begin, phases = compute_phase_boundaries(tmp_path / "nope.txt")
-    assert begin is None
+    phases = compute_phase_boundaries(tmp_path / "nope.txt")
     assert phases == {}
 
 
 def test_compute_phase_boundaries_no_processing_line(tmp_path):
     path = write_log(tmp_path, ["2026-06-01 10:00:00 - INFO: Something else"])
-    begin, phases = compute_phase_boundaries(path)
-    assert begin is None
+    phases = compute_phase_boundaries(path)
     assert phases == {}
 
 
@@ -166,8 +165,7 @@ def test_compute_phase_boundaries_with_permutations(tmp_path):
             "2026-06-01 10:00:50 - INFO: Index build completed",
         ],
     )
-    begin, phases = compute_phase_boundaries(path)
-    assert begin is not None
+    phases = compute_phase_boundaries(path)
     assert phases == {
         "Parse input": (0.0, 10.0),
         "Build vocabularies": (10.0, 20.0),
@@ -188,7 +186,7 @@ def test_compute_phase_boundaries_without_permutations(tmp_path):
             "2026-06-01 10:00:50 - INFO: Index build completed",
         ],
     )
-    begin, phases = compute_phase_boundaries(path)
+    phases = compute_phase_boundaries(path)
     assert phases == {
         "Parse input": (0.0, 10.0),
         "Build vocabularies": (10.0, 20.0),
@@ -209,7 +207,7 @@ def test_compute_phase_boundaries_dedups_repeated_permutation_names(tmp_path):
             "2026-06-01 10:00:50 - INFO: Index build completed",
         ],
     )
-    begin, phases = compute_phase_boundaries(path)
+    phases = compute_phase_boundaries(path)
     assert "Permutation PSO & POS" in phases
     assert "Permutation PSO & POS (2)" in phases
     assert phases["Permutation PSO & POS"] == (30.0, 40.0)
@@ -217,9 +215,21 @@ def test_compute_phase_boundaries_dedups_repeated_permutation_names(tmp_path):
 
 
 def test_compute_phase_boundaries_skips_incomplete_phase(tmp_path):
-    # Only the "Processing" line: a begin is found, but no later
+    # Only the "Processing" line: the start is found, but no later
     # timestamps, so every phase has a None endpoint and is skipped.
     path = write_log(tmp_path, ["2026-06-01 10:00:00 - INFO: Processing input"])
-    begin, phases = compute_phase_boundaries(path)
-    assert begin is not None
+    phases = compute_phase_boundaries(path)
     assert phases == {}
+
+
+def test_render_usage_plot_missing_tsv(tmp_path):
+    assert render_usage_plot("missing", output_dir=tmp_path) is None
+
+
+def test_render_usage_plot_header_only_tsv_renders_nothing(tmp_path):
+    # A TSV with only the header (no samples) must not report success
+    # or leave a PNG behind.
+    tsv_path = tmp_path / "data.usage-log.tsv"
+    tsv_path.write_text("elapsed_s\trss\tcpu_percent\n")
+    assert render_usage_plot("data", output_dir=tmp_path) is None
+    assert not (tmp_path / "data.usage-log.png").exists()

@@ -16,12 +16,8 @@ GB = 10**9
 
 @dataclass
 class Sample:
-    """
-    One resource measurement. `rss` is populated in native mode (via
-    psutil.Process.memory_info — cheap `/proc/<pid>/statm` read) and
-    in container mode (via docker/podman stats). Unavailable fields
-    stay `None` and are written as empty columns in the TSV.
-    """
+    """One sample of elapsed time, memory (RSS), and CPU usage; None
+    fields are written as empty TSV columns."""
 
     elapsed_s: float | None = None
     rss: int | None = None
@@ -33,13 +29,15 @@ def format_gb(bytes_val: float) -> str:
     return f"{bytes_val / GB:.2f} GB"
 
 
-def parse_container_mem_usage(usage: str) -> int:
+def parse_memory_to_bytes(memory_string: str) -> int:
     """
     Parse a memory usage string from `docker stats` or `podman stats`
     into bytes.  Docker reports binary units (GiB, MiB) while Podman
     reports decimal units (GB, MB).
     """
-    usage = usage.strip()
+    memory_string = memory_string.strip()
+    # Order matters: the first endswith match wins, and "B" is a suffix
+    # of every other unit, so it must stay last.
     units = {
         "TIB": 1024**4,
         "TB": 1000**4,
@@ -52,15 +50,15 @@ def parse_container_mem_usage(usage: str) -> int:
         "B": 1,
     }
     for suffix, multiplier in units.items():
-        if usage.upper().endswith(suffix):
-            number = float(usage[: len(usage) - len(suffix)])
+        if memory_string.upper().endswith(suffix):
+            number = float(memory_string[: len(memory_string) - len(suffix)])
             return int(number * multiplier)
     return 0
 
 
 def sample_to_tsv_row(sample: Sample) -> str:
     """Format a Sample as a TSV row; None fields become empty columns."""
-    values = [getattr(sample, f.name) for f in fields(sample)]
+    values = [getattr(sample, field.name) for field in fields(sample)]
     return "\t".join("" if v is None else str(v) for v in values) + "\n"
 
 
@@ -105,12 +103,12 @@ def sample_container(system: str, container: str) -> Sample:
             f" {container}",
             return_output=True,
         )
-        mem_str, cpu_str = output.strip().split("\t")
-        usage = mem_str.split("/")[0].strip()
-        cpu_pct = float(cpu_str.strip().rstrip("%"))
+        memory_field, cpu_field = output.strip().split("\t")
+        used_memory = memory_field.split("/")[0].strip()
+        cpu_percent = float(cpu_field.strip().rstrip("%"))
         return Sample(
-            rss=parse_container_mem_usage(usage),
-            cpu_percent=cpu_pct,
+            rss=parse_memory_to_bytes(used_memory),
+            cpu_percent=cpu_percent,
         )
     except Exception:
         return Sample()
@@ -147,23 +145,18 @@ class ResourceMonitor:
     ):
         """
         Args:
-            dataset:         Name of the dataset being indexed.
-            binary:          Name of the index executable. Its basename
-                             is matched against `Path(argv[0]).name` of
-                             each process in the descendant tree to find
-                             the worker (native mode only).
-            container:       Container name to query for memory stats.
-                             When set together with `system`, sampling
-                             uses `docker/podman stats` instead of
-                             psutil.
-            system:          Container runtime ("docker" or "podman").
-            interval:        Seconds between samples (default 1.0).
-            output_dir:      Directory for the TSV usage log file.
-            parent_pid:      PID whose descendants are searched for the
-                             index process. Defaults to the current
-                             Python process. Useful when the target is a
-                             daemonized process that re-parents away
-                             from us (e.g. virtuoso-t).
+            dataset:    Name of the dataset being indexed.
+            binary:     Name of the index executable, matched against the
+                        descendant processes (native mode only).
+            container:  Container name to sample; when set with `system`,
+                        sampling uses `docker/podman stats` not psutil.
+            system:     Container runtime ("docker" or "podman").
+            interval:   Seconds between samples.
+            output_dir: Directory for the TSV usage log file.
+            parent_pid: PID whose descendants are searched for the index
+                        process. Defaults to the current process; pass a
+                        different PID when the target re-parents away from
+                        us.
         """
         self.dataset = dataset
         self.binary = binary
@@ -188,6 +181,8 @@ class ResourceMonitor:
             )
             if self.worker_proc is None:
                 return Sample()
+            # cpu_percent reports usage since the previous call, so this
+            # first call seeds the baseline and its 0.0 result is discarded.
             try:
                 self.worker_proc.cpu_percent(interval=None)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
