@@ -135,7 +135,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         else:
             self.metrics_timer.resume()
 
-    @work(thread=True, exclusive=True)
+    @work(thread=True, exclusive=True, group="ping_server")
     def ping_server(self) -> None:
         """Curl the server's /ping off the UI thread."""
         ok = is_qlever_server_alive(self.app.sparql_endpoint, max_time=2)

@@ -105,7 +105,7 @@ class MonitorQueriesApp(App):
         self.load_metrics_history()
         self.push_screen("live")
 
-    @work(thread=True, exclusive=True)
+    @work(thread=True, exclusive=True, group="tail_live_log")
     def tail_live_log(self) -> None:
         """Poll the log forever, dispatching new events into LiveState."""
         tailer = LiveLogReader(
@@ -120,7 +120,7 @@ class MonitorQueriesApp(App):
                 tailer.poll(log_stream)
                 time.sleep(tailer.poll_interval)
 
-    @work(thread=True)
+    @work(thread=True, group="load_metrics_history")
     def load_metrics_history(self) -> None:
         """Prepend the hour before cut_offset into completed history so metrics aren't empty at boot."""
         load_completed_history(self.log_file, self.live_state, self.cut_offset)
@@ -174,7 +174,7 @@ class MonitorQueriesApp(App):
         if pane.pretty_text is None:
             self.pretty_print_worker(pane, pane.content.sparql_text)
 
-    @work(thread=True, exclusive=True)
+    @work(thread=True, exclusive=True, group="pretty_print")
     def pretty_print_worker(self, pane: SparqlPane, raw: str) -> None:
         """Run the blocking sparql-formatter off the UI thread."""
         result = pretty_printed_query(

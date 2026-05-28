@@ -181,7 +181,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.show_loading_state()
         self.refresh_data(rescan)
 
-    @work(thread=True, exclusive=True)
+    @work(thread=True, exclusive=True, group="refresh_data")
     def refresh_data(self, rescan: bool) -> None:
         """Scan and/or re-filter the window, push rows + metrics + status.
 
