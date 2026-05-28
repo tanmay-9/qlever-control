@@ -6,7 +6,6 @@ from textual.widgets import DataTable
 from qlever.monitor.models import HistoricQueryRow, LiveQueryRow
 from qlever.monitor.util import format_clock
 
-QID_WIDTH = 10
 SPARQL_WIDTH = 280
 
 
@@ -72,7 +71,7 @@ class LiveQueryTable(QueryTable):
 
     def on_mount(self) -> None:
         """Add the columns and one table row per active query."""
-        self.add_column("Query ID")
+        self.add_column("Started")
         self.add_column("Duration", width=8)
         self.add_column("SPARQL")
         self.repaint_rows()
@@ -81,7 +80,7 @@ class LiveQueryTable(QueryTable):
         """Add one DataTable row per entry in self.query_rows."""
         for row in self.query_rows:
             self.add_row(
-                truncate(row.qid, QID_WIDTH),
+                format_clock(row.started_at_ms),
                 Text(format_duration(row.duration_ms), justify="right"),
                 truncate(oneline(row.sparql), SPARQL_WIDTH),
             )
@@ -90,11 +89,14 @@ class LiveQueryTable(QueryTable):
 class HistoricQueryTable(QueryTable):
     """Finished queries in the current window on the Historic screen."""
 
+    # Wide enough to fit a sortable header plus its sort arrow.
+    SORTABLE_COLUMN_WIDTH = 10
+
     def on_mount(self) -> None:
         """Add the columns and one table row per finished query."""
-        self.add_column("Started")
-        self.add_column("Duration", width=8)
-        self.add_column("Status")
+        self.add_column("Started", width=self.SORTABLE_COLUMN_WIDTH)
+        self.add_column("Duration", width=self.SORTABLE_COLUMN_WIDTH)
+        self.add_column("Status", width=self.SORTABLE_COLUMN_WIDTH)
         self.add_column("SPARQL")
         self.repaint_rows()
 
@@ -107,3 +109,15 @@ class HistoricQueryTable(QueryTable):
                 row.status,
                 truncate(oneline(row.sparql), SPARQL_WIDTH),
             )
+
+    def set_sort_indicator(self, column_index: int, descending: bool) -> None:
+        """Show a sort arrow on one column header and clear the rest."""
+        arrow = " ▼" if descending else " ▲"
+        for index, column in enumerate(self.ordered_columns):
+            base = column.label.plain.rstrip(" ▲▼")
+            label = base + arrow if index == column_index else base
+            column.label = Text(label)
+        # Invalidate the render cache so the new labels paint, the way
+        # update_cell does; Textual has no public column relabel.
+        self._update_count += 1
+        self.refresh()

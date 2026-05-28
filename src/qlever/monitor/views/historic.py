@@ -39,6 +39,21 @@ MODE_PHRASES = {
     "ENDS": "ended in",
 }
 
+SORT_COLUMNS = ["Started", "Duration", "Status"]
+
+SORT_KEYS = {
+    "Started": lambda row: row.started_at_ms,
+    "Duration": lambda row: row.duration_ms,
+    "Status": lambda row: row.status,
+}
+
+# Each column's (descending, ascending) wording for the status line.
+SORT_PHRASES = {
+    "Started": ("newest first", "oldest first"),
+    "Duration": ("longest first", "shortest first"),
+    "Status": ("Z to A", "A to Z"),
+}
+
 
 class HistoricScreen(Screen, inherit_bindings=False):
     """Historic view: shows active queries parsed from the log over a time window."""
@@ -56,6 +71,14 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("shift+right", "shift_later", "Shift window", show=False),
         Binding("g", "snap_start", "Window start/end", key_display="g/G"),
         Binding("G", "snap_end", "Window end", show=False),
+        Binding(
+            "less_than_sign",
+            "sort_prev_column",
+            "Sort column",
+            key_display="< >",
+        ),
+        Binding("greater_than_sign", "sort_next_column", "", show=False),
+        Binding("i", "invert_sort", "Invert sort"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -68,6 +91,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
         )
         self.window_size = self.available_presets[0]
         self.mode = "ACTIVE"
+        self.sort_column = "Duration"
+        self.sort_reverse = True
         width = preset_ms(self.window_size)
         self.window_start_ms = (
             self.log_start_ms if width is None else self.log_end_ms - width
@@ -183,7 +208,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         rows, metrics = render_window(
             self.window_data, controls, self.log_end_ms
         )
-        rows = sorted(rows, key=lambda row: row.duration_ms, reverse=True)
+        rows = self.sorted_rows(rows)
         self.app.call_from_thread(self.apply_window_result, rows, metrics)
 
     def apply_window_result(
@@ -194,10 +219,49 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Push fresh rows, metrics, and status line into the widgets."""
         self.query_one(HistoricQueryTable).set_rows(rows)
         self.query_one(MetricsRow).rows = [metrics]
-        phrase = MODE_PHRASES[self.mode]
         self.query_one("#table-status", Static).update(
-            f"Showing {len(rows)} queries that {phrase} the time window "
-            "(sorted by longest duration)"
+            self.status_text(len(rows))
+        )
+        self.refresh_sort_indicator()
+
+    def apply_sort(self) -> None:
+        """Re-sort the rows already shown and refresh the status line."""
+        table = self.query_one(HistoricQueryTable)
+        rows = self.sorted_rows(table.query_rows)
+        table.set_rows(rows)
+        self.query_one("#table-status", Static).update(
+            self.status_text(len(rows))
+        )
+        self.refresh_sort_indicator()
+
+    def sorted_rows(
+        self, rows: list[HistoricQueryRow]
+    ) -> list[HistoricQueryRow]:
+        """Order rows by the active sort column and direction."""
+        return sorted(
+            rows,
+            key=SORT_KEYS[self.sort_column],
+            reverse=self.sort_reverse,
+        )
+
+    def sort_phrase(self) -> str:
+        """Describe the active sort and direction for the status line."""
+        descending, ascending = SORT_PHRASES[self.sort_column]
+        direction = descending if self.sort_reverse else ascending
+        return f"{self.sort_column}, {direction}"
+
+    def status_text(self, count: int) -> str:
+        """Status line describing the window mode, row count, and sort."""
+        phrase = MODE_PHRASES[self.mode]
+        return (
+            f"Showing {count} queries that {phrase} the time window "
+            f"(sorted by {self.sort_phrase()})"
+        )
+
+    def refresh_sort_indicator(self) -> None:
+        """Point the table's header arrow at the active sort column."""
+        self.query_one(HistoricQueryTable).set_sort_indicator(
+            SORT_COLUMNS.index(self.sort_column), self.sort_reverse
         )
 
     def clamp_window_start(self, start: int, width: int) -> int:
@@ -250,6 +314,27 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Step to the next match mode (wraps)."""
         index = MODES.index(self.mode)
         self.set_mode(MODES[(index + 1) % len(MODES)])
+
+    def cycle_sort_column(self, direction: int) -> None:
+        """Move the sort one column in `direction` (wraps)."""
+        index = SORT_COLUMNS.index(self.sort_column)
+        self.sort_column = SORT_COLUMNS[
+            (index + direction) % len(SORT_COLUMNS)
+        ]
+        self.apply_sort()
+
+    def action_sort_next_column(self) -> None:
+        """Sort by the next column (wraps)."""
+        self.cycle_sort_column(1)
+
+    def action_sort_prev_column(self) -> None:
+        """Sort by the previous column (wraps)."""
+        self.cycle_sort_column(-1)
+
+    def action_invert_sort(self) -> None:
+        """Flip the sort direction."""
+        self.sort_reverse = not self.sort_reverse
+        self.apply_sort()
 
     def shift_window(self, direction: int) -> None:
         """Move the window by its own width; clamp; no-op when `all`."""
@@ -308,6 +393,19 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def on_timeline_recentered(self, message: Timeline.Recentered) -> None:
         """Recenter the window on the clicked timeline position."""
         self.center_window_at(message.center_ms)
+
+    def on_data_table_header_selected(
+        self, message: HistoricQueryTable.HeaderSelected
+    ) -> None:
+        """Sort by the clicked column; click the active one again to invert."""
+        if message.column_index >= len(SORT_COLUMNS):
+            return
+        column = SORT_COLUMNS[message.column_index]
+        if column == self.sort_column:
+            self.sort_reverse = not self.sort_reverse
+        else:
+            self.sort_column = column
+        self.apply_sort()
 
     def on_data_table_row_selected(
         self, message: HistoricQueryTable.RowSelected
