@@ -73,7 +73,9 @@ def test_parse_git_hash_empty_file(tmp_path):
 )
 def test_parse_qleverfile_batch_formatting(triples, expected, tmp_path):
     path = tmp_path / "Qleverfile"
-    path.write_text(f'SETTINGS_JSON = {{ "num-triples-per-batch": {triples} }}\n')
+    path.write_text(
+        f'SETTINGS_JSON = {{ "num-triples-per-batch": {triples} }}\n'
+    )
     assert parse_qleverfile(path)["batch"] == expected
 
 
@@ -95,9 +97,7 @@ def test_parse_qleverfile_no_relevant_keys(tmp_path):
 
 def test_read_usage_tsv_parses_columns_and_blank_as_nan(tmp_path):
     path = tmp_path / "data.usage-log.tsv"
-    path.write_text(
-        "elapsed_s\trss\tcpu_percent\n1.0\t100\t5.0\n2.0\t\t6.0\n"
-    )
+    path.write_text("elapsed_s\trss\tcpu_percent\n1.0\t100\t5.0\n2.0\t\t6.0\n")
     data = read_usage_tsv(path)
     assert set(data) == {"elapsed_s", "rss", "cpu_percent"}
     np.testing.assert_array_equal(data["elapsed_s"], np.array([1.0, 2.0]))
@@ -217,7 +217,9 @@ def test_compute_phase_boundaries_dedups_repeated_permutation_names(tmp_path):
 def test_compute_phase_boundaries_skips_incomplete_phase(tmp_path):
     # Only the "Processing" line: the start is found, but no later
     # timestamps, so every phase has a None endpoint and is skipped.
-    path = write_log(tmp_path, ["2026-06-01 10:00:00 - INFO: Processing input"])
+    path = write_log(
+        tmp_path, ["2026-06-01 10:00:00 - INFO: Processing input"]
+    )
     phases = compute_phase_boundaries(path)
     assert phases == {}
 
