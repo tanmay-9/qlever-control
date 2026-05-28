@@ -9,6 +9,7 @@ from qlever.commands.index import IndexCommand
 
 # Test execute of index command for basic case with successful execution
 class TestIndexCommand(unittest.TestCase):
+    @patch("qlever.commands.index.ResourceMonitor")
     @patch("qlever.util.run_command")
     @patch("qlever.commands.index.run_command")
     @patch("qlever.commands.index.Containerize")
@@ -23,9 +24,11 @@ class TestIndexCommand(unittest.TestCase):
         mock_containerize,
         mock_index_run_command,
         mock_util_run_command,
+        mock_resource_monitor,
     ):
         # Setup args
         args = MagicMock()
+        args.replot_resource_usage = False
         args.name = "TestName"
         args.format = "turtle"
         args.cat_input_files = "cat input.nt"
@@ -110,6 +113,7 @@ class TestIndexCommand(unittest.TestCase):
     ):
         # Setup args
         args = MagicMock()
+        args.replot_resource_usage = False
         args.name = "TestName"
         args.format = "turtle"
         args.cat_input_files = "cat input.nt"
@@ -173,6 +177,7 @@ class TestIndexCommand(unittest.TestCase):
     ):
         # Setup args
         args = MagicMock()
+        args.replot_resource_usage = False
         args.name = "TestName"
         args.format = "turtle"
         args.cat_input_files = "cat input.nt"
@@ -221,6 +226,7 @@ class TestIndexCommand(unittest.TestCase):
         mock_run_command.assert_called_once_with(f"{args.index_binary} --help")
 
     # Test execute for file size > 10gb
+    @patch("qlever.commands.index.ResourceMonitor")
     @patch("qlever.util.run_command")
     @patch("qlever.commands.index.run_command")
     @patch("qlever.commands.index.Containerize")
@@ -235,9 +241,11 @@ class TestIndexCommand(unittest.TestCase):
         mock_containerize,
         mock_index_run_command,
         mock_util_run_command,
+        mock_resource_monitor,
     ):
         # Setup args
         args = MagicMock()
+        args.replot_resource_usage = False
         args.name = "TestName"
         args.format = "turtle"
         args.cat_input_files = "cat input.nt"
@@ -295,6 +303,7 @@ class TestIndexCommand(unittest.TestCase):
     def test_execute_get_input_options_error(self, mock_json, mock_log):
         # Setup args
         args = MagicMock()
+        args.replot_resource_usage = False
         args.cat_input_files = False
         args.multi_input_json = '{"cmd": "test_data"}'
 
@@ -323,6 +332,7 @@ class TestIndexCommand(unittest.TestCase):
     def test_execute_cat_files_and_multi_json(self, mock_log):
         # Setup args
         args = MagicMock()
+        args.replot_resource_usage = False
         args.cat_input_files = True
         args.multi_input_json = True
 
@@ -353,6 +363,7 @@ class TestIndexCommand(unittest.TestCase):
     ):
         # Setup args
         args = MagicMock()
+        args.replot_resource_usage = False
         args.name = "TestName"
         args.index_binary = "/test/path/index-binary"
         args.multi_input_json = True
