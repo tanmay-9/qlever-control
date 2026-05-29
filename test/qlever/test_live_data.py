@@ -4,20 +4,19 @@ import threading
 import time
 
 from qlever.monitor.live_data import (
-    FLASH_THRESHOLD_MS,
     LIVE_HORIZON_MS,
+    ActiveQuery,
     CompletedQueries,
     LiveLogReader,
     LiveState,
+    discard_finished_backlog,
     find_active_queries,
     get_live_metrics,
     get_live_query_rows,
     load_completed_history,
-    take_unseen_finished,
 )
 from qlever.monitor.log_reader import CompletedQuery
 from qlever.monitor.metrics import MetricsSnapshot, percentiles
-from qlever.monitor.models import LiveQueryRow
 
 NOW_MS = 1_700_000_000_000
 MIN_MS = 60_000
@@ -171,7 +170,9 @@ def test_find_active_queries_picks_up_unmatched_starts(write_log):
     )
     state, cut_offset, eof_ts = find_active_queries(path, window_pad_ms=10_000)
     assert list(state.active) == ["q2"]
-    assert state.active["q2"] == (2000, "x", "SELECT b")
+    assert state.active["q2"] == ActiveQuery(
+        start_ms=2000, end_ms=None, client_ip="x", sparql="SELECT b"
+    )
     assert cut_offset == path.stat().st_size
     assert eof_ts == 3000
 
@@ -182,8 +183,12 @@ def test_find_active_queries_loads_sparql_for_each_survivor(write_log):
         + start_line(2000, "b", "SELECT beta")
     )
     state, _, _ = find_active_queries(path, window_pad_ms=10_000)
-    assert state.active["a"] == (1000, "x", "SELECT alpha")
-    assert state.active["b"] == (2000, "x", "SELECT beta")
+    assert state.active["a"] == ActiveQuery(
+        start_ms=1000, end_ms=None, client_ip="x", sparql="SELECT alpha"
+    )
+    assert state.active["b"] == ActiveQuery(
+        start_ms=2000, end_ms=None, client_ip="x", sparql="SELECT beta"
+    )
 
 
 def test_find_active_queries_empty_log_returns_empty_state(write_log):
@@ -225,7 +230,11 @@ def test_poll_pairs_a_clean_start_and_end(write_log):
     reader = make_reader(path, state)
     with path.open("rb") as log_stream:
         reader.poll(log_stream)
-    assert state.active == {}
+    # The end event records the completion but the query stays in active
+    # (end_ms set, still unseen) until a repaint has shown it.
+    entry = state.active["q1"]
+    assert entry.end_ms == 2000
+    assert entry.seen is False
     [done] = state.completed.entries
     assert done.start_ms == 1000
     assert done.end_ms == 2000
@@ -240,7 +249,11 @@ def test_poll_keeps_start_in_active_until_end_arrives(write_log):
     reader = make_reader(path, state)
     with path.open("rb") as log_stream:
         reader.poll(log_stream)
-    assert state.active == {"q1": (1000, "x", "SELECT a")}
+    assert state.active == {
+        "q1": ActiveQuery(
+            start_ms=1000, end_ms=None, client_ip="x", sparql="SELECT a"
+        )
+    }
     assert len(state.completed.entries) == 0
 
 
@@ -276,7 +289,7 @@ def test_poll_partial_trailing_line_is_left_for_next_poll(write_log):
     path.write_bytes(full)
     with path.open("rb") as log_stream:
         reader.poll(log_stream)
-    assert state.active == {}
+    assert state.active["q1"].end_ms == 2000
     assert len(state.completed.entries) == 1
 
 
@@ -327,8 +340,12 @@ def test_evict_stale_drops_actives_older_than_window_pad(write_log):
     state = LiveState()
     now = 1_000_000
     pad = 10_000
-    state.active["fresh"] = (now - 1_000, "", "")
-    state.active["old"] = (now - 20_000, "", "")
+    state.active["fresh"] = ActiveQuery(
+        start_ms=now - 1_000, end_ms=None, client_ip="", sparql=""
+    )
+    state.active["old"] = ActiveQuery(
+        start_ms=now - 20_000, end_ms=None, client_ip="", sparql=""
+    )
     reader = LiveLogReader(
         log_path=write_log(b""),
         state=state,
@@ -528,50 +545,60 @@ def test_poll_loop_picks_up_lines_appended_to_the_file(write_log):
         thread.join()
 
 
-def test_flash_query_carries_real_end_minus_start_duration(write_log):
-    """Sub-repaint completions store end-start, not a wall-clock duration."""
+def test_finished_query_is_shown_once_then_skipped(write_log):
+    """A query that finished before any paint shows once, then is hidden."""
     path = write_log(start_line(1000, "q1", "SELECT a") + end_line(1100, "q1"))
     state = LiveState()
     reader = make_reader(path, state)
     with path.open("rb") as log_stream:
         reader.poll(log_stream)
-    [row] = state.unseen_finished
+    [row] = get_live_query_rows(state, now_ms=5000)
     assert row.qid == "q1"
     assert row.started_at_ms == 1000
-    assert row.duration_ms == 100
     assert row.sparql == "SELECT a"
+    # Frozen at end - start, regardless of the clock the caller passes.
+    assert row.duration_ms == 100
+    assert get_live_query_rows(state, now_ms=9999) == []
 
 
-def test_completion_above_flash_threshold_is_not_queued(write_log):
-    """Queries longer than FLASH_THRESHOLD_MS stay out of unseen_finished."""
-    end_ts = 1000 + FLASH_THRESHOLD_MS + 100
-    path = write_log(start_line(1000, "q1") + end_line(end_ts, "q1"))
+def test_finished_unseen_entry_survives_eviction_until_shown(write_log):
+    """Eviction keeps a finished query until a repaint has rendered it."""
+    path = write_log(start_line(1000, "q1") + end_line(1100, "q1"))
     state = LiveState()
-    reader = make_reader(path, state)
+    reader = make_reader(path, state, now_ms=1200)
     with path.open("rb") as log_stream:
         reader.poll(log_stream)
-    assert state.unseen_finished == []
+    assert "q1" in state.active
+    get_live_query_rows(state, now_ms=1200)
+    reader.evict_stale()
+    assert "q1" not in state.active
 
 
-def test_take_unseen_finished_returns_rows_and_clears_queue():
-    """The drain helper hands back every queued row and empties the list."""
+def test_discard_finished_backlog_marks_finished_seen_only():
+    """The resume drop suppresses finished entries but keeps running ones."""
     state = LiveState()
-    state.unseen_finished.append(
-        LiveQueryRow(qid="q1", started_at_ms=1000, duration_ms=80, sparql="A")
+    state.active["done"] = ActiveQuery(
+        start_ms=1000, end_ms=1100, client_ip="x", sparql="A"
     )
-    state.unseen_finished.append(
-        LiveQueryRow(qid="q2", started_at_ms=1200, duration_ms=120, sparql="B")
+    state.active["running"] = ActiveQuery(
+        start_ms=1200, end_ms=None, client_ip="y", sparql="B"
     )
-    taken = take_unseen_finished(state)
-    assert [row.qid for row in taken] == ["q1", "q2"]
-    assert state.unseen_finished == []
+    discard_finished_backlog(state)
+    assert state.active["done"].seen is True
+    assert state.active["running"].seen is False
+    shown = [row.qid for row in get_live_query_rows(state, now_ms=2000)]
+    assert shown == ["running"]
 
 
 def test_get_live_query_rows_uses_caller_clock_for_duration():
     """Duration is now_ms - start_ms; the screen passes its display clock."""
     state = LiveState()
-    state.active["q1"] = (1000, "x", "SELECT a")
-    state.active["q2"] = (1500, "y", "SELECT b")
+    state.active["q1"] = ActiveQuery(
+        start_ms=1000, end_ms=None, client_ip="x", sparql="SELECT a"
+    )
+    state.active["q2"] = ActiveQuery(
+        start_ms=1500, end_ms=None, client_ip="y", sparql="SELECT b"
+    )
     rows = {row.qid: row for row in get_live_query_rows(state, now_ms=2000)}
     assert rows["q1"].duration_ms == 1000
     assert rows["q2"].duration_ms == 500

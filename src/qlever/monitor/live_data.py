@@ -36,7 +36,6 @@ LIVE_METRIC_WINDOWS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000]
 LIVE_HORIZON_MS = LIVE_METRIC_WINDOWS_MS[2]
 LIVE_METRIC_LABELS = ["last 5m", "last 15m", "last 1h"]
 LIVE_REPAINT_S = 0.25
-FLASH_THRESHOLD_MS = int(LIVE_REPAINT_S * 1000)
 LOG_IDLE_THRESHOLD_MS = 10_000
 PING_INTERVAL_S = 5.0
 PING_FAILS_TO_UNREACHABLE = 3
@@ -109,6 +108,22 @@ class CompletedQueries:
 
 
 @dataclass
+class ActiveQuery:
+    """A running or just-finished query on the Live screen.
+
+    end_ms is None while the query runs; seen is set once a repaint has
+    rendered the query, so one too fast to catch while running still
+    shows for a single paint before being dropped.
+    """
+
+    start_ms: int
+    end_ms: int | None
+    client_ip: str
+    sparql: str
+    seen: bool = False
+
+
+@dataclass
 class LiveState:
     """Shared in-memory state for the Live screen.
 
@@ -118,8 +133,7 @@ class LiveState:
     """
 
     completed: CompletedQueries = field(default_factory=CompletedQueries)
-    active: dict[str, tuple[int, str]] = field(default_factory=dict)
-    unseen_finished: list[LiveQueryRow] = field(default_factory=list)
+    active: dict[str, ActiveQuery] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
     metrics_known_from_ms: int | None = None
     latest_event_ms: int | None = None
@@ -158,7 +172,12 @@ def find_active_queries(
             _, client_ip, sparql = load_sparql_at(
                 log_stream, start_line_offset
             )
-            state.active[qid] = (start_ms, client_ip, sparql)
+            state.active[qid] = ActiveQuery(
+                start_ms=start_ms,
+                end_ms=None,
+                client_ip=client_ip,
+                sparql=sparql,
+            )
 
     return (state, file_size, eof_ts)
 
@@ -225,24 +244,24 @@ class LiveLogReader:
         self.evict_stale()
 
     def evict_stale(self) -> None:
-        """Drop completions older than 1h and actives older than 2t.
+        """Drop old completions and finished or stale active entries.
 
-        Active eviction guards against a missing end event: any query
-        whose start is older than the 2t safety horizon is treated as
-        gone, since the server contract says no real query lives that
-        long.
+        An active entry leaves once a repaint has shown it and it has
+        finished, or once its start is older than the 2t safety horizon
+        (a missing end event, since no real query lives that long).
         """
         now = self.now_ms()
         completed_cutoff = now - LIVE_HORIZON_MS
         active_cutoff = now - self.window_pad_ms
         with self.state.lock:
             self.state.completed.drop_older_than(completed_cutoff)
-            stale = [
+            to_remove = [
                 qid
-                for qid, (start_ms, _, _) in self.state.active.items()
-                if start_ms < active_cutoff
+                for qid, entry in self.state.active.items()
+                if (entry.end_ms is not None and entry.seen)
+                or entry.start_ms < active_cutoff
             ]
-            for qid in stale:
+            for qid in to_remove:
                 del self.state.active[qid]
 
     def handle_line(self, line: bytes) -> None:
@@ -265,7 +284,12 @@ class LiveLogReader:
                 sparql = ""
             client_ip = obj.get("client-ip", "")
             with self.state.lock:
-                self.state.active[qid] = (ts_ms, client_ip, sparql)
+                self.state.active[qid] = ActiveQuery(
+                    start_ms=ts_ms,
+                    end_ms=None,
+                    client_ip=client_ip,
+                    sparql=sparql,
+                )
                 self.state.latest_event_ms = max(
                     self.state.latest_event_ms or 0, ts_ms
                 )
@@ -279,62 +303,65 @@ class LiveLogReader:
                 self.state.latest_event_ms = max(
                     self.state.latest_event_ms or 0, ts_ms
                 )
-                start = self.state.active.pop(qid, None)
-                if start is None:
+                entry = self.state.active.get(qid)
+                if entry is None:
                     return
-                start_ms, client_ip, sparql = start
-                duration_ms = ts_ms - start_ms
+                entry.end_ms = ts_ms
                 self.state.completed.add(
                     CompletedQuery(
-                        start_ms=start_ms,
+                        start_ms=entry.start_ms,
                         end_ms=ts_ms,
-                        duration_ms=duration_ms,
+                        duration_ms=ts_ms - entry.start_ms,
                         status=status,
                         start_line_offset=None,
                     )
                 )
-                if duration_ms < FLASH_THRESHOLD_MS:
-                    self.state.unseen_finished.append(
-                        LiveQueryRow(
-                            qid=qid,
-                            started_at_ms=start_ms,
-                            duration_ms=duration_ms,
-                            sparql=sparql,
-                            client_ip=client_ip,
-                        )
-                    )
-
-
-def take_unseen_finished(state: LiveState) -> list[LiveQueryRow]:
-    """Snapshot the unseen-finished queue and clear it atomically.
-
-    Called once per repaint by the Live screen so each sub-repaint
-    query is shown for exactly one tick before being dropped.
-    """
-    with state.lock:
-        snapshot = list(state.unseen_finished)
-        state.unseen_finished.clear()
-    return snapshot
 
 
 def get_live_query_rows(state: LiveState, now_ms: int) -> list[LiveQueryRow]:
-    """Snapshot the active set as table rows with their current duration.
+    """Snapshot the active set as table rows, marking each one shown.
 
-    The caller chooses the clock: the Live screen passes
-    display_clock_ms() so freeze-on-unreachable freezes durations too.
+    Skips entries that have finished and already appeared in a repaint
+    (they linger only until the tailer reaps them), and flips seen on
+    every returned entry. A query that finished before any paint could
+    catch it running is therefore still shown exactly once. The caller
+    chooses the clock: the Live screen passes display_clock_ms() so
+    freeze-on-unreachable freezes durations too.
+    """
+    rows = []
+    with state.lock:
+        for qid, entry in state.active.items():
+            if entry.end_ms is not None and entry.seen:
+                continue
+            entry.seen = True
+            duration_ms = (
+                entry.end_ms - entry.start_ms
+                if entry.end_ms is not None
+                else now_ms - entry.start_ms
+            )
+            rows.append(
+                LiveQueryRow(
+                    qid=qid,
+                    started_at_ms=entry.start_ms,
+                    duration_ms=duration_ms,
+                    sparql=entry.sparql,
+                    client_ip=entry.client_ip,
+                )
+            )
+    return rows
+
+
+def discard_finished_backlog(state: LiveState) -> None:
+    """Mark finished-but-unshown active entries as seen.
+
+    Called on screen resume so the queries that finished while the user
+    was away are dropped instead of all flashing at once. Running
+    entries are left to show.
     """
     with state.lock:
-        active_snapshot = list(state.active.items())
-    return [
-        LiveQueryRow(
-            qid=qid,
-            started_at_ms=start_ms,
-            duration_ms=now_ms - start_ms,
-            sparql=sparql,
-            client_ip=client_ip,
-        )
-        for qid, (start_ms, client_ip, sparql) in active_snapshot
-    ]
+        for entry in state.active.values():
+            if entry.end_ms is not None:
+                entry.seen = True
 
 
 def format_eta(ms: int) -> str:

@@ -12,10 +12,10 @@ from qlever.monitor.live_data import (
     PING_FAILS_TO_UNREACHABLE,
     PING_INTERVAL_S,
     current_ms,
+    discard_finished_backlog,
     get_live_metrics,
     get_live_query_rows,
     is_log_fresh,
-    take_unseen_finished,
 )
 from qlever.monitor.models import LiveSubtitle, SparqlContent
 from qlever.monitor.widgets.header_row import HeaderRow
@@ -89,8 +89,8 @@ class LiveScreen(Screen, inherit_bindings=False):
 
     def on_screen_resume(self) -> None:
         """Resume periodic UI work; recheck server unless already reachable."""
-        # Drop flashes accumulated while suspended.
-        take_unseen_finished(self.app.live_state)
+        # Drop the backlog of queries that finished while suspended.
+        discard_finished_backlog(self.app.live_state)
         self.table_timer.resume()
         self.update_liveness_visuals()
         if self.ping_timer is not None:
@@ -194,15 +194,13 @@ class LiveScreen(Screen, inherit_bindings=False):
         return current_ms()
 
     def refresh_table(self) -> None:
-        """Push active + just-finished sub-repaint rows; no-op when frozen."""
+        """Push the active rows sorted by duration; no-op when frozen."""
         self.update_liveness_from_log()
         if self.frozen:
             return
         state = self.app.live_state
-        active_rows = get_live_query_rows(state, self.display_clock_ms())
-        flashed_rows = take_unseen_finished(state)
         rows = sorted(
-            active_rows + flashed_rows,
+            get_live_query_rows(state, self.display_clock_ms()),
             key=lambda row: row.duration_ms,
             reverse=True,
         )
