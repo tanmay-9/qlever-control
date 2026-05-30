@@ -6,6 +6,11 @@ from qlever.command import QleverCommand
 from qlever.log import log
 from qlever.monitor.app import MonitorQueriesApp
 
+# `LiveLogReader` ingests new log lines every 0.2s, so a faster screen
+# refresh would only re-render the ticking duration; 0.2s is the floor.
+REFRESH_MIN_S = 0.2
+REFRESH_MAX_S = 2.0
+
 
 class MonitorQueriesCommand(QleverCommand):
     """
@@ -53,6 +58,14 @@ class MonitorQueriesCommand(QleverCommand):
             " completed) is counted as slow in the metrics"
             " (default = server timeout - 10s)",
         )
+        subparser.add_argument(
+            "--refresh",
+            type=float,
+            default=REFRESH_MIN_S,
+            help="Live view screen refresh interval in seconds, between"
+            f" {REFRESH_MIN_S} and {REFRESH_MAX_S}"
+            f" (default = {REFRESH_MIN_S})",
+        )
 
     def execute(self, args) -> bool:
         if not args.metrics_log:
@@ -81,6 +94,13 @@ class MonitorQueriesCommand(QleverCommand):
                 return False
             args.slow_threshold = max(1, timeout_s - 10)
 
+        if args.refresh < REFRESH_MIN_S or args.refresh > REFRESH_MAX_S:
+            log.error(
+                f"--refresh must be between {REFRESH_MIN_S} and"
+                f" {REFRESH_MAX_S} seconds"
+            )
+            return False
+
         sparql_endpoint = (
             args.sparql_endpoint
             if args.sparql_endpoint
@@ -92,6 +112,7 @@ class MonitorQueriesCommand(QleverCommand):
             sparql_endpoint=sparql_endpoint,
             timeout=timeout_s,
             slow_threshold=args.slow_threshold,
+            refresh_interval=args.refresh,
             system=args.system,
         ).run()
         return True

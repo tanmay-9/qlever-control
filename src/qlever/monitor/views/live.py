@@ -8,7 +8,6 @@ from textual.screen import Screen
 from textual.widgets import Footer, Static
 
 from qlever.monitor.live_data import (
-    LIVE_REPAINT_S,
     PING_FAILS_TO_UNREACHABLE,
     PING_INTERVAL_S,
     current_ms,
@@ -74,7 +73,7 @@ class LiveScreen(Screen, inherit_bindings=False):
     def on_mount(self) -> None:
         """Start periodic refreshes; kick off boot pings if the log is stale."""
         self.table_timer = self.set_interval(
-            LIVE_REPAINT_S, self.refresh_table
+            self.app.refresh_interval, self.refresh_table
         )
         self.metrics_timer = self.set_interval(2.0, self.refresh_metrics)
         if self.liveness == "checking":
@@ -169,7 +168,7 @@ class LiveScreen(Screen, inherit_bindings=False):
     def update_liveness_from_log(self) -> None:
         """Re-evaluate the reachability state from log freshness alone.
 
-        Runs every 0.25s via refresh_table. A fresh log line is enough
+        Runs on each refresh_table tick. A fresh log line is enough
         evidence to flip back to reachable from any non-reachable state;
         a long quiet log moves us from reachable into pinging.
         """
