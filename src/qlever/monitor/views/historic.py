@@ -54,6 +54,10 @@ SORT_PHRASES = {
     "Status": ("Z to A", "A to Z"),
 }
 
+# Sort the whole window but paint at most this many rows, so a huge
+# window does not freeze the table.
+MAX_VISIBLE_ROWS = 1000
+
 
 class HistoricScreen(Screen, inherit_bindings=False):
     """Historic view: shows active queries parsed from the log over a time window."""
@@ -99,6 +103,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         )
         self.window_end_ms = self.log_end_ms
         self.window_data = None
+        self.all_rows = []
         controls = ControlsState(
             window_size=self.window_size,
             mode=self.mode,
@@ -208,8 +213,10 @@ class HistoricScreen(Screen, inherit_bindings=False):
         rows, metrics = render_window(
             self.window_data, controls, self.log_end_ms
         )
-        rows = self.sorted_rows(rows)
-        self.app.call_from_thread(self.apply_window_result, rows, metrics)
+        self.all_rows = rows
+        self.app.call_from_thread(
+            self.apply_window_result, self.visible_rows(), metrics
+        )
 
     def apply_window_result(
         self,
@@ -220,17 +227,15 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.query_one(HistoricQueryTable).set_rows(rows)
         self.query_one(MetricsRow).rows = [metrics]
         self.query_one("#table-status", Static).update(
-            self.status_text(len(rows))
+            self.status_text(len(self.all_rows))
         )
         self.refresh_sort_indicator()
 
     def apply_sort(self) -> None:
-        """Re-sort the rows already shown and refresh the status line."""
-        table = self.query_one(HistoricQueryTable)
-        rows = self.sorted_rows(table.query_rows)
-        table.set_rows(rows)
+        """Re-sort the full window, re-cap, and refresh the status line."""
+        self.query_one(HistoricQueryTable).set_rows(self.visible_rows())
         self.query_one("#table-status", Static).update(
-            self.status_text(len(rows))
+            self.status_text(len(self.all_rows))
         )
         self.refresh_sort_indicator()
 
@@ -244,15 +249,23 @@ class HistoricScreen(Screen, inherit_bindings=False):
             reverse=self.sort_reverse,
         )
 
+    def visible_rows(self) -> list[HistoricQueryRow]:
+        """The sorted window capped to the rows the table will paint."""
+        return self.sorted_rows(self.all_rows)[:MAX_VISIBLE_ROWS]
+
     def sort_phrase(self) -> str:
         """Describe the active sort and direction for the status line."""
         descending, ascending = SORT_PHRASES[self.sort_column]
         direction = descending if self.sort_reverse else ascending
         return f"{self.sort_column}, {direction}"
 
-    def status_text(self, count: int) -> str:
+    def status_text(self, total: int) -> str:
         """Status line describing the window mode, row count, and sort."""
         phrase = MODE_PHRASES[self.mode]
+        if total > MAX_VISIBLE_ROWS:
+            count = f"top {MAX_VISIBLE_ROWS:,} of {total:,}"
+        else:
+            count = f"{total:,}"
         return (
             f"Showing {count} queries that {phrase} the time window "
             f"(sorted by {self.sort_phrase()})"
