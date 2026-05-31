@@ -6,7 +6,11 @@ from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Footer, Static
 
-from qlever.monitor.historic_data import read_window, render_window
+from qlever.monitor.historic_data import (
+    load_query_details_for_rows,
+    read_window,
+    render_window,
+)
 from qlever.monitor.live_data import current_ms
 from qlever.monitor.metrics import EMPTY_FIELDS
 from qlever.monitor.models import (
@@ -104,6 +108,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.window_end_ms = self.log_end_ms
         self.window_data = None
         self.all_rows = []
+        self.query_details_cache = {}
         controls = ControlsState(
             window_size=self.window_size,
             mode=self.mode,
@@ -191,8 +196,11 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Scan and/or re-filter the window, push rows + metrics + status.
 
         On `rescan` the log is read into a fresh `WindowData` cached on
-        the screen; otherwise the cached scan is reused. Render always
-        runs, so a mode change pays only an in-memory filter.
+        the screen and the query-details cache is emptied, since a new
+        window is a new set of queries. Render always runs, so a mode
+        change pays only an in-memory filter. The visible rows' text is
+        read here, off the UI thread, reusing the cache across sorts
+        and mode changes within the window.
         """
         if rescan:
             self.window_data = read_window(
@@ -204,6 +212,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
                 self.log_end_ms,
                 current_ms(),
             )
+            self.query_details_cache = {}
         controls = ControlsState(
             window_size=self.window_size,
             mode=self.mode,
@@ -214,8 +223,11 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.window_data, controls, self.log_end_ms
         )
         self.all_rows = rows
+        visible_rows = load_query_details_for_rows(
+            self.app.log_file, self.visible_rows(), self.query_details_cache
+        )
         self.app.call_from_thread(
-            self.apply_window_result, self.visible_rows(), metrics
+            self.apply_window_result, visible_rows, metrics
         )
 
     def apply_window_result(
@@ -226,14 +238,6 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Push fresh rows, metrics, and status line into the widgets."""
         self.query_one(HistoricQueryTable).set_rows(rows)
         self.query_one(MetricsRow).rows = [metrics]
-        self.query_one("#table-status", Static).update(
-            self.status_text(len(self.all_rows))
-        )
-        self.refresh_sort_indicator()
-
-    def apply_sort(self) -> None:
-        """Re-sort the full window, re-cap, and refresh the status line."""
-        self.query_one(HistoricQueryTable).set_rows(self.visible_rows())
         self.query_one("#table-status", Static).update(
             self.status_text(len(self.all_rows))
         )
@@ -334,7 +338,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.sort_column = SORT_COLUMNS[
             (index + direction) % len(SORT_COLUMNS)
         ]
-        self.apply_sort()
+        self.refresh_data(rescan=False)
 
     def action_sort_next_column(self) -> None:
         """Sort by the next column (wraps)."""
@@ -347,7 +351,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def action_invert_sort(self) -> None:
         """Flip the sort direction."""
         self.sort_reverse = not self.sort_reverse
-        self.apply_sort()
+        self.refresh_data(rescan=False)
 
     def shift_window(self, direction: int) -> None:
         """Move the window by its own width; clamp; no-op when `all`."""
@@ -418,7 +422,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.sort_reverse = not self.sort_reverse
         else:
             self.sort_column = column
-        self.apply_sort()
+        self.refresh_data(rescan=False)
 
     def on_data_table_row_selected(
         self, message: HistoricQueryTable.RowSelected

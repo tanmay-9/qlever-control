@@ -52,6 +52,7 @@ class LiveQueryRow:
 @dataclass(frozen=True)
 class HistoricQueryRow:
     qid: str
+    start_line_offset: int
     started_at_ms: int
     duration_ms: int
     status: str

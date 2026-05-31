@@ -6,6 +6,7 @@ that cache by display mode, and maps the survivors into the
 the scan; a mode change reuses the cache.
 """
 
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -32,25 +33,26 @@ class LoggedQuery(NamedTuple):
     `end_ms` is `None` when the query started but has not ended yet,
     either because it is still running or the server crashed before
     writing the end event. `status` carries the raw end status, or
-    `"running"` for a still-open survivor.
+    `"running"` for a still-open survivor. `start_line_offset` is the
+    byte offset of the start line, used to read the query's text only
+    once it is about to be displayed.
     """
 
     start_ms: int
     end_ms: int | None
     status: str
-    qid: str
-    sparql: str
-    client_ip: str
+    start_line_offset: int
 
 
 class WindowData(NamedTuple):
     """Cached scan of one time window, reused across mode flips.
 
     `queries` is every `LoggedQuery` overlapping the window in any
-    mode (the ACTIVE superset), already loaded with `qid` and SPARQL
-    so a mode change is a pure in-memory filter. `metrics` is computed
-    over completions whose `end_ms` lies inside the window, so it is
-    the same for every mode.
+    mode (the ACTIVE superset), so a mode change is a pure in-memory
+    filter. Each query carries its `start_line_offset` but not its
+    text; the text is read for the visible rows only. `metrics` is
+    computed over completions whose `end_ms` lies inside the window,
+    so it is the same for every mode.
     """
 
     queries: list[LoggedQuery]
@@ -70,10 +72,11 @@ def read_window(
 
     The byte range scanned is the window padded by `pad_ms` on each
     side so both events of a query straddling the window edge are
-    recovered. Pairs that lie entirely inside the pad are dropped
-    before `qid` and SPARQL are loaded, so the cache holds only rows
-    a mode predicate could keep. Metrics count completions whose
-    `end_ms` lies inside `[window_start_ms, window_end_ms]`.
+    recovered. Pairs that lie entirely inside the pad are dropped, so
+    the cache holds only rows a mode predicate could keep. The query
+    text is not read here; `load_query_details_for_rows` reads it for
+    the visible rows. Metrics count completions whose `end_ms` lies
+    inside `[window_start_ms, window_end_ms]`.
 
     A still-open query is `"running"` only if its start is within
     `pad_ms` of `log_end_ms` and the log itself is fresh
@@ -92,17 +95,12 @@ def read_window(
         for pair in completed:
             if pair.start_ms > window_end_ms or pair.end_ms < window_start_ms:
                 continue
-            qid, client_ip, sparql = load_sparql_at(
-                log_stream, pair.start_line_offset
-            )
             queries.append(
                 LoggedQuery(
                     start_ms=pair.start_ms,
                     end_ms=pair.end_ms,
                     status=pair.status,
-                    qid=qid,
-                    sparql=sparql,
-                    client_ip=client_ip,
+                    start_line_offset=pair.start_line_offset,
                 )
             )
         log_is_fresh = now_ms - log_end_ms <= pad_ms
@@ -110,9 +108,6 @@ def read_window(
         for start_ms, start_line_offset in still_open.values():
             if start_ms > window_end_ms:
                 continue
-            qid, client_ip, sparql = load_sparql_at(
-                log_stream, start_line_offset
-            )
             status = (
                 "running"
                 if log_is_fresh and start_ms >= running_cutoff_ms
@@ -123,9 +118,7 @@ def read_window(
                     start_ms=start_ms,
                     end_ms=None,
                     status=status,
-                    qid=qid,
-                    sparql=sparql,
-                    client_ip=client_ip,
+                    start_line_offset=start_line_offset,
                 )
             )
 
@@ -183,20 +176,23 @@ def render_window(
     surviving `LoggedQuery` into a `HistoricQueryRow`. `duration_ms`
     is measured against `log_end_ms` for still-running queries,
     against the recorded `end_ms` for completed ones, and reported as
-    DURATION_UNKNOWN for crash orphans. Metrics come straight from
-    `window_data.metrics`, labelled with the current window size.
+    DURATION_UNKNOWN for crash orphans. The rows carry empty text;
+    `load_query_details_for_rows` fills it for the visible slice.
+    Metrics come straight from `window_data.metrics`, labelled with
+    the current window size.
     """
     queries = filter_queries(
         window_data, controls.mode, controls.start_ms, controls.end_ms
     )
     historic_rows = [
         HistoricQueryRow(
-            qid=query.qid,
+            qid="",
+            start_line_offset=query.start_line_offset,
             started_at_ms=query.start_ms,
             duration_ms=display_duration_ms(query, log_end_ms),
             status=query.status,
-            sparql=query.sparql,
-            client_ip=query.client_ip,
+            sparql="",
+            client_ip="",
         )
         for query in queries
     ]
@@ -204,3 +200,37 @@ def render_window(
         label=controls.window_size, **window_data.metrics._asdict()
     )
     return historic_rows, metrics
+
+
+def load_query_details_for_rows(
+    log_path: Path,
+    rows: list[HistoricQueryRow],
+    query_details_cache: dict[int, tuple[str, str, str]],
+) -> list[HistoricQueryRow]:
+    """Fill the deferred start-line fields on the given rows.
+
+    Each row's `qid`, `client_ip`, and SPARQL text live on its start
+    line, which `read_window` did not read. Offsets already in
+    `query_details_cache` are reused; the rest are read in one pass,
+    opening the file only when something is missing. The cache is
+    scoped to one window so a sort or mode change repaints from memory.
+    Returns filled copies; the input rows are left unchanged.
+    """
+    missing = [
+        row.start_line_offset
+        for row in rows
+        if row.start_line_offset not in query_details_cache
+    ]
+    if missing:
+        with log_path.open("rb") as log_stream:
+            for offset in missing:
+                query_details_cache[offset] = load_sparql_at(
+                    log_stream, offset
+                )
+    filled_rows = []
+    for row in rows:
+        qid, client_ip, sparql = query_details_cache[row.start_line_offset]
+        filled_rows.append(
+            replace(row, qid=qid, client_ip=client_ip, sparql=sparql)
+        )
+    return filled_rows
