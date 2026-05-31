@@ -62,6 +62,9 @@ SORT_PHRASES = {
 # window does not freeze the table.
 MAX_VISIBLE_ROWS = 1000
 
+# Collapse a fast window scrub into a single scan once the user settles.
+RESCAN_DEBOUNCE_S = 0.1
+
 
 class HistoricScreen(Screen, inherit_bindings=False):
     """Historic view: shows active queries parsed from the log over a time window."""
@@ -91,8 +94,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
 
     def compose(self) -> ComposeResult:
         self.log_start_ms = self.app.log_start_ms
-        self.log_end_ms = None
-        self.refresh_log_end()
+        self.log_end_ms = self.read_log_end()
         # Presets longer than the log span are pointless; `all` covers it.
         self.available_presets = available_presets(
             self.log_end_ms - self.log_start_ms
@@ -109,6 +111,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.window_data = None
         self.all_rows = []
         self.query_details_cache = {}
+        self.rescan_timer = None
+        self.cached_window = None
         controls = ControlsState(
             window_size=self.window_size,
             mode=self.mode,
@@ -138,18 +142,18 @@ class HistoricScreen(Screen, inherit_bindings=False):
 
     def on_screen_resume(self) -> None:
         """Catch up on log growth, then push state and rescan."""
-        self.refresh_log_end()
+        self.log_end_ms = self.read_log_end()
         self.available_presets = available_presets(
             self.log_end_ms - self.log_start_ms
         )
         self.clamp_window()
         self.refresh_view(rescan=True)
 
-    def refresh_log_end(self) -> None:
-        """Read the freshest log timestamp the tailer has seen."""
+    def read_log_end(self) -> int:
+        """Return the freshest log timestamp the tailer has seen."""
         state = self.app.live_state
         with state.lock:
-            self.log_end_ms = state.latest_event_ms
+            return state.latest_event_ms
 
     def show_loading_state(self) -> None:
         """Blank the table and metrics row while a rescan is in flight."""
@@ -188,8 +192,20 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.query_one(SelectedWindow).state = controls
         self.query_one(Timeline).bounds = bounds
         if rescan:
+            if (self.window_start_ms, self.window_end_ms) == self.cached_window:
+                return
             self.show_loading_state()
-        self.refresh_data(rescan)
+            self.schedule_rescan()
+        else:
+            self.refresh_data(rescan=False)
+
+    def schedule_rescan(self) -> None:
+        """Collapse a fast window scrub into one scan of where the user lands."""
+        if self.rescan_timer is not None:
+            self.rescan_timer.stop()
+        self.rescan_timer = self.set_timer(
+            RESCAN_DEBOUNCE_S, lambda: self.refresh_data(rescan=True)
+        )
 
     @work(thread=True, exclusive=True, group="refresh_data")
     def refresh_data(self, rescan: bool) -> None:
@@ -213,6 +229,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
                 current_ms(),
             )
             self.query_details_cache = {}
+            self.cached_window = (self.window_start_ms, self.window_end_ms)
         controls = ControlsState(
             window_size=self.window_size,
             mode=self.mode,

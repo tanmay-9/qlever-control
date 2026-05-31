@@ -199,8 +199,6 @@ class MonitorQueriesApp(App):
     def action_clear_query(self) -> None:
         """Drop the displayed query, restoring the empty-state hint."""
         pane = self.screen.query_one(SparqlPane)
-        if pane.content is None:
-            return
         pane.content = None
 
     def action_scroll_sparql_up(self) -> None:
