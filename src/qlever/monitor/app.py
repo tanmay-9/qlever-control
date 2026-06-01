@@ -125,7 +125,12 @@ class MonitorQueriesApp(App):
     @work(thread=True, group="load_metrics_history")
     def load_metrics_history(self) -> None:
         """Prepend the hour before cut_offset into completed history so metrics aren't empty at boot."""
-        load_completed_history(self.log_file, self.live_state, self.cut_offset)
+        load_completed_history(
+            self.log_file,
+            self.live_state,
+            self.cut_offset,
+            self.window_pad_ms,
+        )
         # Backfill is done; record how far back metrics have data.
         log_start_or_boot = self.log_start_ms or self.boot_time_ms
         self.live_state.metrics_known_from_ms = max(

@@ -1,9 +1,10 @@
 """Data layer for the Historic screen.
 
-Reads one time window of the log into a cached `WindowData`, filters
-that cache by display mode, and maps the survivors into the
-`models.py` dataclasses the screen renders. A window change reruns
-the scan; a mode change reuses the cache.
+Reads one time window of the log into a list of `LoggedQuery`,
+filters it by display mode, and maps the survivors into the
+`models.py` dataclasses the screen renders. Metrics are computed per
+mode at render time. A window change reruns the scan; a mode change
+reuses the scanned list.
 """
 
 from dataclasses import replace
@@ -11,12 +12,13 @@ from pathlib import Path
 from typing import NamedTuple
 
 from qlever.monitor.log_reader import (
+    CompletedQuery,
     load_sparql_at,
     offset_for_ts,
     pair_start_end_events,
     scan_range,
 )
-from qlever.monitor.metrics import MetricsSnapshot, metrics_for_ranges
+from qlever.monitor.metrics import metrics_for_queries
 from qlever.monitor.models import (
     ControlsState,
     HistoricQueryRow,
@@ -44,39 +46,23 @@ class LoggedQuery(NamedTuple):
     start_line_offset: int
 
 
-class WindowData(NamedTuple):
-    """Cached scan of one time window, reused across mode flips.
-
-    `queries` is every `LoggedQuery` overlapping the window in any
-    mode (the ACTIVE superset), so a mode change is a pure in-memory
-    filter. Each query carries its `start_line_offset` but not its
-    text; the text is read for the visible rows only. `metrics` is
-    computed over completions whose `end_ms` lies inside the window,
-    so it is the same for every mode.
-    """
-
-    queries: list[LoggedQuery]
-    metrics: MetricsSnapshot
-
-
 def read_window(
     log_path: Path,
     window_start_ms: int,
     window_end_ms: int,
     pad_ms: int,
-    slow_threshold_ms: int,
     log_end_ms: int,
     now_ms: int,
-) -> WindowData:
-    """Scan one time window of the log into a `WindowData` snapshot.
+) -> list[LoggedQuery]:
+    """Scan one time window of the log into the queries overlapping it.
 
     The byte range scanned is the window padded by `pad_ms` on each
     side so both events of a query straddling the window edge are
     recovered. Pairs that lie entirely inside the pad are dropped, so
-    the cache holds only rows a mode predicate could keep. The query
+    the result holds only rows a mode predicate could keep. The query
     text is not read here; `load_query_details_for_rows` reads it for
-    the visible rows. Metrics count completions whose `end_ms` lies
-    inside `[window_start_ms, window_end_ms]`.
+    the visible rows. Metrics are computed later, per mode, in
+    `render_window`.
 
     A still-open query is `"running"` only if its start is within
     `pad_ms` of `log_end_ms` and the log itself is fresh
@@ -122,21 +108,18 @@ def read_window(
                 )
             )
 
-    metrics = metrics_for_ranges(
-        completed, [(window_start_ms, window_end_ms)], slow_threshold_ms
-    )[0]
-    return WindowData(queries=queries, metrics=metrics)
+    return queries
 
 
 def filter_queries(
-    window_data: WindowData,
+    queries: list[LoggedQuery],
     mode: str,
     window_start_ms: int,
     window_end_ms: int,
 ) -> list[LoggedQuery]:
-    """Select queries from a cached `WindowData` for the given mode.
+    """Select queries from the scanned window for the given mode.
 
-    The cache is already the ACTIVE set (every query overlaps the
+    The given list is already the ACTIVE set (every query overlaps the
     window), so ACTIVE is the fallthrough that returns it unchanged.
     STARTS narrows to queries that began inside the window; ENDS
     narrows to queries that finished inside it. Still-running queries
@@ -145,17 +128,17 @@ def filter_queries(
     if mode == "STARTS":
         return [
             query
-            for query in window_data.queries
+            for query in queries
             if window_start_ms <= query.start_ms <= window_end_ms
         ]
     if mode == "ENDS":
         return [
             query
-            for query in window_data.queries
+            for query in queries
             if query.end_ms is not None
             and window_start_ms <= query.end_ms <= window_end_ms
         ]
-    return window_data.queries
+    return queries
 
 
 def display_duration_ms(query: LoggedQuery, log_end_ms: int) -> int:
@@ -166,11 +149,12 @@ def display_duration_ms(query: LoggedQuery, log_end_ms: int) -> int:
 
 
 def render_window(
-    window_data: WindowData,
+    queries: list[LoggedQuery],
     controls: ControlsState,
+    slow_threshold_ms: int,
     log_end_ms: int,
 ) -> tuple[list[HistoricQueryRow], MetricsCounts]:
-    """Map a cached `WindowData` into the rows and metrics the UI consumes.
+    """Map the scanned window into the rows and metrics the UI consumes.
 
     Runs `filter_queries` for the current mode and translates each
     surviving `LoggedQuery` into a `HistoricQueryRow`. `duration_ms`
@@ -178,11 +162,12 @@ def render_window(
     against the recorded `end_ms` for completed ones, and reported as
     DURATION_UNKNOWN for crash orphans. The rows carry empty text;
     `load_query_details_for_rows` fills it for the visible slice.
-    Metrics come straight from `window_data.metrics`, labelled with
-    the current window size.
+    Metrics are computed over the completed queries in the selected
+    mode, so they match the rows on screen, and labelled with the
+    current window size.
     """
-    queries = filter_queries(
-        window_data, controls.mode, controls.start_ms, controls.end_ms
+    selected = filter_queries(
+        queries, controls.mode, controls.start_ms, controls.end_ms
     )
     historic_rows = [
         HistoricQueryRow(
@@ -194,11 +179,21 @@ def render_window(
             sparql="",
             client_ip="",
         )
-        for query in queries
+        for query in selected
     ]
-    metrics = MetricsCounts(
-        label=controls.window_size, **window_data.metrics._asdict()
-    )
+    completed = [
+        CompletedQuery(
+            start_ms=query.start_ms,
+            end_ms=query.end_ms,
+            duration_ms=query.end_ms - query.start_ms,
+            status=query.status,
+            start_line_offset=query.start_line_offset,
+        )
+        for query in selected
+        if query.end_ms is not None
+    ]
+    snapshot = metrics_for_queries(completed, slow_threshold_ms)
+    metrics = MetricsCounts(label=controls.window_size, **snapshot._asdict())
     return historic_rows, metrics
 
 

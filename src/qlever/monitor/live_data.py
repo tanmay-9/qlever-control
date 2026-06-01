@@ -185,6 +185,7 @@ def load_completed_history(
     log_path: Path,
     state: LiveState,
     cut_offset: int,
+    window_pad_ms: int,
     now_ms: Callable[[], int] = current_ms,
 ) -> None:
     """Scan the hour before cut_offset and seed completed history.
@@ -192,14 +193,22 @@ def load_completed_history(
     One-shot: callers spawn this on a daemon thread at startup if they
     want it off the main loop. After it returns, the tailer is the only
     writer of state.completed.
+
+    The scan starts window_pad_ms before the hour boundary so a query
+    that began before the hour but ended inside it still has its start
+    line in range and can be paired. Pairs that ended before the hour
+    are then dropped, matching the deque's end_ms retention.
     """
     with log_path.open("rb") as log_stream:
         oldest_wanted_ms = now_ms() - LIVE_HORIZON_MS
         scan_start_offset = offset_for_ts(
-            log_stream, oldest_wanted_ms, cut_offset
+            log_stream, oldest_wanted_ms - window_pad_ms, cut_offset
         )
         events = scan_range(log_stream, scan_start_offset, cut_offset)
-        older_completions, _ = pair_start_end_events(events)
+        paired, _ = pair_start_end_events(events)
+        older_completions = [
+            query for query in paired if query.end_ms >= oldest_wanted_ms
+        ]
 
     with state.lock:
         tailer_entries = state.completed.entries

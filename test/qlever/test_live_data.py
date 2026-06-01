@@ -459,6 +459,7 @@ def test_load_completed_history_loads_pairs_from_history(write_log):
         log_path=path,
         state=state,
         cut_offset=path.stat().st_size,
+        window_pad_ms=10_000,
         now_ms=lambda: 5000,
     )
     assert len(state.completed.entries) == 2
@@ -485,6 +486,7 @@ def test_load_completed_history_prepends_before_existing_tailer_entries(
         log_path=path,
         state=state,
         cut_offset=path.stat().st_size,
+        window_pad_ms=10_000,
         now_ms=lambda: 7000,
     )
     assert len(state.completed.entries) == 2
@@ -503,10 +505,34 @@ def test_load_completed_history_drops_starts_without_a_matching_end(write_log):
         log_path=path,
         state=state,
         cut_offset=path.stat().st_size,
+        window_pad_ms=10_000,
         now_ms=lambda: 5000,
     )
     assert len(state.completed.entries) == 1
     assert state.completed.entries[0].start_ms == 1000
+
+
+def test_load_completed_history_recovers_query_straddling_the_hour(write_log):
+    oldest_wanted = 100_000
+    now = LIVE_HORIZON_MS + oldest_wanted
+    path = write_log(
+        start_line(91_000, "before")
+        + end_line(93_000, "before")
+        + start_line(95_000, "straddler")
+        + end_line(150_000, "straddler")
+        + start_line(200_000, "inside")
+        + end_line(300_000, "inside")
+    )
+    state = LiveState()
+    load_completed_history(
+        log_path=path,
+        state=state,
+        cut_offset=path.stat().st_size,
+        window_pad_ms=20_000,
+        now_ms=lambda: now,
+    )
+    starts = [entry.start_ms for entry in state.completed.entries]
+    assert starts == [95_000, 200_000]
 
 
 def test_poll_loop_picks_up_lines_appended_to_the_file(write_log):

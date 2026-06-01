@@ -108,7 +108,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.log_start_ms if width is None else self.log_end_ms - width
         )
         self.window_end_ms = self.log_end_ms
-        self.window_data = None
+        self.window_queries = None
         self.all_rows = []
         self.query_details_cache = {}
         self.rescan_timer = None
@@ -211,20 +211,19 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def refresh_data(self, rescan: bool) -> None:
         """Scan and/or re-filter the window, push rows + metrics + status.
 
-        On `rescan` the log is read into a fresh `WindowData` cached on
-        the screen and the query-details cache is emptied, since a new
-        window is a new set of queries. Render always runs, so a mode
-        change pays only an in-memory filter. The visible rows' text is
-        read here, off the UI thread, reusing the cache across sorts
-        and mode changes within the window.
+        On `rescan` the log is read into a fresh list of window queries
+        cached on the screen and the query-details cache is emptied,
+        since a new window is a new set of queries. Render always runs,
+        so a mode change pays only an in-memory filter. The visible
+        rows' text is read here, off the UI thread, reusing the cache
+        across sorts and mode changes within the window.
         """
         if rescan:
-            self.window_data = read_window(
+            self.window_queries = read_window(
                 self.app.log_file,
                 self.window_start_ms,
                 self.window_end_ms,
                 self.app.window_pad_ms,
-                self.app.slow_threshold * 1000,
                 self.log_end_ms,
                 current_ms(),
             )
@@ -237,7 +236,10 @@ class HistoricScreen(Screen, inherit_bindings=False):
             end_ms=self.window_end_ms,
         )
         rows, metrics = render_window(
-            self.window_data, controls, self.log_end_ms
+            self.window_queries,
+            controls,
+            self.app.slow_threshold * 1000,
+            self.log_end_ms,
         )
         self.all_rows = rows
         visible_rows = load_query_details_for_rows(

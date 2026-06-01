@@ -6,7 +6,7 @@ each other.
 """
 
 import statistics
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from typing import NamedTuple
 
 from qlever.monitor.log_reader import CompletedQuery
@@ -78,35 +78,37 @@ def build_snapshot(
     )
 
 
-def metrics_for_ranges(
+def metrics_for_queries(
     completed: Iterable[CompletedQuery],
+    slow_threshold_ms: int,
+) -> MetricsSnapshot:
+    """Compute the metrics snapshot for a set of completed queries."""
+    counts = {"ok": 0, "failed": 0, "timeout": 0, "cancelled": 0, "unknown": 0}
+    slow = 0
+    durations = []
+    for entry in completed:
+        counts[entry.status] += 1
+        if entry.duration_ms >= slow_threshold_ms:
+            slow += 1
+        durations.append(entry.duration_ms)
+    return build_snapshot(counts, slow, durations)
+
+
+def metrics_for_ranges(
+    completed: Collection[CompletedQuery],
     ranges: list[tuple[int, int]],
     slow_threshold_ms: int,
 ) -> list[MetricsSnapshot]:
     """Summarise completed queries into one snapshot per time range.
 
     Each range is an absolute (lo_ms, hi_ms) interval; a completed
-    query counts toward a range when its end_ms falls inside it. Walks
-    completed once, filling every range's tally in parallel, so N
-    ranges still cost a single pass. Returns one snapshot per range, in
-    the order the ranges were given.
+    query counts toward a range when its end_ms falls inside it.
+    Returns one snapshot per range, in the order the ranges were given.
     """
-    counts = [
-        {"ok": 0, "failed": 0, "timeout": 0, "cancelled": 0, "unknown": 0}
-        for _ in ranges
-    ]
-    slow = [0] * len(ranges)
-    durations = [[] for _ in ranges]
-
-    for entry in completed:
-        for index, (lo_ms, hi_ms) in enumerate(ranges):
-            if lo_ms <= entry.end_ms <= hi_ms:
-                counts[index][entry.status] += 1
-                if entry.duration_ms >= slow_threshold_ms:
-                    slow[index] += 1
-                durations[index].append(entry.duration_ms)
-
     return [
-        build_snapshot(counts[index], slow[index], durations[index])
-        for index in range(len(ranges))
+        metrics_for_queries(
+            [entry for entry in completed if lo_ms <= entry.end_ms <= hi_ms],
+            slow_threshold_ms,
+        )
+        for lo_ms, hi_ms in ranges
     ]
