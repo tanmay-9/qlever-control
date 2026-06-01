@@ -96,6 +96,10 @@ class MonitorQueriesApp(App):
 
     def on_mount(self) -> None:
         """Boot the live engine, then open the Live screen."""
+        # The ansi theme renders an unreadable Footer (its colors are
+        # ansi_default, which flattens to black). Drop it so it is
+        # offered neither in the theme cycle nor the command palette.
+        self.unregister_theme("textual-ansi")
         self.boot_time_ms = current_ms()
         state, cut_offset, _ = find_active_queries(
             self.log_file, self.window_pad_ms
