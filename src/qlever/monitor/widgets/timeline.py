@@ -97,7 +97,9 @@ def render_track(bounds: TimelineBounds, bar_width: int) -> str:
         span_fraction(bounds.window_start_ms, bounds), bar_width
     )
     end = start + width - 1
-    if end > bar_width - 1:
+    # Pin the block to the last cell when it overruns the bar, or when
+    # the window actually reaches the log end but rounding fell short.
+    if end > bar_width - 1 or bounds.window_end_ms >= bounds.log_end_ms:
         end = bar_width - 1
         start = end - width + 1
     for col in range(start, end + 1):

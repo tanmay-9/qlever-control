@@ -64,7 +64,10 @@ class LiveScreen(Screen, inherit_bindings=False):
                 n_active=len(rows),
             )
         )
-        yield MetricsRow(get_live_metrics(state, slow_ms, current_ms()))
+        yield MetricsRow(
+            get_live_metrics(state, slow_ms, current_ms()),
+            self.app.slow_threshold,
+        )
         yield LiveQueryTable(rows)
         yield Static("", id="table-status")
         yield SparqlPane()

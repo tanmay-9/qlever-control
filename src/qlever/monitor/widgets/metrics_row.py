@@ -75,21 +75,43 @@ def column_widths(rows: list[MetricsCounts]) -> list[int]:
     return widths
 
 
-def render_cell(label: str, value: int | None, width: int, kind: str) -> str:
-    """Render one bold-label, right-aligned value pair with optional color."""
+def column_label(name: str, slow_threshold_s: int) -> str:
+    """Display label for a metric column; slow carries its threshold."""
+    if name == "slow":
+        return f">{slow_threshold_s}s"
+    return name
+
+
+def render_cell(
+    name: str, label: str, value: int | None, width: int, kind: str
+) -> str:
+    """Render one bold-label, right-aligned value pair with optional color.
+
+    `name` is the metric field and drives the color lookup; `label` is
+    the text shown, which can differ from it (the slow column shows its
+    threshold).
+    """
     text = format_value(value, kind).rjust(width)
-    color = color_tag(label, value)
+    color = color_tag(name, value)
     if color:
         return f"[b]{label}[/] [{color}]{text}[/]"
     return f"[b]{label}[/] {text}"
 
 
-def format_row(row: MetricsCounts, widths: list[int]) -> str:
+def format_row(
+    row: MetricsCounts, widths: list[int], slow_threshold_s: int
+) -> str:
     """Format one rolling-window row as a single line with markup."""
     if row.not_ready_message:
         return f"[bold]{row.label:<8}[/] │ [dim]{row.not_ready_message}[/]"
     cells = [
-        render_cell(name, getattr(row, name), width, kind)
+        render_cell(
+            name,
+            column_label(name, slow_threshold_s),
+            getattr(row, name),
+            width,
+            kind,
+        )
         for (name, kind), width in zip(COLUMNS, widths)
     ]
     return f"[bold]{row.label:<8}[/] │ " + " · ".join(cells)
@@ -102,18 +124,21 @@ class MetricsRow(Vertical):
 
     rows = reactive(list, init=False)
 
-    def __init__(self, rows: list[MetricsCounts]) -> None:
+    def __init__(
+        self, rows: list[MetricsCounts], slow_threshold_s: int
+    ) -> None:
         """Render each row in `rows` as one formatted text line."""
         super().__init__()
+        self.slow_threshold_s = slow_threshold_s
         self.set_reactive(MetricsRow.rows, rows)
 
     def compose(self) -> ComposeResult:
         widths = column_widths(self.rows)
         for row in self.rows:
-            yield Static(format_row(row, widths))
+            yield Static(format_row(row, widths, self.slow_threshold_s))
 
     def watch_rows(self, rows: list[MetricsCounts]) -> None:
         """Repaint each line static when the row data changes."""
         widths = column_widths(rows)
         for line, row in zip(self.query(Static), rows):
-            line.update(format_row(row, widths))
+            line.update(format_row(row, widths, self.slow_threshold_s))

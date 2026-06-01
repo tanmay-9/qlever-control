@@ -133,7 +133,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
         yield HistoricControlsRow(controls)
         yield Timeline(bounds)
         yield MetricsRow(
-            [MetricsCounts(label=self.window_size, **EMPTY_FIELDS)]
+            [MetricsCounts(label=self.window_size, **EMPTY_FIELDS)],
+            self.app.slow_threshold,
         )
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
