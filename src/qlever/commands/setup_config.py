@@ -97,7 +97,9 @@ class SetupConfigCommand(QleverCommand):
                     )
 
         # Show the updates that will be applied.
-        show_lines = [f"Copy {qleverfile_path} to Qleverfile with following changes:"]
+        show_lines = [
+            f"Copy {qleverfile_path} to Qleverfile with following changes:"
+        ]
         for section, option_dict in updates.items():
             show_lines.append(f"\n[{section}]")
             for option, (value, is_suffix) in option_dict.items():

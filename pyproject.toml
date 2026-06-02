@@ -12,7 +12,7 @@ authors = [
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 
 keywords = ["Graph database", "Triplestore", "Knowledge graphs", "SPARQL", "RDF"]
 
@@ -22,6 +22,9 @@ classifiers = [
 ]
 
 dependencies = [ "psutil", "termcolor", "argcomplete", "pyyaml", "rdflib", "requests-sse", "tqdm>=4.60.0" ]
+
+[project.optional-dependencies]
+dev = [ "ruff", "pre-commit" ]
 
 [project.urls]
 homepage = "https://github.com/ad-freiburg/qlever"

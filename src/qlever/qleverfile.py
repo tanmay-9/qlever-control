@@ -347,6 +347,14 @@ class Qleverfile:
             help="Whether to use the text index (requires that one was "
             "built, see `qlever index`)",
         )
+        server_args["preload_materialized_views"] = arg(
+            "-l",
+            "--preload-materialized-views",
+            nargs="+",
+            default=None,
+            help="Names of one or more materialized views to preload on "
+            "startup",
+        )
         server_args["warmup_cmd"] = arg(
             "--warmup-cmd",
             type=str,
@@ -381,6 +389,15 @@ class Qleverfile:
             "--server-container",
             type=str,
             help=f"The name of the container used by `{script_name} start`",
+        )
+        runtime_args["restart_policy"] = arg(
+            "--restart-policy",
+            type=str,
+            choices=["no", "always", "unless-stopped", "on-failure"],
+            default="unless-stopped",
+            help="Restart policy for the server container"
+            " (only applies when running in a container)"
+            " (default: unless-stopped)",
         )
 
         ui_args["ui_port"] = arg(
@@ -423,7 +440,9 @@ class Qleverfile:
                 module = import_module(engine_args_module_path)
                 module.qleverfile_args(all_args)
         except (ImportError, AttributeError) as e:
-            log.debug(f"Could not import module {engine_args_module_path}: {e}")
+            log.debug(
+                f"Could not import module {engine_args_module_path}: {e}"
+            )
 
         return all_args
 
