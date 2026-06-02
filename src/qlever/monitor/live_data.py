@@ -32,9 +32,9 @@ from qlever.monitor.metrics import (
 )
 from qlever.monitor.models import LiveQueryRow, MetricsCounts
 
-LIVE_METRIC_WINDOWS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000]
+LIVE_METRIC_WINDOWS_MS = [1 * 60_000, 5 * 60_000, 60 * 60_000]
 LIVE_HORIZON_MS = LIVE_METRIC_WINDOWS_MS[2]
-LIVE_METRIC_LABELS = ["last 5m", "last 15m", "last 1h"]
+LIVE_METRIC_LABELS = ["last 1m", "last 5m", "last 1h"]
 LOG_IDLE_THRESHOLD_MS = 10_000
 PING_INTERVAL_S = 5.0
 PING_FAILS_TO_UNREACHABLE = 3
