@@ -18,7 +18,7 @@ from qlever.monitor.live_data import (
     load_completed_history,
 )
 from qlever.monitor.log_reader import read_first_timestamp
-from qlever.monitor.util import clipboard_install_hint, copy_text
+from qlever.monitor.util import clipboard_install_hint, copy_text, in_ssh
 from qlever.monitor.views.historic import HistoricScreen
 from qlever.monitor.views.live import LiveScreen
 from qlever.monitor.widgets.sparql_pane import SparqlPane, SparqlScroll
@@ -154,22 +154,43 @@ class MonitorQueriesApp(App):
                 return
         self.switch_screen(target)
 
+    def copy_via_terminal(self, text: str, detail: str) -> None:
+        """Best-effort clipboard copy through the terminal's OSC 52."""
+        self.copy_to_clipboard(text)
+        self.notify(
+            f"Tried to copy SPARQL via the terminal. {detail}",
+            severity="warning",
+        )
+
     def action_copy_query(self) -> None:
         """Copy the displayed query's SPARQL to the system clipboard."""
         pane = self.screen.query_one(SparqlPane)
         if pane.displayed_text is None:
             self.notify("No query selected", severity="warning")
             return
-        result = copy_text(pane.displayed_text)
+        text = pane.displayed_text
+
+        # Over SSH a local clipboard binary would write the remote
+        # machine's clipboard, so ask the terminal itself instead.
+        if in_ssh():
+            self.copy_via_terminal(
+                text, "This may not work on every terminal."
+            )
+            return
+
+        result = copy_text(text)
         if result is True:
             self.notify("SPARQL copied to clipboard")
-        elif result is None:
-            self.notify(
-                f"No clipboard tool found: {clipboard_install_hint()}",
-                severity="warning",
+            return
+
+        if result is None:
+            detail = (
+                f"If it doesn't paste, {clipboard_install_hint()} "
+                "for a reliable copy."
             )
         else:
-            self.notify("Clipboard tool failed", severity="error")
+            detail = "If it doesn't paste, the local clipboard tool errored."
+        self.copy_via_terminal(text, detail)
 
     def action_pretty_print(self) -> None:
         """Toggle pretty-printed SPARQL in the pane for the selected query."""
@@ -201,7 +222,12 @@ class MonitorQueriesApp(App):
             return
         if result is None:
             pane.show_pretty = False
-            self.notify("Could not pretty-print this query", severity="error")
+            self.notify(
+                "Pretty-printing failed: Docker/Podman not configured. "
+                "Start `monitor-queries` with --system docker or podman, or "
+                "set SYSTEM=docker or podman in the Qleverfile.",
+                severity="error",
+            )
             return
         pane.pretty_text = result
 
