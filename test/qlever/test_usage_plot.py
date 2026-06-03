@@ -96,7 +96,7 @@ def test_parse_qleverfile_no_relevant_keys(tmp_path):
 
 
 def test_read_usage_tsv_parses_columns_and_blank_as_nan(tmp_path):
-    path = tmp_path / "data.usage-log.tsv"
+    path = tmp_path / "data.resource-usage-log.tsv"
     path.write_text("elapsed_s\trss\tcpu_percent\n1.0\t100\t5.0\n2.0\t\t6.0\n")
     data = read_usage_tsv(path)
     assert set(data) == {"elapsed_s", "rss", "cpu_percent"}
@@ -231,7 +231,7 @@ def test_render_usage_plot_missing_tsv(tmp_path):
 def test_render_usage_plot_header_only_tsv_renders_nothing(tmp_path):
     # A TSV with only the header (no samples) must not report success
     # or leave a PNG behind.
-    tsv_path = tmp_path / "data.usage-log.tsv"
+    tsv_path = tmp_path / "data.resource-usage-log.tsv"
     tsv_path.write_text("elapsed_s\trss\tcpu_percent\n")
     assert render_usage_plot("data", output_dir=tmp_path) is None
-    assert not (tmp_path / "data.usage-log.png").exists()
+    assert not (tmp_path / "data.resource-usage-plot.png").exists()

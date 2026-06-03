@@ -252,15 +252,15 @@ class Qleverfile:
             help="File with the documents for the text index (one line "
             "per document, format: `id\tdocument text`)",
         )
-        index_args["resource_monitor_interval"] = arg(
-            "--resource-monitor-interval",
+        index_args["resource_usage_interval"] = arg(
+            "--resource-usage-interval",
             type=float,
             default=1.0,
             help="Seconds between resource-usage samples (memory, CPU) "
             "collected during the index build",
         )
-        index_args["resource_monitor_plot_max_points"] = arg(
-            "--resource-monitor-plot-max-points",
+        index_args["resource_usage_plot_max_points"] = arg(
+            "--resource-usage-plot-max-points",
             type=int,
             default=500,
             help="Maximum number of points per line (RSS and CPU) in "

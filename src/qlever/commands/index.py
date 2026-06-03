@@ -53,8 +53,8 @@ class IndexCommand(QleverCommand):
                 "text_index",
                 "stxxl_memory",
                 "parser_buffer_size",
-                "resource_monitor_interval",
-                "resource_monitor_plot_max_points",
+                "resource_usage_interval",
+                "resource_usage_plot_max_points",
             ],
             "runtime": ["system", "image", "index_container"],
         }
@@ -67,13 +67,13 @@ class IndexCommand(QleverCommand):
             help="Overwrite an existing index, think twice before using this",
         )
         subparser.add_argument(
-            "--replot-resource-usage",
+            "--resource-usage-plot-only",
             action="store_true",
             default=False,
-            help="Skip the index build and re-render the resource-usage "
-            "plot from the existing <name>.usage-log.tsv. Useful for "
-            "tweaking plot settings (e.g. --resource-monitor-plot-max-points) "
-            "without re-running the build",
+            help="Only render the resource-usage plot from the existing "
+            "`<name>.resource-usage-log.tsv`; do not build the index. Use "
+            "after installing the plotting libraries, or to re-render with "
+            "a different `--resource-usage-plot-max-points`",
         )
 
     # Exception for invalid JSON.
@@ -194,12 +194,12 @@ class IndexCommand(QleverCommand):
         return " ".join(input_options)
 
     def execute(self, args) -> bool:
-        # Re-render the resource-usage plot from an existing TSV without
+        # Render the resource-usage plot from the existing log without
         # rebuilding the index.
-        if args.replot_resource_usage:
+        if args.resource_usage_plot_only:
             plot_path = render_usage_plot(
                 args.name,
-                plot_max_points=args.resource_monitor_plot_max_points,
+                plot_max_points=args.resource_usage_plot_max_points,
             )
             if plot_path is None:
                 return False
@@ -352,7 +352,7 @@ class IndexCommand(QleverCommand):
                 binary=args.index_binary,
                 container=args.index_container,
                 system=args.system,
-                interval=args.resource_monitor_interval,
+                interval=args.resource_usage_interval,
             ):
                 run_command(index_cmd, show_output=True)
         except Exception as e:
@@ -361,7 +361,7 @@ class IndexCommand(QleverCommand):
 
         plot_path = render_usage_plot(
             args.name,
-            plot_max_points=args.resource_monitor_plot_max_points,
+            plot_max_points=args.resource_usage_plot_max_points,
         )
         if plot_path is not None:
             log.info(f"Resource-usage plot saved to {plot_path}")

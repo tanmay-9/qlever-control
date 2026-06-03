@@ -20,8 +20,8 @@ from qlever.resource_monitor import GB
 
 def read_usage_tsv(path: Path) -> dict[str, np.ndarray]:
     """
-    Read a usage-log TSV into a dict of numpy arrays keyed by column
-    name. Empty cells become NaN so matplotlib can skip them.
+    Read a resource-usage log into a dict of numpy arrays keyed by
+    column name. Empty cells become NaN so matplotlib can skip them.
     """
     columns = {}
     with open(path) as tsv_file:
@@ -363,17 +363,18 @@ def render_usage_plot(
     plot_max_points: int = 500,
 ) -> Path | None:
     """
-    Render `<dataset>.usage-log.png` from `<dataset>.usage-log.tsv`
-    in `output_dir`. Returns the plot path on success, None if the
-    TSV is missing or the plot could not be rendered.
+    Render `<dataset>.resource-usage-plot.png` from
+    `<dataset>.resource-usage-log.tsv` in `output_dir`. Returns the
+    plot path on success, None if the log is missing or the plot
+    could not be rendered.
     """
     output_dir = output_dir or Path.cwd()
-    tsv_path = output_dir / f"{dataset}.usage-log.tsv"
+    tsv_path = output_dir / f"{dataset}.resource-usage-log.tsv"
     log_path = output_dir / f"{dataset}.index-log.txt"
     qleverfile_path = Path.cwd() / "Qleverfile"
-    plot_path = output_dir / f"{dataset}.usage-log.png"
+    plot_path = output_dir / f"{dataset}.resource-usage-plot.png"
     if not tsv_path.exists():
-        log.warning(f"Resource-usage TSV not found: {tsv_path}")
+        log.warning(f"Resource-usage log not found: {tsv_path}")
         return None
     try:
         rendered = draw_usage_plot(
@@ -385,11 +386,12 @@ def render_usage_plot(
             plot_max_points=plot_max_points,
         )
     except Exception as error:
-        log.warning(f"Could not render usage plot: {error}")
+        log.warning(f"Could not render resource-usage plot: {error}")
         return None
     if not rendered:
         log.warning(
-            f"Resource-usage plot not rendered, no usable samples in {tsv_path}"
+            f"Resource-usage plot not rendered: no usable samples in the "
+            f"resource-usage log {tsv_path}"
         )
         return None
     return plot_path
