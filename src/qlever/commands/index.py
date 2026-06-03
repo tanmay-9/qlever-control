@@ -4,12 +4,12 @@ import glob
 import json
 import re
 import shlex
+from pathlib import Path
 
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
 from qlever.resource_monitor import ResourceMonitor
-from qlever.usage_plot import render_usage_plot
 from qlever.util import (
     binary_exists,
     get_existing_index_files,
@@ -17,6 +17,26 @@ from qlever.util import (
     input_files_exist,
     run_command,
 )
+
+
+def render_usage_plot(dataset: str, plot_max_points: int) -> Path | None:
+    """Render the resource-usage plot, warning if plotting libs are missing."""
+    try:
+        from qlever import usage_plot
+    except ImportError:
+        log.warning(
+            "Resource-usage plot skipped: it needs matplotlib and numpy. "
+            "Install the plot extra, e.g. `pip install qlever[plot]`."
+        )
+        log.warning(
+            "After installing the dependencies, no index rebuild is needed: "
+            "rerun `qlever index --resource-usage-plot-only` to plot from the "
+            "existing resource-usage log."
+        )
+        return None
+    return usage_plot.render_usage_plot(
+        dataset, plot_max_points=plot_max_points
+    )
 
 
 class IndexCommand(QleverCommand):

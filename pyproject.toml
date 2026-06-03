@@ -21,9 +21,10 @@ classifiers = [
  "Topic :: Database :: Front-Ends"
 ]
 
-dependencies = [ "psutil", "termcolor", "argcomplete", "pyyaml", "rdflib", "requests-sse", "tqdm>=4.60.0", "matplotlib", "numpy" ]
+dependencies = [ "psutil", "termcolor", "argcomplete", "pyyaml", "rdflib", "requests-sse", "tqdm>=4.60.0" ]
 
 [project.optional-dependencies]
+plot = [ "matplotlib", "numpy" ]
 dev = [ "ruff", "pre-commit" ]
 
 [project.urls]
