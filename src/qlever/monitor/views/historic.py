@@ -193,7 +193,10 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.query_one(SelectedWindow).state = controls
         self.query_one(Timeline).bounds = bounds
         if rescan:
-            if (self.window_start_ms, self.window_end_ms) == self.cached_window:
+            if (
+                self.window_start_ms,
+                self.window_end_ms,
+            ) == self.cached_window:
                 return
             self.show_loading_state()
             self.schedule_rescan()

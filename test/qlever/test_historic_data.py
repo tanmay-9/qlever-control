@@ -253,7 +253,8 @@ def test_filter_queries_starts_keeps_only_starts_in_window():
         make_query(1100, 1200),
     ]
     starts = [
-        query.start_ms for query in filter_queries(queries, "STARTS", 100, 1000)
+        query.start_ms
+        for query in filter_queries(queries, "STARTS", 100, 1000)
     ]
     assert starts == [200]
 
@@ -261,7 +262,8 @@ def test_filter_queries_starts_keeps_only_starts_in_window():
 def test_filter_queries_starts_includes_running_queries():
     queries = [make_query(500, None, status="running")]
     starts = [
-        query.start_ms for query in filter_queries(queries, "STARTS", 100, 1000)
+        query.start_ms
+        for query in filter_queries(queries, "STARTS", 100, 1000)
     ]
     assert starts == [500]
 
@@ -333,7 +335,9 @@ def test_render_window_passes_window_size_as_metric_label():
         start_ms=0,
         end_ms=1_000_000,
     )
-    _, metrics = render_window(queries, controls, SLOW_MS, log_end_ms=1_000_000)
+    _, metrics = render_window(
+        queries, controls, SLOW_MS, log_end_ms=1_000_000
+    )
     assert metrics.label == "1h"
     assert metrics.seen == 7
     assert metrics.ok == 7
