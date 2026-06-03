@@ -1,7 +1,11 @@
-import numpy as np
 import pytest
 
-from qlever.usage_plot import (
+# The plot extra (numpy, matplotlib) is optional, so skip this whole
+# module when it is not installed instead of failing to import.
+np = pytest.importorskip("numpy")
+pytest.importorskip("matplotlib")
+
+from qlever.usage_plot import (  # noqa: E402
     compute_phase_boundaries,
     downsample_for_plot,
     parse_git_hash,
