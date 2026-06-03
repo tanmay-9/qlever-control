@@ -24,6 +24,7 @@ COLUMNS = [
     ("timeout", "count"),
     ("cancelled", "count"),
     ("unknown", "count"),
+    ("mean", "ms"),
     ("p50", "ms"),
     ("p95", "ms"),
     ("slow", "count"),

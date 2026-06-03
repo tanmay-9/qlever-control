@@ -34,6 +34,7 @@ class MetricsCounts:
     timeout: int | None
     cancelled: int | None
     unknown: int | None
+    mean: int | None
     p50: int | None
     p95: int | None
     slow: int | None

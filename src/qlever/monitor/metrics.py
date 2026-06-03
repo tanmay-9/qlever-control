@@ -30,6 +30,7 @@ class MetricsSnapshot(NamedTuple):
     cancelled: int
     unknown: int
     slow: int
+    mean: int | None
     p50: int | None
     p95: int | None
 
@@ -65,6 +66,7 @@ def build_snapshot(
     run time (its length is the total seen).
     """
     p50, p95 = percentiles(durations_ms)
+    mean = None if not durations_ms else int(statistics.mean(durations_ms))
     return MetricsSnapshot(
         seen=len(durations_ms),
         ok=counts["ok"],
@@ -73,6 +75,7 @@ def build_snapshot(
         cancelled=counts["cancelled"],
         unknown=counts["unknown"],
         slow=slow,
+        mean=mean,
         p50=p50,
         p95=p95,
     )
