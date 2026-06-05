@@ -9,9 +9,12 @@ import psutil
 
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.util import run_command
-
-GB = 10**9
+from qlever.util import (
+    container_memory_to_bytes,
+    find_process_by_binary,
+    format_size,
+    run_command,
+)
 
 
 @dataclass
@@ -24,64 +27,10 @@ class Sample:
     cpu_percent: float | None = None
 
 
-def format_gb(bytes_val: float) -> str:
-    """Format a byte count as decimal GB with two decimals."""
-    return f"{bytes_val / GB:.2f} GB"
-
-
-def parse_memory_to_bytes(memory_string: str) -> int:
-    """
-    Parse a memory usage string from `docker stats` or `podman stats`
-    into bytes.  Docker reports binary units (GiB, MiB) while Podman
-    reports decimal units (GB, MB).
-    """
-    memory_string = memory_string.strip()
-    # Order matters: the first endswith match wins, and "B" is a suffix
-    # of every other unit, so it must stay last.
-    units = {
-        "TIB": 1024**4,
-        "TB": 1000**4,
-        "GIB": 1024**3,
-        "GB": 1000**3,
-        "MIB": 1024**2,
-        "MB": 1000**2,
-        "KIB": 1024,
-        "KB": 1000,
-        "B": 1,
-    }
-    for suffix, multiplier in units.items():
-        if memory_string.upper().endswith(suffix):
-            number = float(memory_string[: len(memory_string) - len(suffix)])
-            return int(number * multiplier)
-    return 0
-
-
 def sample_to_tsv_row(sample: Sample) -> str:
     """Format a Sample as a TSV row; None fields become empty columns."""
     values = [getattr(sample, field.name) for field in fields(sample)]
     return "\t".join("" if v is None else str(v) for v in values) + "\n"
-
-
-def find_process_by_binary(
-    parent_pid: int | None, binary: str
-) -> psutil.Process | None:
-    """Find a descendant of parent_pid whose argv[0] basename matches binary."""
-    try:
-        root = psutil.Process(parent_pid)
-        candidates = [root] + root.children(recursive=True)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return None
-    # Both sides use Path(...).name so any path form (relative, absolute,
-    # bare, symlink) matches as long as argv[0] preserves the binary's name.
-    target = Path(binary).name
-    for proc in candidates:
-        try:
-            cmdline = proc.cmdline()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-        if cmdline and Path(cmdline[0]).name == target:
-            return proc
-    return None
 
 
 def sample_process(proc: psutil.Process) -> Sample:
@@ -107,7 +56,7 @@ def sample_container(system: str, container: str) -> Sample:
         used_memory = memory_field.split("/")[0].strip()
         cpu_percent = float(cpu_field.strip().rstrip("%"))
         return Sample(
-            rss=parse_memory_to_bytes(used_memory),
+            rss=container_memory_to_bytes(used_memory),
             cpu_percent=cpu_percent,
         )
     except Exception:
@@ -222,5 +171,5 @@ class ResourceMonitor:
         self.thread.join()
         self.log_file.close()
         if self.peak_rss > 0:
-            log.info(f"Peak memory: RSS {format_gb(self.peak_rss)}")
+            log.info(f"Peak memory: RSS {format_size(self.peak_rss)}")
         return False

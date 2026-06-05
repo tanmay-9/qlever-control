@@ -240,6 +240,28 @@ def show_process_info(psutil_process, cmdline_regex, show_heading=True):
         return False
 
 
+def find_process_by_binary(
+    parent_pid: int | None, binary: str
+) -> psutil.Process | None:
+    """Find a descendant of parent_pid whose argv[0] basename matches binary."""
+    try:
+        root = psutil.Process(parent_pid)
+        candidates = [root] + root.children(recursive=True)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return None
+    # Both sides use Path(...).name so any path form (relative, absolute,
+    # bare, symlink) matches as long as argv[0] preserves the binary's name.
+    target = Path(binary).name
+    for proc in candidates:
+        try:
+            cmdline = proc.cmdline()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if cmdline and Path(cmdline[0]).name == target:
+            return proc
+    return None
+
+
 def get_random_string(length: int) -> str:
     """
     Helper function that returns a randomly chosen string of the given
@@ -477,6 +499,33 @@ def parse_memory(value: str) -> str:
     return value.upper()
 
 
+def container_memory_to_bytes(memory_string: str) -> int:
+    """
+    Parse a memory usage string from `docker stats` or `podman stats`
+    into bytes.  Docker reports binary units (GiB, MiB) while Podman
+    reports decimal units (GB, MB).
+    """
+    memory_string = memory_string.strip()
+    # Order matters: the first endswith match wins, and "B" is a suffix
+    # of every other unit, so it must stay last.
+    units = {
+        "TIB": 1024**4,
+        "TB": 1000**4,
+        "GIB": 1024**3,
+        "GB": 1000**3,
+        "MIB": 1024**2,
+        "MB": 1000**2,
+        "KIB": 1024,
+        "KB": 1000,
+        "B": 1,
+    }
+    for suffix, multiplier in units.items():
+        if memory_string.upper().endswith(suffix):
+            number = float(memory_string[: len(memory_string) - len(suffix)])
+            return int(number * multiplier)
+    return 0
+
+
 def add_memory_options(subparser, index=True, server=True):
     """
     Add total memory-related options to a subparser for setup-config command.
@@ -530,6 +579,16 @@ def tail_log_file(
         waited += 0.1
     tail_cmd = f"exec tail -n +1 -f {log_file}"
     return subprocess.Popen(tail_cmd, shell=True)
+
+
+def parse_git_hash(log_path: Path) -> str | None:
+    """Return the git hash printed on the first line of a QLever index log."""
+    try:
+        first_line = log_path.read_text().splitlines()[0]
+    except (OSError, IndexError):
+        return None
+    match = re.search(r"git hash ([0-9a-f]+)", first_line)
+    return match.group(1) if match else None
 
 
 class PhaseMarkers(NamedTuple):

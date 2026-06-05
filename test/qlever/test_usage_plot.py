@@ -8,12 +8,12 @@ pytest.importorskip("matplotlib")
 from qlever.usage_plot import (  # noqa: E402
     compute_phase_boundaries,
     downsample_for_plot,
-    parse_git_hash,
     parse_qleverfile,
     pick_time_unit,
     read_usage_tsv,
     render_usage_plot,
 )
+from qlever.util import parse_git_hash  # noqa: E402
 
 
 def write_log(tmp_path, lines):

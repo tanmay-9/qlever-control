@@ -15,8 +15,13 @@ from matplotlib import pyplot as plt  # noqa: E402
 
 from qlever import engine_name
 from qlever.log import log
-from qlever.resource_monitor import GB
-from qlever.util import iter_permutation_phases, parse_phase_markers
+from qlever.util import (
+    iter_permutation_phases,
+    parse_git_hash,
+    parse_phase_markers,
+)
+
+GB = 1024**3
 
 
 def read_usage_tsv(path: Path) -> dict[str, np.ndarray]:
@@ -155,16 +160,6 @@ def compute_phase_boundaries(
     return phases
 
 
-def parse_git_hash(log_path: Path) -> str | None:
-    """Return the git hash printed on the first line of a QLever index log."""
-    try:
-        first_line = log_path.read_text().splitlines()[0]
-    except (OSError, IndexError):
-        return None
-    match = re.search(r"git hash ([0-9a-f]+)", first_line)
-    return match.group(1) if match else None
-
-
 def parse_qleverfile(qleverfile_path: Path) -> dict[str, str]:
     """Read STXXL_MEMORY and num-triples-per-batch from a QLeverfile."""
     try:
@@ -201,7 +196,7 @@ def build_plot_subtitle(log_path: Path, qleverfile_path: Path) -> str | None:
     return "   |   ".join(parts) if parts else None
 
 
-def draw_usage_plot(
+def write_usage_plot(
     tsv_path: Path,
     log_path: Path,
     qleverfile_path: Path,
@@ -335,7 +330,7 @@ def render_usage_plot(
         log.warning(f"Resource-usage log not found: {tsv_path}")
         return None
     try:
-        rendered = draw_usage_plot(
+        rendered = write_usage_plot(
             tsv_path=tsv_path,
             log_path=log_path,
             qleverfile_path=qleverfile_path,

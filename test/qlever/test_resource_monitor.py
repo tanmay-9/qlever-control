@@ -2,24 +2,9 @@ import pytest
 
 from qlever.resource_monitor import (
     Sample,
-    format_gb,
-    parse_memory_to_bytes,
     sample_to_tsv_row,
 )
-
-
-@pytest.mark.parametrize(
-    "bytes_val,expected",
-    [
-        (0, "0.00 GB"),
-        (5e9, "5.00 GB"),
-        (1.5e9, "1.50 GB"),
-        (5e8, "0.50 GB"),
-        (1.239e9, "1.24 GB"),
-    ],
-)
-def test_format_gb(bytes_val, expected):
-    assert format_gb(bytes_val) == expected
+from qlever.util import container_memory_to_bytes
 
 
 @pytest.mark.parametrize(
@@ -47,8 +32,8 @@ def test_format_gb(bytes_val, expected):
         ("garbage", 0),
     ],
 )
-def test_parse_memory_to_bytes(usage, expected):
-    assert parse_memory_to_bytes(usage) == expected
+def test_container_memory_to_bytes(usage, expected):
+    assert container_memory_to_bytes(usage) == expected
 
 
 @pytest.mark.parametrize(
