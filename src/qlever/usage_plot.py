@@ -16,6 +16,7 @@ from matplotlib import pyplot as plt  # noqa: E402
 from qlever import engine_name
 from qlever.log import log
 from qlever.resource_monitor import GB
+from qlever.util import iter_permutation_phases, parse_phase_markers
 
 
 def read_usage_tsv(path: Path) -> dict[str, np.ndarray]:
@@ -117,50 +118,17 @@ def compute_phase_boundaries(
     except OSError:
         return {}
 
-    ts_regex = r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"
-    ts_format = "%Y-%m-%d %H:%M:%S"
-
-    def find(pattern: str, start: int = 0) -> tuple[datetime | None, int]:
-        for line_idx in range(start, len(lines)):
-            if re.search(pattern, lines[line_idx]):
-                match = re.match(ts_regex, lines[line_idx])
-                if match:
-                    try:
-                        return datetime.strptime(
-                            match.group(1), ts_format
-                        ), line_idx + 1
-                    except ValueError:
-                        continue
-        return None, len(lines)
-
-    overall_begin, idx = find(r"INFO:\s*Processing")
+    markers = parse_phase_markers(lines)
+    overall_begin = markers.overall_begin
     if overall_begin is None:
         return {}
 
-    merge_begin, idx = find(r"INFO:\s*Merging partial vocab", idx)
-    convert_begin, idx = find(r"INFO:\s*Converting triples", idx)
-
-    perms = []
-    cursor = idx
-    while True:
-        perm_begin, cursor = find(
-            r"INFO:\s*Creating permutations ([A-Z]+ and [A-Z]+)", cursor
-        )
-        if perm_begin is None:
-            break
-        match = re.search(
-            r"Creating permutations ([A-Z]+ and [A-Z]+)", lines[cursor - 1]
-        )
-        name = (
-            match.group(1).replace(" and ", " & ")
-            if match
-            else f"#{len(perms) + 1}"
-        )
-        perms.append((perm_begin, name))
-
-    normal_end, idx = find(r"INFO:\s*Index build completed", idx)
-    text_begin, _ = find(r"INFO:\s*Adding text index")
-    text_end, _ = find(r"INFO:\s*Text index build comp")
+    merge_begin = markers.merge_begin
+    convert_begin = markers.convert_begin
+    perms = markers.permutations
+    normal_end = markers.normal_end
+    text_begin = markers.text_begin
+    text_end = markers.text_end
 
     def rel(ts: datetime | None) -> float | None:
         return (ts - overall_begin).total_seconds() if ts else None
@@ -176,19 +144,9 @@ def compute_phase_boundaries(
     add("Build vocabularies", merge_begin, convert_begin)
     if perms:
         add("Convert to global IDs", convert_begin, perms[0][0])
-        perm_names = set()
-        for perm_idx, (perm_begin, name) in enumerate(perms):
-            perm_end = (
-                perms[perm_idx + 1][0]
-                if perm_idx + 1 < len(perms)
-                else normal_end
-            )
-            if name in perm_names:
-                suffix = 2
-                while f"{name} ({suffix})" in perm_names:
-                    suffix += 1
-                name = f"{name} ({suffix})"
-            perm_names.add(name)
+        for name, perm_begin, perm_end in iter_permutation_phases(
+            perms, normal_end
+        ):
             add(f"Permutation {name}", perm_begin, perm_end)
     else:
         add("Convert to global IDs", convert_begin, normal_end)
