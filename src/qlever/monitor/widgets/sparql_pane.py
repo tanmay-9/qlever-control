@@ -2,23 +2,24 @@ from __future__ import annotations
 
 from rich.style import Style
 from rich.syntax import Syntax
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.widgets import Static
 
 from qlever.monitor.models import SparqlContent
-from qlever.monitor.util import format_timestamp
+from qlever.monitor.util import format_timestamp, resolve_client_name
 
 LIGHT_SYNTAX_THEME = "friendly"
 DARK_SYNTAX_THEME = "monokai"
 
 
-def format_header(content: SparqlContent) -> str:
+def format_header(content: SparqlContent, client_name: str) -> str:
     """One-line query identity shown above the SPARQL body."""
     parts = [
         f"[b]Server Query ID:[/b] {content.qid}",
-        f"[b]Client IP:[/b] {content.client_ip or '-'}",
+        f"[b]Client:[/b] {client_name or '-'}",
         f"[b]Started at:[/b] {format_timestamp(content.started_at_ms)}",
     ]
     if content.status is not None:
@@ -83,6 +84,7 @@ class SparqlPane(Vertical):
     content = reactive(None, init=False)
     show_pretty = reactive(False, init=False)
     pretty_text = reactive(None, init=False)
+    client_name = reactive(None, init=False)
 
     def compose(self) -> ComposeResult:
         yield Static(id="sparql-header")
@@ -94,10 +96,13 @@ class SparqlPane(Vertical):
         self.refresh_content(self.content)
 
     def watch_content(self, content: SparqlContent | None) -> None:
-        """Reset pretty-print state for the newly selected query, then paint."""
+        """Reset pretty-print and client name, paint, then resolve the name."""
         self.show_pretty = False
         self.pretty_text = None
+        self.client_name = None
         self.refresh_content(content)
+        if content is not None and content.client_ip:
+            self.resolve_name(content.client_ip)
 
     def watch_show_pretty(self, show_pretty: bool) -> None:
         """Repaint with raw or pretty text when the toggle flips."""
@@ -106,6 +111,21 @@ class SparqlPane(Vertical):
     def watch_pretty_text(self, pretty_text: str | None) -> None:
         """Repaint once the pretty-printed text has been computed."""
         self.refresh_content(self.content)
+
+    def watch_client_name(self, client_name: str | None) -> None:
+        """Repaint the header once the client name has been resolved."""
+        self.refresh_content(self.content)
+
+    @work(thread=True, exclusive=True, group="resolve_client_name")
+    def resolve_name(self, client_ip: str) -> None:
+        """Reverse-DNS the client IP off the UI thread, then apply it."""
+        name = resolve_client_name(client_ip)
+        self.app.call_from_thread(self.apply_client_name, client_ip, name)
+
+    def apply_client_name(self, client_ip: str, name: str) -> None:
+        """Show the resolved name unless the selection moved on meanwhile."""
+        if self.content is not None and self.content.client_ip == client_ip:
+            self.client_name = name
 
     @property
     def displayed_text(self) -> str | None:
@@ -134,5 +154,6 @@ class SparqlPane(Vertical):
             )
             body.code = None
             return
-        header.update(format_header(content))
+        client_name = self.client_name or content.client_ip
+        header.update(format_header(content, client_name))
         body.code = self.displayed_text

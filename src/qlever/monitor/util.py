@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 import platform
 import shutil
+import socket
 import subprocess
 from datetime import datetime
+from functools import lru_cache
 
 
 def format_timestamp(ms: int) -> str:
@@ -24,6 +26,22 @@ def truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 1] + "…"
+
+
+@lru_cache(maxsize=1024)
+def resolve_client_name(client_ip: str) -> str:
+    """Reverse-DNS a client IP to its hostname, or return the IP.
+
+    Blocking network call; run it off the UI thread. Falls back to the
+    IP when there is no PTR record or the lookup fails. Cached per IP so
+    each address is resolved at most once per process.
+    """
+    if not client_ip:
+        return ""
+    try:
+        return socket.gethostbyaddr(client_ip)[0]
+    except OSError:
+        return client_ip
 
 
 def in_ssh() -> bool:

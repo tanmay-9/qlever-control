@@ -19,8 +19,9 @@ class MetricsSnapshot(NamedTuple):
     always add up to seen:
         seen == ok + failed + timeout + cancelled + unknown
     slow is counted separately, since a query can be both ok and slow.
-    p50 and p95 are the median and 95th-percentile run times in
-    milliseconds, or None when there are no queries to measure.
+    am and gm are the arithmetic and geometric mean run times, p50 and
+    p95 the median and 95th-percentile run times, all in milliseconds,
+    or None when there are no queries to measure.
     """
 
     seen: int
@@ -30,7 +31,8 @@ class MetricsSnapshot(NamedTuple):
     cancelled: int
     unknown: int
     slow: int
-    mean: int | None
+    am: int | None
+    gm: int | None
     p50: int | None
     p95: int | None
 
@@ -66,7 +68,12 @@ def build_snapshot(
     run time (its length is the total seen).
     """
     p50, p95 = percentiles(durations_ms)
-    mean = None if not durations_ms else int(statistics.mean(durations_ms))
+    am = None if not durations_ms else int(statistics.mean(durations_ms))
+    # A single zero would collapse the geometric mean to zero, so each
+    # run time is floored at 1ms.
+    gm = None
+    if durations_ms:
+        gm = int(statistics.geometric_mean(max(ms, 1) for ms in durations_ms))
     return MetricsSnapshot(
         seen=len(durations_ms),
         ok=counts["ok"],
@@ -75,7 +82,8 @@ def build_snapshot(
         cancelled=counts["cancelled"],
         unknown=counts["unknown"],
         slow=slow,
-        mean=mean,
+        am=am,
+        gm=gm,
         p50=p50,
         p95=p95,
     )

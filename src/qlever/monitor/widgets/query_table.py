@@ -104,6 +104,7 @@ class LiveQueryTable(QueryTable):
         self.column_keys = (
             self.add_column("Started"),
             self.add_column("Duration", width=8),
+            self.add_column("Client IP"),
             self.add_column("SPARQL"),
         )
         self.fill_rows()
@@ -113,6 +114,7 @@ class LiveQueryTable(QueryTable):
         return (
             format_clock(row.started_at_ms),
             Text(format_duration(row.duration_ms), justify="right"),
+            row.client_ip or "-",
             truncate(oneline(row.sparql), SPARQL_WIDTH),
         )
 
@@ -179,6 +181,7 @@ class HistoricQueryTable(QueryTable):
         self.add_column("Started", width=self.SORTABLE_COLUMN_WIDTH)
         self.add_column("Duration", width=self.SORTABLE_COLUMN_WIDTH)
         self.add_column("Status", width=self.SORTABLE_COLUMN_WIDTH)
+        self.add_column("Client IP")
         self.add_column("SPARQL")
         self.fill_rows()
 
@@ -188,6 +191,7 @@ class HistoricQueryTable(QueryTable):
             format_clock(row.started_at_ms),
             Text(format_duration(row.duration_ms), justify="right"),
             row.status,
+            row.client_ip or "-",
             truncate(oneline(row.sparql), SPARQL_WIDTH),
         )
 
