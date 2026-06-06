@@ -19,7 +19,12 @@ from qlever.util import (
 )
 
 
-def render_usage_plot(dataset: str, plot_max_points: int) -> Path | None:
+def render_usage_plot(
+    dataset: str,
+    stxxl_memory: str,
+    settings_json: str,
+    plot_max_points: int,
+) -> Path | None:
     """Render the resource-usage plot, warning if plotting libs are missing."""
     try:
         from qlever import usage_plot
@@ -35,7 +40,10 @@ def render_usage_plot(dataset: str, plot_max_points: int) -> Path | None:
         )
         return None
     return usage_plot.render_usage_plot(
-        dataset, plot_max_points=plot_max_points
+        dataset,
+        stxxl_memory=stxxl_memory,
+        settings_json=settings_json,
+        plot_max_points=plot_max_points,
     )
 
 
@@ -219,6 +227,8 @@ class IndexCommand(QleverCommand):
         if args.resource_usage_plot_only:
             plot_path = render_usage_plot(
                 args.name,
+                stxxl_memory=args.stxxl_memory or "",
+                settings_json=args.settings_json,
                 plot_max_points=args.resource_usage_plot_max_points,
             )
             if plot_path is None:
@@ -381,6 +391,8 @@ class IndexCommand(QleverCommand):
 
         plot_path = render_usage_plot(
             args.name,
+            stxxl_memory=args.stxxl_memory or "",
+            settings_json=args.settings_json,
             plot_max_points=args.resource_usage_plot_max_points,
         )
         if plot_path is not None:

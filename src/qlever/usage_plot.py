@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import csv
-import re
+import json
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -160,46 +160,39 @@ def compute_phase_boundaries(
     return phases
 
 
-def parse_qleverfile(qleverfile_path: Path) -> dict[str, str]:
-    """Read STXXL_MEMORY and num-triples-per-batch from a QLeverfile."""
-    try:
-        text = qleverfile_path.read_text()
-    except OSError:
-        return {}
-    info = {}
-    stxxl = re.search(r"^\s*STXXL_MEMORY\s*=\s*(\S+)", text, re.MULTILINE)
-    if stxxl:
-        info["stxxl"] = stxxl.group(1)
-    batch = re.search(r'"num-triples-per-batch"\s*:\s*(\d+)', text)
-    if batch:
-        triples_per_batch = int(batch.group(1))
-        if triples_per_batch >= 1_000_000:
-            info["batch"] = f"{triples_per_batch / 1_000_000:g}M"
-        elif triples_per_batch >= 1_000:
-            info["batch"] = f"{triples_per_batch / 1_000:g}K"
-        else:
-            info["batch"] = str(triples_per_batch)
-    return info
 
-
-def build_plot_subtitle(log_path: Path, qleverfile_path: Path) -> str | None:
-    """Assemble a 'batch | git | STXXL' line from the index log and QLeverfile."""
-    qleverfile_info = parse_qleverfile(qleverfile_path)
+def build_plot_subtitle(
+    log_path: Path, stxxl_memory: str, settings_json: str
+) -> str | None:
+    """Assemble a 'batch | git | STXXL' line from the index log and resolved args."""
     git_hash = parse_git_hash(log_path)
     parts = []
-    if "batch" in qleverfile_info:
-        parts.append(f"batch = {qleverfile_info['batch']} triples")
+    try:
+        triples_per_batch = json.loads(settings_json).get(
+            "num-triples-per-batch"
+        )
+    except (json.JSONDecodeError, AttributeError):
+        triples_per_batch = None
+    if triples_per_batch is not None:
+        if triples_per_batch >= 1_000_000:
+            batch_str = f"{triples_per_batch / 1_000_000:g}M"
+        elif triples_per_batch >= 1_000:
+            batch_str = f"{triples_per_batch / 1_000:g}K"
+        else:
+            batch_str = str(triples_per_batch)
+        parts.append(f"batch = {batch_str} triples")
     if git_hash:
         parts.append(f"git = {git_hash}")
-    if "stxxl" in qleverfile_info:
-        parts.append(f"STXXL = {qleverfile_info['stxxl']}")
+    if stxxl_memory:
+        parts.append(f"STXXL = {stxxl_memory}")
     return "   |   ".join(parts) if parts else None
 
 
 def write_usage_plot(
     tsv_path: Path,
     log_path: Path,
-    qleverfile_path: Path,
+    stxxl_memory: str,
+    settings_json: str,
     out_path: Path,
     title: str,
     plot_max_points: int = 500,
@@ -303,7 +296,7 @@ def write_usage_plot(
         bbox_to_anchor=(1.08, 0.5),
     )
 
-    subtitle = build_plot_subtitle(log_path, qleverfile_path)
+    subtitle = build_plot_subtitle(log_path, stxxl_memory, settings_json)
     ax_mem.set_title(f"{title}\n{subtitle}" if subtitle else title)
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
@@ -312,6 +305,8 @@ def write_usage_plot(
 
 def render_usage_plot(
     dataset: str,
+    stxxl_memory: str = "",
+    settings_json: str = "{}",
     output_dir: Path | None = None,
     plot_max_points: int = 500,
 ) -> Path | None:
@@ -324,7 +319,6 @@ def render_usage_plot(
     output_dir = output_dir or Path.cwd()
     tsv_path = output_dir / f"{dataset}.resource-usage-log.tsv"
     log_path = output_dir / f"{dataset}.index-log.txt"
-    qleverfile_path = Path.cwd() / "Qleverfile"
     plot_path = output_dir / f"{dataset}.resource-usage-plot.png"
     if not tsv_path.exists():
         log.warning(f"Resource-usage log not found: {tsv_path}")
@@ -333,7 +327,8 @@ def render_usage_plot(
         rendered = write_usage_plot(
             tsv_path=tsv_path,
             log_path=log_path,
-            qleverfile_path=qleverfile_path,
+            stxxl_memory=stxxl_memory,
+            settings_json=settings_json,
             out_path=plot_path,
             title=f"{engine_name} index build: {dataset}",
             plot_max_points=plot_max_points,

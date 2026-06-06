@@ -6,9 +6,9 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("matplotlib")
 
 from qlever.usage_plot import (  # noqa: E402
+    build_plot_subtitle,
     compute_phase_boundaries,
     downsample_for_plot,
-    parse_qleverfile,
     pick_time_unit,
     read_usage_tsv,
     render_usage_plot,
@@ -65,38 +65,44 @@ def test_parse_git_hash_empty_file(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "triples,expected",
+    "triples,expected_fragment",
     [
-        (1_000_000, "1M"),
-        (5_000_000, "5M"),
-        (2_500_000, "2.5M"),
-        (1_000, "1K"),
-        (50_000, "50K"),
-        (500, "500"),
+        (1_000_000, "batch = 1M triples"),
+        (5_000_000, "batch = 5M triples"),
+        (2_500_000, "batch = 2.5M triples"),
+        (1_000, "batch = 1K triples"),
+        (50_000, "batch = 50K triples"),
+        (500, "batch = 500 triples"),
     ],
 )
-def test_parse_qleverfile_batch_formatting(triples, expected, tmp_path):
-    path = tmp_path / "Qleverfile"
-    path.write_text(
-        f'SETTINGS_JSON = {{ "num-triples-per-batch": {triples} }}\n'
-    )
-    assert parse_qleverfile(path)["batch"] == expected
+def test_build_plot_subtitle_batch_formatting(
+    triples, expected_fragment, tmp_path
+):
+    log_path = tmp_path / "index-log.txt"
+    log_path.write_text("")
+    settings_json = f'{{"num-triples-per-batch": {triples}}}'
+    subtitle = build_plot_subtitle(log_path, "", settings_json)
+    assert subtitle == expected_fragment
 
 
-def test_parse_qleverfile_reads_stxxl(tmp_path):
-    path = tmp_path / "Qleverfile"
-    path.write_text("[index]\nSTXXL_MEMORY = 5G\n")
-    assert parse_qleverfile(path) == {"stxxl": "5G"}
+def test_build_plot_subtitle_stxxl(tmp_path):
+    log_path = tmp_path / "index-log.txt"
+    log_path.write_text("")
+    subtitle = build_plot_subtitle(log_path, "5G", "{}")
+    assert subtitle == "STXXL = 5G"
 
 
-def test_parse_qleverfile_missing_file(tmp_path):
-    assert parse_qleverfile(tmp_path / "nope") == {}
+def test_build_plot_subtitle_no_values(tmp_path):
+    log_path = tmp_path / "index-log.txt"
+    log_path.write_text("")
+    assert build_plot_subtitle(log_path, "", "{}") is None
 
 
-def test_parse_qleverfile_no_relevant_keys(tmp_path):
-    path = tmp_path / "Qleverfile"
-    path.write_text("[index]\nFORMAT = ttl\n")
-    assert parse_qleverfile(path) == {}
+def test_build_plot_subtitle_invalid_settings_json(tmp_path):
+    log_path = tmp_path / "index-log.txt"
+    log_path.write_text("")
+    # Malformed JSON must not raise; the batch part is simply omitted.
+    assert build_plot_subtitle(log_path, "", "not-json") is None
 
 
 def test_read_usage_tsv_parses_columns_and_blank_as_nan(tmp_path):
