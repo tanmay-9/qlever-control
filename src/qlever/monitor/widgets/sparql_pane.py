@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from rich.style import Style
 from rich.syntax import Syntax
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
@@ -26,24 +27,41 @@ def format_header(content: SparqlContent) -> str:
 
 
 class SparqlBody(Static):
-    """Syntax-highlighted SPARQL; theme follows the active app theme.
+    """Syntax-highlighted SPARQL whose theme follows the app theme.
 
-    The Syntax object is rebuilt in render() rather than stored, so a
-    theme switch (which triggers a repaint) picks the matching variant
-    without any explicit subscription.
+    render() returns highlighted Text rather than a Syntax renderable:
+    Text carries the per-character offsets Textual needs for mouse
+    selection. The theme's per-character background is stripped, so the
+    query renders on the app background, spans the full pane, and lets
+    the selection highlight show through.
     """
 
     code = reactive(None, layout=True)
 
+    def syntax_theme_name(self) -> str:
+        """Pygments theme name for the active light or dark app theme."""
+        if self.app.current_theme.dark:
+            return DARK_SYNTAX_THEME
+        return LIGHT_SYNTAX_THEME
+
     def render(self):
         if self.code is None:
             return ""
-        theme = (
-            DARK_SYNTAX_THEME
-            if self.app.current_theme.dark
-            else LIGHT_SYNTAX_THEME
-        )
-        return Syntax(self.code, "sparql", theme=theme, word_wrap=True)
+        highlighted = Syntax(
+            self.code, "sparql", theme=self.syntax_theme_name()
+        ).highlight(self.code)
+        highlighted.rstrip()
+        # highlight() sets a base background plus a per-character one;
+        # drop both so the query renders on the app background and the
+        # selection highlight is not masked.
+        highlighted.style = ""
+        highlighted.spans = [
+            span._replace(
+                style=span.style.without_color + Style(color=span.style.color)
+            )
+            for span in highlighted.spans
+        ]
+        return highlighted
 
 
 class SparqlScroll(VerticalScroll):

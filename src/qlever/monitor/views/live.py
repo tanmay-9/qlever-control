@@ -34,6 +34,7 @@ class LiveScreen(Screen, inherit_bindings=False):
     BINDINGS = [
         Binding("tab", "app.swap_screen", "Historic>", priority=True),
         Binding("f", "toggle_freeze", "Freeze/Unfreeze"),
+        Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
 
     frozen = reactive(False, init=False)

@@ -99,9 +99,8 @@ QueryTable > .datatable--cursor {
 
 SparqlPane {
     height: 1fr;
-    margin-bottom: 1;
-    margin-left: 1;
-    margin-right: 1;
+    border: round $primary-muted;
+    padding: 0 1;
 }
 
 #sparql-header {

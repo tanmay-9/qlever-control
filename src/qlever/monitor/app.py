@@ -96,10 +96,14 @@ class MonitorQueriesApp(App):
 
     def on_mount(self) -> None:
         """Boot the live engine, then open the Live screen."""
-        # The ansi theme renders an unreadable Footer (its colors are
-        # ansi_default, which flattens to black). Drop it so it is
-        # offered neither in the theme cycle nor the command palette.
-        self.unregister_theme("textual-ansi")
+        # The ansi theme renders inconsistently across terminals.
+        # Drop it so it is offered neither in the theme cycle nor
+        # the command palette.
+        ansi_themes = [
+            theme for theme in self.available_themes if "ansi" in theme
+        ]
+        for theme in ansi_themes:
+            self.unregister_theme(theme)
         self.boot_time_ms = current_ms()
         state, cut_offset, _ = find_active_queries(
             self.log_file, self.window_pad_ms
@@ -154,35 +158,26 @@ class MonitorQueriesApp(App):
                 return
         self.switch_screen(target)
 
-    def copy_via_terminal(self, text: str, detail: str) -> None:
-        """Best-effort clipboard copy through the terminal's OSC 52."""
-        self.copy_to_clipboard(text)
-        self.notify(
-            f"Tried to copy SPARQL via the terminal. {detail}",
-            severity="warning",
-        )
+    def copy_to_clipboard(self, text: str) -> None:
+        """Copy text to the clipboard, native tool first, OSC 52 fallback.
 
-    def action_copy_query(self) -> None:
-        """Copy the displayed query's SPARQL to the system clipboard."""
-        pane = self.screen.query_one(SparqlPane)
-        if pane.displayed_text is None:
-            self.notify("No query selected", severity="warning")
-            return
-        text = pane.displayed_text
-
-        # Over SSH a local clipboard binary would write the remote
-        # machine's clipboard, so ask the terminal itself instead.
+        Over SSH a local clipboard binary would write the
+        remote machine's clipboard, so the terminal's own OSC 52 is
+        asked instead.
+        """
         if in_ssh():
-            self.copy_via_terminal(
-                text, "This may not work on every terminal."
+            super().copy_to_clipboard(text)
+            self.notify(
+                "Copied via the terminal. This may not work on every terminal."
             )
             return
 
         result = copy_text(text)
         if result is True:
-            self.notify("SPARQL copied to clipboard")
+            self.notify("Copied to clipboard")
             return
 
+        super().copy_to_clipboard(text)
         if result is None:
             detail = (
                 f"If it doesn't paste, {clipboard_install_hint()} "
@@ -190,7 +185,15 @@ class MonitorQueriesApp(App):
             )
         else:
             detail = "If it doesn't paste, the local clipboard tool errored."
-        self.copy_via_terminal(text, detail)
+        self.notify(f"Copied via the terminal. {detail}", severity="warning")
+
+    def action_copy_query(self) -> None:
+        """Copy the displayed query's SPARQL to the system clipboard."""
+        pane = self.screen.query_one(SparqlPane)
+        if pane.displayed_text is None:
+            self.notify("No query selected", severity="warning")
+            return
+        self.copy_to_clipboard(pane.displayed_text)
 
     def action_pretty_print(self) -> None:
         """Toggle pretty-printed SPARQL in the pane for the selected query."""

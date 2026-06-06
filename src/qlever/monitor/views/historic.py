@@ -90,6 +90,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         ),
         Binding("greater_than_sign", "sort_next_column", "", show=False),
         Binding("i", "invert_sort", "Invert sort"),
+        Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -139,7 +140,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
         yield SparqlPane()
-        yield Footer(show_command_palette=False)
+        yield Footer(show_command_palette=False, compact=True)
 
     def on_screen_resume(self) -> None:
         """Catch up on log growth, then push state and rescan."""
