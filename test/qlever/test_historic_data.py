@@ -4,11 +4,13 @@ from qlever.monitor.historic_data import (
     DURATION_UNKNOWN,
     LoggedQuery,
     filter_queries,
+    filter_rows,
     load_query_details_for_rows,
+    passes_filter,
     read_window,
     render_window,
 )
-from qlever.monitor.models import ControlsState, HistoricQueryRow
+from qlever.monitor.models import ControlsState, FilterState, HistoricQueryRow
 
 PAD_MS = 10_000
 SLOW_MS = 60_000
@@ -458,3 +460,104 @@ def test_load_query_details_reuses_cache_without_reading(write_log):
     assert filled.qid == "cached-qid"
     assert filled.client_ip == "cached-ip"
     assert filled.sparql == "CACHED"
+
+
+def filter_row(status="ok", duration_ms=5_000, client_ip="", sparql=""):
+    return HistoricQueryRow(
+        qid="",
+        start_line_offset=0,
+        started_at_ms=1_000_000,
+        duration_ms=duration_ms,
+        status=status,
+        sparql=sparql,
+        client_ip=client_ip,
+    )
+
+
+def test_passes_filter_empty_keeps_every_row():
+    assert passes_filter(filter_row(status="failed"), FilterState())
+
+
+def test_passes_filter_status_keeps_listed_status():
+    filters = FilterState(statuses=frozenset({"ok", "failed"}))
+    assert passes_filter(filter_row(status="ok"), filters)
+    assert passes_filter(filter_row(status="failed"), filters)
+
+
+def test_passes_filter_status_drops_unlisted_status():
+    filters = FilterState(statuses=frozenset({"ok"}))
+    assert not passes_filter(filter_row(status="timeout"), filters)
+
+
+def test_passes_filter_duration_keeps_at_or_above_minimum():
+    filters = FilterState(min_duration_s=5)
+    assert passes_filter(filter_row(duration_ms=5_000), filters)
+    assert passes_filter(filter_row(duration_ms=9_000), filters)
+
+
+def test_passes_filter_duration_drops_below_minimum():
+    filters = FilterState(min_duration_s=5)
+    assert not passes_filter(filter_row(duration_ms=4_999), filters)
+
+
+def test_passes_filter_duration_drops_orphan_rows():
+    filters = FilterState(min_duration_s=1)
+    assert not passes_filter(filter_row(duration_ms=DURATION_UNKNOWN), filters)
+
+
+def test_passes_filter_combines_status_and_duration():
+    filters = FilterState(statuses=frozenset({"ok"}), min_duration_s=5)
+    assert passes_filter(filter_row(status="ok", duration_ms=6_000), filters)
+    assert not passes_filter(
+        filter_row(status="ok", duration_ms=1_000), filters
+    )
+    assert not passes_filter(
+        filter_row(status="failed", duration_ms=6_000), filters
+    )
+
+
+def test_filter_rows_empty_returns_same_list():
+    rows = [filter_row(status="ok"), filter_row(status="failed")]
+    assert filter_rows(rows, FilterState()) is rows
+
+
+def test_filter_rows_keeps_only_matching():
+    rows = [
+        filter_row(status="ok", duration_ms=6_000),
+        filter_row(status="failed", duration_ms=6_000),
+        filter_row(status="ok", duration_ms=1_000),
+    ]
+    filters = FilterState(statuses=frozenset({"ok"}), min_duration_s=5)
+    assert filter_rows(rows, filters) == [rows[0]]
+
+
+def test_passes_filter_client_ip_matches_substring_ignoring_case():
+    filters = FilterState(client_ip_substr="192.168")
+    assert passes_filter(filter_row(client_ip="192.168.0.7"), filters)
+    assert not passes_filter(filter_row(client_ip="10.0.0.1"), filters)
+
+
+def test_passes_filter_client_ip_is_case_insensitive():
+    filters = FilterState(client_ip_substr="ABCD")
+    assert passes_filter(filter_row(client_ip="fe80::abcd"), filters)
+
+
+def test_passes_filter_sparql_matches_substring_ignoring_case():
+    filters = FilterState(sparql_substr="select")
+    assert passes_filter(filter_row(sparql="SELECT * WHERE {}"), filters)
+    assert not passes_filter(filter_row(sparql="ASK {}"), filters)
+
+
+def test_passes_filter_combines_text_with_status():
+    filters = FilterState(
+        statuses=frozenset({"ok"}), sparql_substr="select"
+    )
+    assert passes_filter(
+        filter_row(status="ok", sparql="SELECT *"), filters
+    )
+    assert not passes_filter(
+        filter_row(status="failed", sparql="SELECT *"), filters
+    )
+    assert not passes_filter(
+        filter_row(status="ok", sparql="ASK {}"), filters
+    )

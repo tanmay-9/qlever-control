@@ -96,3 +96,35 @@ class ControlsState:
     mode: str
     start_ms: int
     end_ms: int
+
+
+@dataclass(frozen=True)
+class FilterState:
+    """The active filters on the Historic table.
+
+    Empty `statuses` keeps every status; `min_duration_s` of None
+    keeps any duration. A None text filter keeps every query; a set
+    one keeps queries whose value contains it, ignoring case.
+    Filtering hides rows but does not change the metrics.
+    """
+
+    statuses: frozenset[str] = frozenset()
+    min_duration_s: int | None = None
+    client_ip_substr: str | None = None
+    sparql_substr: str | None = None
+
+    def is_empty(self) -> bool:
+        """Whether no filter is active, so every row passes."""
+        return (
+            not self.statuses
+            and self.min_duration_s is None
+            and self.client_ip_substr is None
+            and self.sparql_substr is None
+        )
+
+    def has_text_filter(self) -> bool:
+        """Whether a filter needs the query text read from the log."""
+        return (
+            self.client_ip_substr is not None
+            or self.sparql_substr is not None
+        )

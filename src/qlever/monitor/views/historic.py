@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -7,6 +8,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Static
 
 from qlever.monitor.historic_data import (
+    filter_rows,
     load_query_details_for_rows,
     read_window,
     render_window,
@@ -15,17 +17,23 @@ from qlever.monitor.live_data import current_ms
 from qlever.monitor.metrics import EMPTY_FIELDS
 from qlever.monitor.models import (
     ControlsState,
+    FilterState,
     HistoricQueryRow,
     MetricsCounts,
     SparqlContent,
     TimelineBounds,
 )
+from qlever.monitor.views.filter_modal import FILTER_STATUSES, FilterModal
 from qlever.monitor.widgets.controls_row import HistoricControlsRow
 from qlever.monitor.widgets.header_row import HeaderRow
 from qlever.monitor.widgets.metrics_row import MetricsRow
 from qlever.monitor.widgets.mode_picker import MODES, ModePicker
 from qlever.monitor.widgets.nav_pill import NavPill
-from qlever.monitor.widgets.query_table import HistoricQueryTable
+from qlever.monitor.widgets.query_table import (
+    HistoricQueryTable,
+    oneline,
+    truncate,
+)
 from qlever.monitor.widgets.selected_window import SelectedWindow
 from qlever.monitor.widgets.sparql_pane import SparqlPane
 from qlever.monitor.widgets.timeline import Timeline
@@ -65,6 +73,35 @@ MAX_VISIBLE_ROWS = 1000
 # Collapse a fast window scrub into a single scan once the user settles.
 RESCAN_DEBOUNCE_S = 0.1
 
+# Active-filter chips are clipped to this width so a long client IP or
+# SPARQL substring keeps the row on one line.
+CHIP_SUBSTR_LIMIT = 20
+
+
+def filter_summary(filters: FilterState) -> str:
+    """Markup readout of the active filters: bold labels, colored values."""
+    chips = []
+    if filters.statuses:
+        shown = ", ".join(
+            status for status in FILTER_STATUSES if status in filters.statuses
+        )
+        chips.append(("status:", shown))
+    if filters.min_duration_s is not None:
+        chips.append(("duration:", f">{filters.min_duration_s}s"))
+    if filters.client_ip_substr is not None:
+        value = truncate(oneline(filters.client_ip_substr), CHIP_SUBSTR_LIMIT)
+        chips.append(("client ip:", value))
+    if filters.sparql_substr is not None:
+        value = truncate(oneline(filters.sparql_substr), CHIP_SUBSTR_LIMIT)
+        chips.append(("sparql:", value))
+    if not chips:
+        return ""
+    parts = [
+        f"[$text on $secondary] [bold]{label}[/bold] {escape(value)} [/]"
+        for label, value in chips
+    ]
+    return "[bold]Active filters:[/bold]  " + "  ".join(parts)
+
 
 class HistoricScreen(Screen, inherit_bindings=False):
     """Historic view: shows active queries parsed from the log over a time window."""
@@ -90,6 +127,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
         ),
         Binding("greater_than_sign", "sort_next_column", "", show=False),
         Binding("i", "invert_sort", "Invert sort"),
+        Binding("f", "edit_filter", "Filter"),
+        Binding("F", "clear_filters", "Clear filters"),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
 
@@ -102,6 +141,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         )
         self.window_size = self.available_presets[0]
         self.mode = "ACTIVE"
+        self.filters = FilterState()
         self.sort_column = "Duration"
         self.sort_reverse = True
         width = preset_ms(self.window_size)
@@ -111,6 +151,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.window_end_ms = self.log_end_ms
         self.window_queries = None
         self.all_rows = []
+        self.window_total = 0
         self.query_details_cache = {}
         self.rescan_timer = None
         self.cached_window = None
@@ -137,10 +178,11 @@ class HistoricScreen(Screen, inherit_bindings=False):
             [MetricsCounts(label=self.window_size, **EMPTY_FIELDS)],
             self.app.slow_threshold,
         )
+        yield Static("", id="filter-row")
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
         yield SparqlPane()
-        yield Footer(show_command_palette=False, compact=True)
+        yield Footer(show_command_palette=False)
 
     def on_screen_resume(self) -> None:
         """Catch up on log growth, then push state and rescan."""
@@ -246,10 +288,22 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.app.slow_threshold * 1000,
             self.log_end_ms,
         )
-        self.all_rows = rows
-        visible_rows = load_query_details_for_rows(
-            self.app.log_file, self.visible_rows(), self.query_details_cache
-        )
+        self.window_total = len(rows)
+        if self.filters.has_text_filter():
+            # Text filters need the query text, so read the whole window;
+            # the survivors are then already filled.
+            rows = load_query_details_for_rows(
+                self.app.log_file, rows, self.query_details_cache
+            )
+            self.all_rows = filter_rows(rows, self.filters)
+            visible_rows = self.visible_rows()
+        else:
+            self.all_rows = filter_rows(rows, self.filters)
+            visible_rows = load_query_details_for_rows(
+                self.app.log_file,
+                self.visible_rows(),
+                self.query_details_cache,
+            )
         self.app.call_from_thread(
             self.apply_window_result, visible_rows, metrics
         )
@@ -287,16 +341,14 @@ class HistoricScreen(Screen, inherit_bindings=False):
         direction = descending if self.sort_reverse else ascending
         return f"{self.sort_column}, {direction}"
 
-    def status_text(self, total: int) -> str:
+    def status_text(self, matched: int) -> str:
         """Status line describing the window mode, row count, and sort."""
         phrase = MODE_PHRASES[self.mode]
-        if total > MAX_VISIBLE_ROWS:
-            count = f"top {MAX_VISIBLE_ROWS:,} of {total:,}"
-        else:
-            count = f"{total:,}"
+        shown = min(matched, MAX_VISIBLE_ROWS)
+        prefix = "" if self.filters.is_empty() else "filtered, "
         return (
-            f"Showing {count} queries that {phrase} the time window "
-            f"(sorted by {self.sort_phrase()})"
+            f"Showing {shown:,} of {self.window_total:,} queries that "
+            f"{phrase} the time window ({prefix}sorted by {self.sort_phrase()})"
         )
 
     def refresh_sort_indicator(self) -> None:
@@ -376,6 +428,45 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Flip the sort direction."""
         self.sort_reverse = not self.sort_reverse
         self.refresh_data(rescan=False)
+
+    def action_edit_filter(self) -> None:
+        """Open the filter modal and apply its result to the table."""
+        self.app.push_screen(FilterModal(self.filters), self.apply_filter)
+
+    def apply_filter(self, filters: FilterState | None) -> None:
+        """Set the chosen filters and re-render without rescanning."""
+        if filters is None:
+            return
+        self.filters = filters
+        self.sync_filter_ui()
+        # A text filter reads the whole window, which can take a moment.
+        if filters.has_text_filter():
+            self.query_one("#table-status", Static).update("Filtering…")
+        self.refresh_data(rescan=False)
+
+    def sync_filter_ui(self) -> None:
+        """Show the active filters above the table, or hide the row if none."""
+        row = self.query_one("#filter-row", Static)
+        if self.filters.is_empty():
+            row.display = False
+        else:
+            row.update(filter_summary(self.filters))
+            row.display = True
+        self.refresh_bindings()
+
+    def action_clear_filters(self) -> None:
+        """Drop all filters and re-render (no rescan)."""
+        if self.filters.is_empty():
+            return
+        self.filters = FilterState()
+        self.sync_filter_ui()
+        self.refresh_data(rescan=False)
+
+    def check_action(self, action: str, parameters: tuple) -> bool:
+        """Hide the clear-filters binding while no filter is active."""
+        if action == "clear_filters":
+            return not self.filters.is_empty()
+        return True
 
     def shift_window(self, direction: int) -> None:
         """Move the window by its own width; clamp; no-op when `all`."""

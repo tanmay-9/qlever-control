@@ -21,6 +21,7 @@ from qlever.monitor.log_reader import (
 from qlever.monitor.metrics import metrics_for_queries
 from qlever.monitor.models import (
     ControlsState,
+    FilterState,
     HistoricQueryRow,
     MetricsCounts,
 )
@@ -195,6 +196,39 @@ def render_window(
     snapshot = metrics_for_queries(completed, slow_threshold_ms)
     metrics = MetricsCounts(label=controls.window_size, **snapshot._asdict())
     return historic_rows, metrics
+
+
+def passes_filter(row: HistoricQueryRow, filters: FilterState) -> bool:
+    """Whether a rendered row survives the active filters.
+
+    A status filter keeps only the listed statuses. A duration filter
+    keeps only rows at or above the minimum, which drops running and
+    orphaned rows since their duration is below any real threshold. A
+    client IP or SPARQL filter keeps only rows whose value contains
+    the text, ignoring case; these read the query text, so the screen
+    fills it for the whole window before filtering.
+    """
+    if filters.statuses and row.status not in filters.statuses:
+        return False
+    if filters.min_duration_s is not None:
+        if row.duration_ms < filters.min_duration_s * 1000:
+            return False
+    if filters.client_ip_substr is not None:
+        if filters.client_ip_substr.lower() not in row.client_ip.lower():
+            return False
+    if filters.sparql_substr is not None:
+        if filters.sparql_substr.lower() not in row.sparql.lower():
+            return False
+    return True
+
+
+def filter_rows(
+    rows: list[HistoricQueryRow], filters: FilterState
+) -> list[HistoricQueryRow]:
+    """Keep the rows passing the filters; the same list when none are set."""
+    if filters.is_empty():
+        return rows
+    return [row for row in rows if passes_filter(row, filters)]
 
 
 def load_query_details_for_rows(

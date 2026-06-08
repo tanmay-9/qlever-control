@@ -87,6 +87,15 @@ QueryTable > .datatable--cursor {
     color: $text;
 }
 
+/* active-filter readout, just above the table; hidden until a filter is set */
+
+#filter-row {
+    height: 1;
+    margin-bottom: 1;
+    margin-left: 1;
+    display: none;
+}
+
 /* table status line, flush under the table */
 
 #table-status {
@@ -175,4 +184,37 @@ ModePicker > Static {
     background: $accent;
     color: $text;
     text-style: bold;
+}
+
+/* FilterModal */
+
+FilterModal {
+    align-horizontal: right;
+}
+
+#filter-modal {
+    width: 50;
+    height: 100%;
+    padding: 1 2;
+    background: $surface;
+}
+
+#filter-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.filter-section {
+    text-style: bold;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#filter-statuses {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#filter-modal Input {
+    margin-bottom: 1;
 }
