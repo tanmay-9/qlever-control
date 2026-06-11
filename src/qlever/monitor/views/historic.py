@@ -202,6 +202,10 @@ class HistoricScreen(Screen, inherit_bindings=False):
         yield SparqlPane()
         yield Footer(show_command_palette=False)
 
+    def on_mount(self) -> None:
+        """Focus the table so the header theme dropdown can't take it."""
+        self.query_one(HistoricQueryTable).focus()
+
     def on_screen_resume(self) -> None:
         """Catch up on log growth, then push state and rescan."""
         self.log_end_ms = self.read_log_end()

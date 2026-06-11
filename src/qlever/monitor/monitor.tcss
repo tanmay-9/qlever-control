@@ -7,8 +7,7 @@ HeaderRow {
 }
 
 .slot-left {
-    width: auto;
-    min-width: 15;
+    height: 1;
 }
 
 .slot-center {
@@ -17,14 +16,34 @@ HeaderRow {
     text-style: bold;
 }
 
-.slot-right {
-    width: auto;
-    min-width: 15;
+/* ThemeSelect (header theme dropdown) */
+
+ThemeSelect {
+    height: 1;
+}
+
+ThemeSelect > SelectCurrent {
+    background: $accent;
+    padding: 0 1;
+}
+
+ThemeSelect > SelectCurrent #label {
+    color: $text;
+    text-style: bold;
+    width: 1fr;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+ThemeSelect .arrow {
+    color: $text;
 }
 
 /* NavPill */
 
 NavPill {
+    width: auto;
+    min-width: 18;
     padding: 0 1;
     background: $accent;
     color: $text;
@@ -100,7 +119,6 @@ QueryTable > .datatable--cursor {
 
 #table-status {
     height: 1;
-    margin-bottom: 1;
     margin-left: 1;
 }
 

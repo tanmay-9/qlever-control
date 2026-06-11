@@ -41,8 +41,8 @@ class LiveScreen(Screen, inherit_bindings=False):
 
     def compose(self) -> ComposeResult:
         yield HeaderRow(
+            left=NavPill("Historic >", target="historic"),
             center=Static(TITLE),
-            right=NavPill("Historic >", target="historic"),
         )
         state = self.app.live_state
         slow_ms = self.app.slow_threshold * 1000
@@ -82,6 +82,8 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.metrics_timer = self.set_interval(2.0, self.refresh_metrics)
         if self.liveness == "checking":
             self.start_pinging(initial=True)
+        # Focus the table so the header theme dropdown can't take it.
+        self.query_one(LiveQueryTable).focus()
 
     def on_screen_suspend(self) -> None:
         """Pause periodic UI work while Live isn't the active screen."""

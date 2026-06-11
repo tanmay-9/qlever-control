@@ -7,6 +7,7 @@ from textual import work
 from textual.app import App
 from textual.binding import Binding
 from textual.css.query import NoMatches
+from textual.widgets import Select
 from textual.worker import get_current_worker
 
 from qlever.monitor.live_data import (
@@ -21,6 +22,8 @@ from qlever.monitor.log_reader import read_first_timestamp
 from qlever.monitor.util import clipboard_install_hint, copy_text
 from qlever.monitor.views.historic import HistoricScreen
 from qlever.monitor.views.live import LiveScreen
+from qlever.monitor.widgets.header_row import ThemeSelect
+from qlever.monitor.widgets.query_table import QueryTable
 from qlever.monitor.widgets.sparql_pane import SparqlPane, SparqlScroll
 from qlever.util import pretty_printed_query
 
@@ -45,8 +48,7 @@ class MonitorQueriesApp(App):
 
     BINDINGS = [
         ("q", "quit", "Quit/Exit"),
-        Binding("t", "cycle_themes", "Change theme", key_display="T/t"),
-        Binding("T", "cycle_themes(-1)", "Previous theme", show=False),
+        ("t", "open_theme_picker", "Theme"),
         ("y", "copy_query", "Copy SPARQL"),
         ("p", "pretty_print", "Pretty print"),
         ("c", "clear_query", "Clear SPARQL"),
@@ -113,6 +115,9 @@ class MonitorQueriesApp(App):
         self.set_log_start_ms()
         self.tail_live_log()
         self.load_metrics_history()
+        # Keep every header dropdown showing the active theme, however it
+        # changes (a dropdown, or the command palette).
+        self.watch(self, "theme", self.sync_theme_pickers)
         self.push_screen("live")
 
     @work(thread=True, exclusive=True, group="tail_live_log")
@@ -260,8 +265,23 @@ class MonitorQueriesApp(App):
             return scroll.max_scroll_y > 0
         return True
 
-    def action_cycle_themes(self, direction: int = 1) -> None:
-        """Step through themes; `direction` is +1 for `t`, -1 for `T`."""
-        themes = list(self.available_themes)
-        selected_theme_idx = themes.index(self.theme)
-        self.theme = themes[(selected_theme_idx + direction) % len(themes)]
+    def action_open_theme_picker(self) -> None:
+        """Open the header theme dropdown on the active screen."""
+        picker = self.screen.query_one(ThemeSelect)
+        picker.focus()
+        picker.expanded = True
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Apply a picked theme, ignoring the initial selection echo."""
+        if event.value is not Select.BLANK and event.value != self.theme:
+            self.theme = event.value
+
+    def on_theme_select_closed(self, event: ThemeSelect.Closed) -> None:
+        """Return focus to the table once the dropdown closes."""
+        self.screen.query_one(QueryTable).focus()
+
+    def sync_theme_pickers(self, theme: str) -> None:
+        """Point every header dropdown at the active theme."""
+        for picker in self.query(ThemeSelect):
+            if picker.value != theme:
+                picker.value = theme
