@@ -18,7 +18,7 @@ from qlever.monitor.live_data import (
     load_completed_history,
 )
 from qlever.monitor.log_reader import read_first_timestamp
-from qlever.monitor.util import clipboard_install_hint, copy_text, in_ssh
+from qlever.monitor.util import clipboard_install_hint, copy_text
 from qlever.monitor.views.historic import HistoricScreen
 from qlever.monitor.views.live import LiveScreen
 from qlever.monitor.widgets.sparql_pane import SparqlPane, SparqlScroll
@@ -161,17 +161,10 @@ class MonitorQueriesApp(App):
     def copy_to_clipboard(self, text: str) -> None:
         """Copy text to the clipboard, native tool first, OSC 52 fallback.
 
-        Over SSH a local clipboard binary would write the
-        remote machine's clipboard, so the terminal's own OSC 52 is
-        asked instead.
+        A native tool that has no display to write to (e.g. xclip over
+        SSH without X11 forwarding) exits non-zero, so the failure is
+        itself the signal to fall back to the terminal's own OSC 52.
         """
-        if in_ssh():
-            super().copy_to_clipboard(text)
-            self.notify(
-                "Copied via the terminal. This may not work on every terminal."
-            )
-            return
-
         result = copy_text(text)
         if result is True:
             self.notify("Copied to clipboard")
@@ -180,12 +173,16 @@ class MonitorQueriesApp(App):
         super().copy_to_clipboard(text)
         if result is None:
             detail = (
-                f"If it doesn't paste, {clipboard_install_hint()} "
-                "for a reliable copy."
+                f"No clipboard tool found; copied via the terminal (OSC 52). "
+                f"{clipboard_install_hint()} for a reliable copy, or check "
+                "your terminal supports OSC 52."
             )
         else:
-            detail = "If it doesn't paste, the local clipboard tool errored."
-        self.notify(f"Copied via the terminal. {detail}", severity="warning")
+            detail = (
+                "Clipboard tool failed; copied via the terminal (OSC 52). "
+                "If it doesn't paste, your terminal may not support OSC 52."
+            )
+        self.notify(detail, severity="warning")
 
     def action_copy_query(self) -> None:
         """Copy the displayed query's SPARQL to the system clipboard."""

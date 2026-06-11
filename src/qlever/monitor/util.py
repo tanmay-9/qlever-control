@@ -44,11 +44,6 @@ def resolve_client_name(client_ip: str) -> str:
         return client_ip
 
 
-def in_ssh() -> bool:
-    """True when this process runs over an SSH session."""
-    return bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"))
-
-
 def clipboard_commands() -> list[list[str]]:
     """Pick clipboard CLIs available on this platform, in priority order."""
     system = platform.system()
