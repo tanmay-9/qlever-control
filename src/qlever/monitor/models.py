@@ -125,6 +125,5 @@ class FilterState:
     def has_text_filter(self) -> bool:
         """Whether a filter needs the query text read from the log."""
         return (
-            self.client_ip_substr is not None
-            or self.sparql_substr is not None
+            self.client_ip_substr is not None or self.sparql_substr is not None
         )

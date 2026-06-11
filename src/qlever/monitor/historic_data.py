@@ -234,9 +234,7 @@ def filter_rows(
     if not filters.statuses and filters.min_duration_s is None:
         return queries
     return [
-        query
-        for query in queries
-        if passes_filter(query, filters, log_end_ms)
+        query for query in queries if passes_filter(query, filters, log_end_ms)
     ]
 
 

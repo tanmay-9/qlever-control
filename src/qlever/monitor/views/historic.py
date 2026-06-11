@@ -59,6 +59,7 @@ MODE_PHRASES = {
 
 SORT_COLUMNS = ["Started", "Duration", "Status"]
 
+
 def sort_key(column, log_end_ms):
     """Return the sort key over a LoggedQuery for the given column.
 
@@ -72,6 +73,7 @@ def sort_key(column, log_end_ms):
     if column == "Started":
         return lambda query: query.start_ms
     return lambda query: query.status
+
 
 # Each column's (descending, ascending) wording for the status line.
 SORT_PHRASES = {

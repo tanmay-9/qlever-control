@@ -13,7 +13,14 @@ from qlever.monitor.models import FilterState
 
 # Statuses offered in the filter, in display order: the terminal
 # statuses a completed query can carry, plus orphaned crash survivors.
-FILTER_STATUSES = ("ok", "failed", "timeout", "cancelled", "unknown", "orphaned")
+FILTER_STATUSES = (
+    "ok",
+    "failed",
+    "timeout",
+    "cancelled",
+    "unknown",
+    "orphaned",
+)
 
 
 class FilterModal(ModalScreen[FilterState | None]):
