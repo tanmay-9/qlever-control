@@ -12,15 +12,17 @@ from pathlib import Path
 from typing import NamedTuple
 
 from qlever.monitor.log_reader import (
+    CLIENT_IP_KEY,
     CompletedQuery,
+    extract_qid_ip_query,
     load_sparql_at,
     offset_for_ts,
     pair_start_end_events,
     scan_range,
+    slice_string_value,
 )
 from qlever.monitor.metrics import metrics_for_queries
 from qlever.monitor.models import (
-    ControlsState,
     FilterState,
     HistoricQueryRow,
     MetricsCounts,
@@ -62,8 +64,8 @@ def read_window(
     recovered. Pairs that lie entirely inside the pad are dropped, so
     the result holds only rows a mode predicate could keep. The query
     text is not read here; `load_query_details_for_rows` reads it for
-    the visible rows. Metrics are computed later, per mode, in
-    `render_window`.
+    the visible rows. Metrics are computed later, per mode, by
+    `window_metrics`.
 
     A still-open query is `"running"` only if its start is within
     `pad_ms` of `log_end_ms` and the log itself is fresh
@@ -149,28 +151,19 @@ def display_duration_ms(query: LoggedQuery, log_end_ms: int) -> int:
     return (query.end_ms or log_end_ms) - query.start_ms
 
 
-def render_window(
-    queries: list[LoggedQuery],
-    controls: ControlsState,
-    slow_threshold_ms: int,
-    log_end_ms: int,
-) -> tuple[list[HistoricQueryRow], MetricsCounts]:
-    """Map the scanned window into the rows and metrics the UI consumes.
+def materialize_rows(
+    queries: list[LoggedQuery], log_end_ms: int
+) -> list[HistoricQueryRow]:
+    """Build a text-empty HistoricQueryRow for each given query.
 
-    Runs `filter_queries` for the current mode and translates each
-    surviving `LoggedQuery` into a `HistoricQueryRow`. `duration_ms`
-    is measured against `log_end_ms` for still-running queries,
-    against the recorded `end_ms` for completed ones, and reported as
-    DURATION_UNKNOWN for crash orphans. The rows carry empty text;
-    `load_query_details_for_rows` fills it for the visible slice.
-    Metrics are computed over the completed queries in the selected
-    mode, so they match the rows on screen, and labelled with the
-    current window size.
+    Called for the capped visible slice only. `duration_ms` is
+    measured against `log_end_ms` for still-running queries, against
+    the recorded `end_ms` for completed ones, and reported as
+    DURATION_UNKNOWN for crash orphans. The `qid`, `client_ip`, and
+    SPARQL text are left empty; `load_query_details_for_rows` fills
+    them.
     """
-    selected = filter_queries(
-        queries, controls.mode, controls.start_ms, controls.end_ms
-    )
-    historic_rows = [
+    return [
         HistoricQueryRow(
             qid="",
             start_line_offset=query.start_line_offset,
@@ -180,9 +173,22 @@ def render_window(
             sparql="",
             client_ip="",
         )
-        for query in selected
+        for query in queries
     ]
-    completed = [
+
+
+def window_metrics(
+    selected: list[LoggedQuery], slow_threshold_ms: int, label: str
+) -> MetricsCounts:
+    """Tally metrics over the completed queries in the selected set.
+
+    The completed queries are fed to `metrics_for_queries` through a
+    generator, so no per-query list is retained. Running and orphaned
+    queries (`end_ms is None`) carry no real status and are excluded,
+    so the counts match the completed rows on screen. Labelled with
+    the current window size.
+    """
+    completed = (
         CompletedQuery(
             start_ms=query.start_ms,
             end_ms=query.end_ms,
@@ -192,43 +198,105 @@ def render_window(
         )
         for query in selected
         if query.end_ms is not None
-    ]
+    )
     snapshot = metrics_for_queries(completed, slow_threshold_ms)
-    metrics = MetricsCounts(label=controls.window_size, **snapshot._asdict())
-    return historic_rows, metrics
+    return MetricsCounts(label=label, **snapshot._asdict())
 
 
-def passes_filter(row: HistoricQueryRow, filters: FilterState) -> bool:
-    """Whether a rendered row survives the active filters.
+def passes_filter(
+    query: LoggedQuery,
+    filters: FilterState,
+    log_end_ms: int,
+) -> bool:
+    """Whether a query survives the status and duration filters.
 
     A status filter keeps only the listed statuses. A duration filter
-    keeps only rows at or above the minimum, which drops running and
-    orphaned rows since their duration is below any real threshold. A
-    client IP or SPARQL filter keeps only rows whose value contains
-    the text, ignoring case; these read the query text, so the screen
-    fills it for the whole window before filtering.
+    keeps only queries at or above the minimum, which drops running and
+    orphaned queries since their duration is below any real threshold.
+    Text filters (client IP, SPARQL) need the start line and are
+    applied separately by `filter_by_text`.
     """
-    if filters.statuses and row.status not in filters.statuses:
+    if filters.statuses and query.status not in filters.statuses:
         return False
     if filters.min_duration_s is not None:
-        if row.duration_ms < filters.min_duration_s * 1000:
-            return False
-    if filters.client_ip_substr is not None:
-        if filters.client_ip_substr.lower() not in row.client_ip.lower():
-            return False
-    if filters.sparql_substr is not None:
-        if filters.sparql_substr.lower() not in row.sparql.lower():
+        duration_ms = display_duration_ms(query, log_end_ms)
+        if duration_ms < filters.min_duration_s * 1000:
             return False
     return True
 
 
 def filter_rows(
-    rows: list[HistoricQueryRow], filters: FilterState
-) -> list[HistoricQueryRow]:
-    """Keep the rows passing the filters; the same list when none are set."""
-    if filters.is_empty():
-        return rows
-    return [row for row in rows if passes_filter(row, filters)]
+    queries: list[LoggedQuery],
+    filters: FilterState,
+    log_end_ms: int,
+) -> list[LoggedQuery]:
+    """Keep the queries passing status/duration; same list when neither set."""
+    if not filters.statuses and filters.min_duration_s is None:
+        return queries
+    return [
+        query
+        for query in queries
+        if passes_filter(query, filters, log_end_ms)
+    ]
+
+
+def filter_by_text(
+    log_path: Path,
+    queries: list[LoggedQuery],
+    filters: FilterState,
+) -> list[LoggedQuery]:
+    """Keep queries whose start-line text passes the text filters.
+
+    Reads each surviving start line in ascending offset order and runs
+    the case-insensitive substring tests, retaining no text. The client
+    IP is sliced from the line bytes (IPs never escape), so only a
+    SPARQL filter decodes the line, and only for IP-test survivors.
+    Returns the same list when no text filter is set.
+    """
+    if not filters.has_text_filter():
+        return queries
+    ordered = sorted(queries, key=lambda query: query.start_line_offset)
+    kept = []
+    with log_path.open("rb") as log_stream:
+        for query in ordered:
+            log_stream.seek(query.start_line_offset)
+            line = log_stream.readline()
+            if filters.client_ip_substr is not None:
+                client_ip = slice_string_value(line, CLIENT_IP_KEY) or ""
+                if filters.client_ip_substr.lower() not in client_ip.lower():
+                    continue
+            if filters.sparql_substr is not None:
+                _, _, sparql = extract_qid_ip_query(line)
+                if filters.sparql_substr.lower() not in sparql.lower():
+                    continue
+            kept.append(query)
+    return kept
+
+
+def load_query_details(
+    log_path: Path,
+    offsets: list[int],
+    query_details_cache: dict[int, tuple[str, str, str]],
+) -> None:
+    """Fill the details cache for any of the given start-line offsets.
+
+    The `qid`, `client_ip`, and SPARQL text live on each query's start
+    line, which `read_window` did not read. Offsets already cached are
+    reused; the rest are read in one pass, opening the file only when
+    something is missing. The cache is scoped to one window so a sort
+    or mode change repaints from memory. Used for the visible slice and,
+    under a text filter, for the whole window so `passes_filter` can
+    read each query's text by offset.
+    """
+    missing = [
+        offset for offset in offsets if offset not in query_details_cache
+    ]
+    if missing:
+        with log_path.open("rb") as log_stream:
+            for offset in missing:
+                query_details_cache[offset] = load_sparql_at(
+                    log_stream, offset
+                )
 
 
 def load_query_details_for_rows(
@@ -238,24 +306,15 @@ def load_query_details_for_rows(
 ) -> list[HistoricQueryRow]:
     """Fill the deferred start-line fields on the given rows.
 
-    Each row's `qid`, `client_ip`, and SPARQL text live on its start
-    line, which `read_window` did not read. Offsets already in
-    `query_details_cache` are reused; the rest are read in one pass,
-    opening the file only when something is missing. The cache is
-    scoped to one window so a sort or mode change repaints from memory.
-    Returns filled copies; the input rows are left unchanged.
+    Reads each row's start line through `load_query_details`, reusing
+    the cache, and returns filled copies; the input rows are left
+    unchanged.
     """
-    missing = [
-        row.start_line_offset
-        for row in rows
-        if row.start_line_offset not in query_details_cache
-    ]
-    if missing:
-        with log_path.open("rb") as log_stream:
-            for offset in missing:
-                query_details_cache[offset] = load_sparql_at(
-                    log_stream, offset
-                )
+    load_query_details(
+        log_path,
+        [row.start_line_offset for row in rows],
+        query_details_cache,
+    )
     filled_rows = []
     for row in rows:
         qid, client_ip, sparql = query_details_cache[row.start_line_offset]

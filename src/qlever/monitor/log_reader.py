@@ -7,6 +7,7 @@ from typing import BinaryIO, NamedTuple
 TS_PREFIX = b'{"ts-ms":'
 EVENT_KEY = b'"event":"'
 QID_KEY = b'"qid":"'
+CLIENT_IP_KEY = b'"client-ip":"'
 STATUS_KEY = b'"status":"'
 
 STATUS_SET = frozenset({"ok", "failed", "cancelled", "timeout", "unknown"})

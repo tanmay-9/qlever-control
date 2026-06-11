@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import heapq
+
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
@@ -8,10 +10,14 @@ from textual.screen import Screen
 from textual.widgets import Footer, Static
 
 from qlever.monitor.historic_data import (
+    display_duration_ms,
+    filter_by_text,
+    filter_queries,
     filter_rows,
     load_query_details_for_rows,
+    materialize_rows,
     read_window,
-    render_window,
+    window_metrics,
 )
 from qlever.monitor.live_data import current_ms
 from qlever.monitor.metrics import EMPTY_FIELDS
@@ -53,11 +59,19 @@ MODE_PHRASES = {
 
 SORT_COLUMNS = ["Started", "Duration", "Status"]
 
-SORT_KEYS = {
-    "Started": lambda row: row.started_at_ms,
-    "Duration": lambda row: row.duration_ms,
-    "Status": lambda row: row.status,
-}
+def sort_key(column, log_end_ms):
+    """Return the sort key over a LoggedQuery for the given column.
+
+    Duration measures against `log_end_ms` for running queries and
+    reports DURATION_UNKNOWN for orphans, so they sort below any real
+    duration; Started keys on the start timestamp and Status on the
+    raw status word.
+    """
+    if column == "Duration":
+        return lambda query: display_duration_ms(query, log_end_ms)
+    if column == "Started":
+        return lambda query: query.start_ms
+    return lambda query: query.status
 
 # Each column's (descending, ascending) wording for the status line.
 SORT_PHRASES = {
@@ -153,6 +167,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.all_rows = []
         self.window_total = 0
         self.query_details_cache = {}
+        # mode -> (selected LoggedQuery list, metrics), cleared on rescan
+        self.render_cache = {}
         self.rescan_timer = None
         self.cached_window = None
         controls = ControlsState(
@@ -259,11 +275,13 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Scan and/or re-filter the window, push rows + metrics + status.
 
         On `rescan` the log is read into a fresh list of window queries
-        cached on the screen and the query-details cache is emptied,
-        since a new window is a new set of queries. Render always runs,
-        so a mode change pays only an in-memory filter. The visible
-        rows' text is read here, off the UI thread, reusing the cache
-        across sorts and mode changes within the window.
+        cached on the screen and the details and render caches are
+        emptied, since a new window is a new set of queries. The mode's
+        subset and its metrics are cached per mode, so sort and
+        cheap-filter actions reuse them and a repeat mode pays nothing.
+        Only the capped visible slice is materialized into rows and has
+        its text read, off the UI thread; a text filter reads the
+        surviving start lines in one streaming pass that retains nothing.
         """
         if rescan:
             self.window_queries = read_window(
@@ -275,35 +293,29 @@ class HistoricScreen(Screen, inherit_bindings=False):
                 current_ms(),
             )
             self.query_details_cache = {}
+            self.render_cache = {}
             self.cached_window = (self.window_start_ms, self.window_end_ms)
-        controls = ControlsState(
-            window_size=self.window_size,
-            mode=self.mode,
-            start_ms=self.window_start_ms,
-            end_ms=self.window_end_ms,
-        )
-        rows, metrics = render_window(
-            self.window_queries,
-            controls,
-            self.app.slow_threshold * 1000,
-            self.log_end_ms,
-        )
-        self.window_total = len(rows)
-        if self.filters.has_text_filter():
-            # Text filters need the query text, so read the whole window;
-            # the survivors are then already filled.
-            rows = load_query_details_for_rows(
-                self.app.log_file, rows, self.query_details_cache
-            )
-            self.all_rows = filter_rows(rows, self.filters)
-            visible_rows = self.visible_rows()
+        if self.mode in self.render_cache:
+            selected, metrics = self.render_cache[self.mode]
         else:
-            self.all_rows = filter_rows(rows, self.filters)
-            visible_rows = load_query_details_for_rows(
-                self.app.log_file,
-                self.visible_rows(),
-                self.query_details_cache,
+            selected = filter_queries(
+                self.window_queries,
+                self.mode,
+                self.window_start_ms,
+                self.window_end_ms,
             )
+            metrics = window_metrics(
+                selected, self.app.slow_threshold * 1000, self.window_size
+            )
+            self.render_cache[self.mode] = (selected, metrics)
+        self.window_total = len(selected)
+        # Status and duration filter in memory; text filters then read
+        # the surviving start lines in one streaming pass.
+        narrowed = filter_rows(selected, self.filters, self.log_end_ms)
+        self.all_rows = filter_by_text(
+            self.app.log_file, narrowed, self.filters
+        )
+        visible_rows = self.visible_rows()
         self.app.call_from_thread(
             self.apply_window_result, visible_rows, metrics
         )
@@ -321,19 +333,35 @@ class HistoricScreen(Screen, inherit_bindings=False):
         )
         self.refresh_sort_indicator()
 
-    def sorted_rows(
-        self, rows: list[HistoricQueryRow]
-    ) -> list[HistoricQueryRow]:
-        """Order rows by the active sort column and direction."""
-        return sorted(
-            rows,
-            key=SORT_KEYS[self.sort_column],
-            reverse=self.sort_reverse,
-        )
+    @work(thread=True, exclusive=True, group="refresh_data")
+    def refresh_visible(self) -> None:
+        """Rebuild the visible rows from the already-filtered list.
+
+        A sort changes the row order, not which queries match, so it
+        reuses the filtered rows and the cached metrics instead of
+        re-filtering and re-reading the log.
+        """
+        _, metrics = self.render_cache[self.mode]
+        visible = self.visible_rows()
+        self.app.call_from_thread(self.apply_window_result, visible, metrics)
 
     def visible_rows(self) -> list[HistoricQueryRow]:
-        """The sorted window capped to the rows the table will paint."""
-        return self.sorted_rows(self.all_rows)[:MAX_VISIBLE_ROWS]
+        """Materialize the capped top queries by the active sort, with text.
+
+        Caps the filtered LoggedQuery list to what the table paints,
+        builds a row per survivor, and reads the text for that slice
+        only, reusing the per-window cache.
+        """
+        select_top = heapq.nlargest if self.sort_reverse else heapq.nsmallest
+        visible = select_top(
+            MAX_VISIBLE_ROWS,
+            self.all_rows,
+            key=sort_key(self.sort_column, self.log_end_ms),
+        )
+        rows = materialize_rows(visible, self.log_end_ms)
+        return load_query_details_for_rows(
+            self.app.log_file, rows, self.query_details_cache
+        )
 
     def sort_phrase(self) -> str:
         """Describe the active sort and direction for the status line."""
@@ -414,7 +442,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.sort_column = SORT_COLUMNS[
             (index + direction) % len(SORT_COLUMNS)
         ]
-        self.refresh_data(rescan=False)
+        self.refresh_visible()
 
     def action_sort_next_column(self) -> None:
         """Sort by the next column (wraps)."""
@@ -427,7 +455,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def action_invert_sort(self) -> None:
         """Flip the sort direction."""
         self.sort_reverse = not self.sort_reverse
-        self.refresh_data(rescan=False)
+        self.refresh_visible()
 
     def action_edit_filter(self) -> None:
         """Open the filter modal and apply its result to the table."""
@@ -537,7 +565,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.sort_reverse = not self.sort_reverse
         else:
             self.sort_column = column
-        self.refresh_data(rescan=False)
+        self.refresh_visible()
 
     def on_data_table_row_selected(
         self, message: HistoricQueryTable.RowSelected

@@ -1,25 +1,27 @@
-"""Tests for read_window, filter_queries, render_window, and detail loading."""
+"""Tests for read_window, filtering, metrics, and detail loading."""
 
 from qlever.monitor.historic_data import (
     DURATION_UNKNOWN,
     LoggedQuery,
+    filter_by_text,
     filter_queries,
     filter_rows,
     load_query_details_for_rows,
+    materialize_rows,
     passes_filter,
     read_window,
-    render_window,
+    window_metrics,
 )
-from qlever.monitor.models import ControlsState, FilterState, HistoricQueryRow
+from qlever.monitor.models import FilterState, HistoricQueryRow
 
 PAD_MS = 10_000
 SLOW_MS = 60_000
 
 
-def start_line(ts_ms, qid, query="SELECT 1"):
+def start_line(ts_ms, qid, query="SELECT 1", client_ip="x"):
     return (
         f'{{"ts-ms":{ts_ms},"event":"start","qid":"{qid}",'
-        f'"client-ip":"x","query":"{query}"}}\n'
+        f'"client-ip":"{client_ip}","query":"{query}"}}\n'
     ).encode()
 
 
@@ -293,138 +295,95 @@ def test_filter_queries_ends_drops_ends_outside_window():
     assert ends == [500]
 
 
-def make_controls(mode="ACTIVE"):
-    return ControlsState(
-        window_size="15m",
-        mode=mode,
-        start_ms=1_000_000,
-        end_ms=2_000_000,
+def test_materialize_uses_recorded_end_for_completed_query():
+    [row] = materialize_rows([make_query(1_100_000, 1_150_000)], 2_500_000)
+    assert row.duration_ms == 50_000
+    assert row.status == "ok"
+
+
+def test_materialize_uses_log_end_for_running_query():
+    [row] = materialize_rows(
+        [make_query(1_100_000, None, status="running")], 2_500_000
     )
+    assert row.duration_ms == 1_400_000
+    assert row.status == "running"
 
 
-def test_render_window_uses_recorded_end_for_completed_query():
-    queries = [make_query(1_100_000, 1_150_000)]
-    rows, _ = render_window(
-        queries, make_controls(), SLOW_MS, log_end_ms=2_500_000
+def test_materialize_marks_orphan_duration_as_unknown():
+    [row] = materialize_rows(
+        [make_query(1_100_000, None, status="orphaned")], 2_500_000
     )
-    assert rows[0].duration_ms == 50_000
-    assert rows[0].status == "ok"
+    assert row.duration_ms == DURATION_UNKNOWN
+    assert row.status == "orphaned"
 
 
-def test_render_window_uses_log_end_for_running_query():
-    queries = [make_query(1_100_000, None, status="running")]
-    rows, _ = render_window(
-        queries, make_controls(), SLOW_MS, log_end_ms=2_500_000
+def test_materialize_carries_start_line_offset_onto_row():
+    [row] = materialize_rows(
+        [make_query(1_100_000, 1_200_000, start_line_offset=512)], 2_500_000
     )
-    assert rows[0].duration_ms == 1_400_000
-    assert rows[0].status == "running"
+    assert row.start_line_offset == 512
 
 
-def test_render_window_marks_orphan_duration_as_unknown():
-    queries = [make_query(1_100_000, None, status="orphaned")]
-    rows, _ = render_window(
-        queries, make_controls(), SLOW_MS, log_end_ms=2_500_000
-    )
-    assert rows[0].duration_ms == DURATION_UNKNOWN
-    assert rows[0].status == "orphaned"
+def test_materialize_leaves_text_empty():
+    [row] = materialize_rows([make_query(1_100_000, 1_200_000)], 2_500_000)
+    assert (row.qid, row.sparql, row.client_ip) == ("", "", "")
 
 
-def test_render_window_passes_window_size_as_metric_label():
+def test_materialize_after_mode_filter_keeps_only_mode_subset():
+    queries = [
+        make_query(1_100_000, 1_200_000),
+        make_query(1_500_000, None, status="running"),
+    ]
+    selected = filter_queries(queries, "ENDS", 1_000_000, 2_000_000)
+    rows = materialize_rows(selected, 2_500_000)
+    assert [row.started_at_ms for row in rows] == [1_100_000]
+
+
+def test_window_metrics_passes_window_size_as_label():
     queries = [make_query(100 + index, 200 + index) for index in range(7)]
-    controls = ControlsState(
-        window_size="1h",
-        mode="ACTIVE",
-        start_ms=0,
-        end_ms=1_000_000,
-    )
-    _, metrics = render_window(
-        queries, controls, SLOW_MS, log_end_ms=1_000_000
-    )
+    metrics = window_metrics(queries, SLOW_MS, "1h")
     assert metrics.label == "1h"
     assert metrics.seen == 7
     assert metrics.ok == 7
 
 
-def test_render_window_carries_start_line_offset_onto_row():
-    queries = [make_query(1_100_000, 1_200_000, start_line_offset=512)]
-    rows, _ = render_window(
-        queries, make_controls(), SLOW_MS, log_end_ms=2_500_000
-    )
-    assert rows[0].start_line_offset == 512
-
-
-def test_render_window_leaves_text_empty():
-    queries = [make_query(1_100_000, 1_200_000)]
-    rows, _ = render_window(
-        queries, make_controls(), SLOW_MS, log_end_ms=2_500_000
-    )
-    assert rows[0].qid == ""
-    assert rows[0].sparql == ""
-    assert rows[0].client_ip == ""
-
-
-def test_render_window_respects_mode_filter():
-    queries = [
-        make_query(1_100_000, 1_200_000),
-        make_query(1_500_000, None, status="running"),
-    ]
-    rows, _ = render_window(
-        queries, make_controls(mode="ENDS"), SLOW_MS, log_end_ms=2_500_000
-    )
-    assert [row.started_at_ms for row in rows] == [1_100_000]
-
-
-# Queries used by the mode-aware metric tests. A is fully inside the
-# window, B starts inside but ends after it, C starts before but ends
-# inside. So the metric count must change with the selected mode.
-def mode_metric_queries():
-    return [
-        make_query(1_100_000, 1_900_000),
-        make_query(1_500_000, 2_200_000),
-        make_query(800_000, 1_300_000),
-    ]
-
-
-def test_render_window_metrics_active_counts_all_overlapping():
-    _, metrics = render_window(
-        mode_metric_queries(),
-        make_controls("ACTIVE"),
-        SLOW_MS,
-        log_end_ms=2_200_000,
-    )
-    assert metrics.seen == 3
-
-
-def test_render_window_metrics_starts_counts_started_in_window():
-    _, metrics = render_window(
-        mode_metric_queries(),
-        make_controls("STARTS"),
-        SLOW_MS,
-        log_end_ms=2_200_000,
-    )
-    assert metrics.seen == 2
-
-
-def test_render_window_metrics_ends_counts_ended_in_window():
-    _, metrics = render_window(
-        mode_metric_queries(),
-        make_controls("ENDS"),
-        SLOW_MS,
-        log_end_ms=2_200_000,
-    )
-    assert metrics.seen == 2
-
-
-def test_render_window_metrics_exclude_running_and_orphaned():
+def test_window_metrics_exclude_running_and_orphaned():
     queries = [
         make_query(1_100_000, 1_900_000),
         make_query(1_500_000, None, status="running"),
         make_query(1_200_000, None, status="orphaned"),
     ]
-    _, metrics = render_window(
-        queries, make_controls("ACTIVE"), SLOW_MS, log_end_ms=2_500_000
-    )
+    metrics = window_metrics(queries, SLOW_MS, "15m")
     assert metrics.seen == 1
+
+
+# A is fully inside the window, B starts inside but ends after it, C
+# starts before but ends inside, so the metric count changes with mode.
+WINDOW_START_MS = 1_000_000
+WINDOW_END_MS = 2_000_000
+
+
+def metrics_for_mode(mode):
+    """Metrics over the mode's subset of a fixed three-query window."""
+    queries = [
+        make_query(1_100_000, 1_900_000),
+        make_query(1_500_000, 2_200_000),
+        make_query(800_000, 1_300_000),
+    ]
+    selected = filter_queries(queries, mode, WINDOW_START_MS, WINDOW_END_MS)
+    return window_metrics(selected, SLOW_MS, mode)
+
+
+def test_metrics_active_counts_all_overlapping():
+    assert metrics_for_mode("ACTIVE").seen == 3
+
+
+def test_metrics_starts_counts_started_in_window():
+    assert metrics_for_mode("STARTS").seen == 2
+
+
+def test_metrics_ends_counts_ended_in_window():
+    assert metrics_for_mode("ENDS").seen == 2
 
 
 def make_row(start_line_offset):
@@ -462,102 +421,154 @@ def test_load_query_details_reuses_cache_without_reading(write_log):
     assert filled.sparql == "CACHED"
 
 
-def filter_row(status="ok", duration_ms=5_000, client_ip="", sparql=""):
-    return HistoricQueryRow(
-        qid="",
-        start_line_offset=0,
-        started_at_ms=1_000_000,
-        duration_ms=duration_ms,
+FILTER_LOG_END_MS = 2_000_000
+
+
+def filter_query(status="ok", duration_ms=5_000, start_line_offset=0):
+    """Completed LoggedQuery whose display_duration_ms equals duration_ms."""
+    start_ms = 1_000_000
+    return LoggedQuery(
+        start_ms=start_ms,
+        end_ms=start_ms + duration_ms,
         status=status,
-        sparql=sparql,
-        client_ip=client_ip,
+        start_line_offset=start_line_offset,
     )
 
 
+def passes(query, filters):
+    """Run passes_filter against the fixed log end."""
+    return passes_filter(query, filters, FILTER_LOG_END_MS)
+
+
 def test_passes_filter_empty_keeps_every_row():
-    assert passes_filter(filter_row(status="failed"), FilterState())
+    assert passes(filter_query(status="failed"), FilterState())
 
 
 def test_passes_filter_status_keeps_listed_status():
     filters = FilterState(statuses=frozenset({"ok", "failed"}))
-    assert passes_filter(filter_row(status="ok"), filters)
-    assert passes_filter(filter_row(status="failed"), filters)
+    assert passes(filter_query(status="ok"), filters)
+    assert passes(filter_query(status="failed"), filters)
 
 
 def test_passes_filter_status_drops_unlisted_status():
     filters = FilterState(statuses=frozenset({"ok"}))
-    assert not passes_filter(filter_row(status="timeout"), filters)
+    assert not passes(filter_query(status="timeout"), filters)
 
 
 def test_passes_filter_duration_keeps_at_or_above_minimum():
     filters = FilterState(min_duration_s=5)
-    assert passes_filter(filter_row(duration_ms=5_000), filters)
-    assert passes_filter(filter_row(duration_ms=9_000), filters)
+    assert passes(filter_query(duration_ms=5_000), filters)
+    assert passes(filter_query(duration_ms=9_000), filters)
 
 
 def test_passes_filter_duration_drops_below_minimum():
     filters = FilterState(min_duration_s=5)
-    assert not passes_filter(filter_row(duration_ms=4_999), filters)
+    assert not passes(filter_query(duration_ms=4_999), filters)
 
 
 def test_passes_filter_duration_drops_orphan_rows():
     filters = FilterState(min_duration_s=1)
-    assert not passes_filter(filter_row(duration_ms=DURATION_UNKNOWN), filters)
+    orphan = LoggedQuery(
+        start_ms=1_000_000,
+        end_ms=None,
+        status="orphaned",
+        start_line_offset=0,
+    )
+    assert not passes(orphan, filters)
 
 
 def test_passes_filter_combines_status_and_duration():
     filters = FilterState(statuses=frozenset({"ok"}), min_duration_s=5)
-    assert passes_filter(filter_row(status="ok", duration_ms=6_000), filters)
-    assert not passes_filter(
-        filter_row(status="ok", duration_ms=1_000), filters
-    )
-    assert not passes_filter(
-        filter_row(status="failed", duration_ms=6_000), filters
+    assert passes(filter_query(status="ok", duration_ms=6_000), filters)
+    assert not passes(filter_query(status="ok", duration_ms=1_000), filters)
+    assert not passes(
+        filter_query(status="failed", duration_ms=6_000), filters
     )
 
 
 def test_filter_rows_empty_returns_same_list():
-    rows = [filter_row(status="ok"), filter_row(status="failed")]
-    assert filter_rows(rows, FilterState()) is rows
+    queries = [filter_query(status="ok"), filter_query(status="failed")]
+    result = filter_rows(queries, FilterState(), FILTER_LOG_END_MS)
+    assert result is queries
+
+
+def test_filter_rows_text_only_filter_returns_same_list():
+    queries = [filter_query(status="ok"), filter_query(status="failed")]
+    filters = FilterState(sparql_substr="select")
+    result = filter_rows(queries, filters, FILTER_LOG_END_MS)
+    assert result is queries
 
 
 def test_filter_rows_keeps_only_matching():
-    rows = [
-        filter_row(status="ok", duration_ms=6_000),
-        filter_row(status="failed", duration_ms=6_000),
-        filter_row(status="ok", duration_ms=1_000),
+    queries = [
+        filter_query(status="ok", duration_ms=6_000),
+        filter_query(status="failed", duration_ms=6_000),
+        filter_query(status="ok", duration_ms=1_000),
     ]
     filters = FilterState(statuses=frozenset({"ok"}), min_duration_s=5)
-    assert filter_rows(rows, filters) == [rows[0]]
+    assert filter_rows(queries, filters, FILTER_LOG_END_MS) == [queries[0]]
 
 
-def test_passes_filter_client_ip_matches_substring_ignoring_case():
+def text_log(write_log, entries):
+    """Write a start line per (qid, query, client_ip) entry.
+
+    Returns the log path and a LoggedQuery per entry pointing at its
+    start-line offset, so filter_by_text can read each line's text.
+    """
+    payload = b""
+    queries = []
+    ts_ms = 1_000_000
+    for qid, query, client_ip in entries:
+        offset = len(payload)
+        payload += start_line(ts_ms, qid, query, client_ip)
+        queries.append(
+            LoggedQuery(
+                start_ms=ts_ms,
+                end_ms=ts_ms + 1_000,
+                status="ok",
+                start_line_offset=offset,
+            )
+        )
+        ts_ms += 1_000
+    return write_log(payload), queries
+
+
+def test_filter_by_text_no_filter_returns_same_list(write_log):
+    path, queries = text_log(write_log, [("q1", "SELECT a", "x")])
+    assert filter_by_text(path, queries, FilterState()) is queries
+
+
+def test_filter_by_text_client_ip_matches_substring_ignoring_case(write_log):
+    path, queries = text_log(
+        write_log,
+        [("q1", "SELECT a", "192.168.0.7"), ("q2", "SELECT b", "10.0.0.1")],
+    )
     filters = FilterState(client_ip_substr="192.168")
-    assert passes_filter(filter_row(client_ip="192.168.0.7"), filters)
-    assert not passes_filter(filter_row(client_ip="10.0.0.1"), filters)
+    assert filter_by_text(path, queries, filters) == [queries[0]]
 
 
-def test_passes_filter_client_ip_is_case_insensitive():
-    filters = FilterState(client_ip_substr="ABCD")
-    assert passes_filter(filter_row(client_ip="fe80::abcd"), filters)
+def test_filter_by_text_client_ip_is_case_insensitive(write_log):
+    path, queries = text_log(write_log, [("q1", "SELECT a", "fe80::ABCD")])
+    filters = FilterState(client_ip_substr="abcd")
+    assert filter_by_text(path, queries, filters) == [queries[0]]
 
 
-def test_passes_filter_sparql_matches_substring_ignoring_case():
+def test_filter_by_text_sparql_matches_substring_ignoring_case(write_log):
+    path, queries = text_log(
+        write_log, [("q1", "SELECT a", "x"), ("q2", "ASK b", "x")]
+    )
     filters = FilterState(sparql_substr="select")
-    assert passes_filter(filter_row(sparql="SELECT * WHERE {}"), filters)
-    assert not passes_filter(filter_row(sparql="ASK {}"), filters)
+    assert filter_by_text(path, queries, filters) == [queries[0]]
 
 
-def test_passes_filter_combines_text_with_status():
-    filters = FilterState(
-        statuses=frozenset({"ok"}), sparql_substr="select"
+def test_filter_by_text_combines_client_ip_and_sparql(write_log):
+    path, queries = text_log(
+        write_log,
+        [
+            ("q1", "SELECT a", "192.168.0.7"),
+            ("q2", "SELECT b", "10.0.0.1"),
+            ("q3", "ASK c", "192.168.0.9"),
+        ],
     )
-    assert passes_filter(
-        filter_row(status="ok", sparql="SELECT *"), filters
-    )
-    assert not passes_filter(
-        filter_row(status="failed", sparql="SELECT *"), filters
-    )
-    assert not passes_filter(
-        filter_row(status="ok", sparql="ASK {}"), filters
-    )
+    filters = FilterState(client_ip_substr="192.168", sparql_substr="select")
+    assert filter_by_text(path, queries, filters) == [queries[0]]
