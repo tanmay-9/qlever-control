@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import shlex
 import unittest
+from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 from qlever.commands.index import IndexCommand
 
 
+@contextmanager
+def fake_resource_monitor(**kwargs):
+    """Stand-in for ResourceMonitor that records no samples."""
+    yield SimpleNamespace(peak_rss=0)
+
+
 # Test execute of index command for basic case with successful execution
 class TestIndexCommand(unittest.TestCase):
-    @patch("qlever.commands.index.ResourceMonitor")
+    @patch("qlever.commands.index.ResourceMonitor", new=fake_resource_monitor)
     @patch("qlever.util.run_command")
     @patch("qlever.commands.index.run_command")
     @patch("qlever.commands.index.Containerize")
@@ -24,7 +32,6 @@ class TestIndexCommand(unittest.TestCase):
         mock_containerize,
         mock_index_run_command,
         mock_util_run_command,
-        mock_resource_monitor,
     ):
         # Setup args
         args = MagicMock()
@@ -226,7 +233,7 @@ class TestIndexCommand(unittest.TestCase):
         mock_run_command.assert_called_once_with(f"{args.index_binary} --help")
 
     # Test execute for file size > 10gb
-    @patch("qlever.commands.index.ResourceMonitor")
+    @patch("qlever.commands.index.ResourceMonitor", new=fake_resource_monitor)
     @patch("qlever.util.run_command")
     @patch("qlever.commands.index.run_command")
     @patch("qlever.commands.index.Containerize")
@@ -241,7 +248,6 @@ class TestIndexCommand(unittest.TestCase):
         mock_containerize,
         mock_index_run_command,
         mock_util_run_command,
-        mock_resource_monitor,
     ):
         # Setup args
         args = MagicMock()
