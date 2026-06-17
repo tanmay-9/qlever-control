@@ -80,8 +80,11 @@ def run_command(
     # generic message (which is also what `subprocess.run` does with
     # `check=True`).
     if result.returncode != 0:
-        if len(result.stderr) > 0:
-            raise Exception(result.stderr.replace("\n", " ").strip())
+        # `result.stderr` is `None` when stderr was not captured (i.e., when
+        # `show_stderr` is `True` and it went straight to the terminal).
+        stderr = result.stderr or ""
+        if len(stderr) > 0:
+            raise Exception(stderr.replace("\n", " ").strip())
         else:
             raise Exception(
                 f"Command failed with exit code {result.returncode}, "
