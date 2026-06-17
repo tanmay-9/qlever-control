@@ -1,6 +1,6 @@
 import pytest
 
-from qlever.resource_monitor import (
+from qlever.resource_usage.resource_monitor import (
     Sample,
     sample_to_tsv_row,
 )

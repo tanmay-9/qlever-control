@@ -155,8 +155,10 @@ class ResourceMonitor:
 
     def __enter__(self):
         """Open the TSV log, write the header, start sampling thread."""
-        path = self.output_dir / f"{self.dataset}.resource-usage-log.tsv"
-        self.log_file = open(path, "w")
+        self.log_path = (
+            self.output_dir / f"{self.dataset}.resource-usage-log.tsv"
+        )
+        self.log_file = open(self.log_path, "w")
         header = "\t".join(f.name for f in fields(Sample)) + "\n"
         self.log_file.write(header)
         self.log_file.flush()
@@ -166,10 +168,11 @@ class ResourceMonitor:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Stop sampling, close the log, log peak RSS."""
+        """Stop sampling, close the log, report where it was saved."""
         self.stop_event.set()
         self.thread.join()
         self.log_file.close()
         if self.peak_rss > 0:
-            log.info(f"Peak memory: RSS {format_size(self.peak_rss)}")
+            log.info(f"Resource-usage log saved to {self.log_path}")
+            log.info(f"Peak memory RSS {format_size(self.peak_rss)}")
         return False

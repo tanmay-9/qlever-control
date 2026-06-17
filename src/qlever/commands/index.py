@@ -9,7 +9,7 @@ from pathlib import Path
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.resource_monitor import ResourceMonitor
+from qlever.resource_usage.resource_monitor import ResourceMonitor
 from qlever.util import (
     binary_exists,
     get_existing_index_files,
@@ -24,20 +24,29 @@ def render_usage_plot(
     stxxl_memory: str,
     settings_json: str,
     plot_max_points: int,
+    plot_only: bool,
 ) -> Path | None:
-    """Render the resource-usage plot, warning if plotting libs are missing."""
+    """Render the resource-usage plot.
+
+    When the plotting libraries are missing, this is an error if the
+    user asked for the plot directly via `plot_only`, otherwise it notes
+    how to get the plot at info level since the index build succeeded.
+    """
     try:
-        from qlever import usage_plot
+        from qlever.resource_usage import usage_plot
     except ImportError:
-        log.warning(
-            "Resource-usage plot skipped: it needs matplotlib and numpy. "
-            "Install the plot extra, e.g. `pip install qlever[plot]`."
-        )
-        log.warning(
-            "After installing the dependencies, no index rebuild is needed: "
-            "rerun `qlever index --resource-usage-plot-only` to plot from the "
-            "existing resource-usage log."
-        )
+        if plot_only:
+            log.error(
+                "Resource-usage plot needs matplotlib and numpy "
+                "(pip: `pip install qlever[plot]`). Install them and "
+                "rerun."
+            )
+        else:
+            log.info(
+                "To plot the resource-usage log, install matplotlib and "
+                "numpy (pip: `pip install qlever[plot]`), then run "
+                "`qlever index --resource-usage-plot-only`."
+            )
         return None
     return usage_plot.render_usage_plot(
         dataset,
@@ -230,6 +239,7 @@ class IndexCommand(QleverCommand):
                 stxxl_memory=args.stxxl_memory or "",
                 settings_json=args.settings_json,
                 plot_max_points=args.resource_usage_plot_max_points,
+                plot_only=True,
             )
             if plot_path is None:
                 return False
@@ -394,6 +404,7 @@ class IndexCommand(QleverCommand):
             stxxl_memory=args.stxxl_memory or "",
             settings_json=args.settings_json,
             plot_max_points=args.resource_usage_plot_max_points,
+            plot_only=False,
         )
         if plot_path is not None:
             log.info(f"Resource-usage plot saved to {plot_path}")

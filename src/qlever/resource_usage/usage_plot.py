@@ -160,7 +160,6 @@ def compute_phase_boundaries(
     return phases
 
 
-
 def build_plot_subtitle(
     log_path: Path, stxxl_memory: str, settings_json: str
 ) -> str | None:
