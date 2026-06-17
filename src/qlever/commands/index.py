@@ -393,20 +393,21 @@ class IndexCommand(QleverCommand):
                 container=args.index_container,
                 system=args.system,
                 interval=args.resource_usage_interval,
-            ):
+            ) as monitor:
                 run_command(index_cmd, show_output=True)
         except Exception as e:
             log.error(f"Building the index failed: {e}")
             return False
 
-        plot_path = render_usage_plot(
-            args.name,
-            stxxl_memory=args.stxxl_memory or "",
-            settings_json=args.settings_json,
-            plot_max_points=args.resource_usage_plot_max_points,
-            plot_only=False,
-        )
-        if plot_path is not None:
-            log.info(f"Resource-usage plot saved to {plot_path}")
+        if monitor.peak_rss > 0:
+            plot_path = render_usage_plot(
+                args.name,
+                stxxl_memory=args.stxxl_memory or "",
+                settings_json=args.settings_json,
+                plot_max_points=args.resource_usage_plot_max_points,
+                plot_only=False,
+            )
+            if plot_path is not None:
+                log.info(f"Resource-usage plot saved to {plot_path}")
 
         return True

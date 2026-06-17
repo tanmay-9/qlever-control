@@ -175,4 +175,8 @@ class ResourceMonitor:
         if self.peak_rss > 0:
             log.info(f"Resource-usage log saved to {self.log_path}")
             log.info(f"Peak memory RSS {format_size(self.peak_rss)}")
+        else:
+            log.warning(
+                "Resource usage was not recorded (no samples collected)."
+            )
         return False
