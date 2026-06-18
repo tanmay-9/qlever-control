@@ -46,6 +46,8 @@ def construct_command(args) -> str:
         start_cmd += " --no-patterns"
     if args.use_text_index == "yes":
         start_cmd += " -t"
+    if args.metrics_log == "no":
+        start_cmd += " --no-metrics-log"
     preload_materialized_views = vars(args).get("preload_materialized_views")
     if preload_materialized_views:
         start_cmd += " --preload-materialized-views"
@@ -156,6 +158,7 @@ class StartCommand(QleverCommand):
                 "only_pso_and_pos_permutations",
                 "use_patterns",
                 "use_text_index",
+                "metrics_log",
                 "preload_materialized_views",
                 "warmup_cmd",
             ],
