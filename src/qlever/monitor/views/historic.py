@@ -8,6 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Footer, Static
+from textual.worker import get_current_worker
 
 from qlever.monitor.historic_data import (
     display_duration_ms,
@@ -289,15 +290,21 @@ class HistoricScreen(Screen, inherit_bindings=False):
         its text read, off the UI thread; a text filter reads the
         surviving start lines in one streaming pass that retains nothing.
         """
+        worker = get_current_worker()
         if rescan:
-            self.window_queries = read_window(
+            window_queries = read_window(
                 self.app.log_file,
                 self.window_start_ms,
                 self.window_end_ms,
                 self.app.window_pad_ms,
                 self.log_end_ms,
                 current_ms(),
+                should_cancel=lambda: worker.is_cancelled,
             )
+            # A cancelled scan returns partial; drop it instead of committing.
+            if worker.is_cancelled:
+                return
+            self.window_queries = window_queries
             self.query_details_cache = {}
             self.render_cache = {}
             self.cached_window = (self.window_start_ms, self.window_end_ms)
@@ -322,6 +329,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.app.log_file, narrowed, self.filters
         )
         visible_rows = self.visible_rows()
+        if worker.is_cancelled:
+            return
         self.app.call_from_thread(
             self.apply_window_result, visible_rows, metrics
         )
@@ -349,6 +358,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """
         _, metrics = self.render_cache[self.mode]
         visible = self.visible_rows()
+        if get_current_worker().is_cancelled:
+            return
         self.app.call_from_thread(self.apply_window_result, visible, metrics)
 
     def visible_rows(self) -> list[HistoricQueryRow]:

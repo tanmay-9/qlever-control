@@ -7,6 +7,7 @@ mode at render time. A window change reruns the scan; a mode change
 reuses the scanned list.
 """
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
@@ -56,6 +57,7 @@ def read_window(
     pad_ms: int,
     log_end_ms: int,
     now_ms: int,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> list[LoggedQuery]:
     """Scan one time window of the log into the queries overlapping it.
 
@@ -77,7 +79,7 @@ def read_window(
             log_stream, window_start_ms - pad_ms, file_size
         )
         hi_bound = offset_for_ts(log_stream, window_end_ms + pad_ms, file_size)
-        events = scan_range(log_stream, lo_offset, hi_bound)
+        events = scan_range(log_stream, lo_offset, hi_bound, should_cancel)
         completed, still_open = pair_start_end_events(events)
 
         queries = []

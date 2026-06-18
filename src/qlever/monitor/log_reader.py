@@ -1,7 +1,7 @@
 """Pure primitives for reading the query metrics log"""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import BinaryIO, NamedTuple
 
 TS_PREFIX = b'{"ts-ms":'
@@ -210,6 +210,9 @@ def read_last_timestamp(log_stream: BinaryIO, file_size: int) -> int | None:
 
 GALLOP_START = 128 * 1024
 
+# Re-check should_cancel after this many scanned bytes.
+CANCEL_CHECK_BYTES = 8 * 1024 * 1024
+
 
 def offset_for_ts(log_stream: BinaryIO, target_ms: int, file_size: int) -> int:
     """Find where to start reading so a forward read sees every line
@@ -271,7 +274,10 @@ def offset_for_ts(log_stream: BinaryIO, target_ms: int, file_size: int) -> int:
 
 
 def scan_range(
-    log_stream: BinaryIO, lo_offset: int, hi_bound: int
+    log_stream: BinaryIO,
+    lo_offset: int,
+    hi_bound: int,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> Iterator:
     """Yield (parsed, line_offset) for whole lines in [lo_offset, hi_bound].
 
@@ -279,14 +285,23 @@ def scan_range(
     line-aligned; it always comes from offset_for_ts. The line straddling
     hi_bound is included; a trailing line without a newline is left for a
     later read. Malformed lines are skipped.
+
+    When should_cancel is given, it is polled every CANCEL_CHECK_BYTES and
+    the scan returns early if it is true. That yields a partial stream, so
+    a caller that cancels must re-check before trusting the result.
     """
     log_stream.seek(lo_offset)
     offset = lo_offset
+    next_cancel_check = lo_offset + CANCEL_CHECK_BYTES
     for line in log_stream:
         if offset > hi_bound:
             return
         if not line.endswith(b"\n"):
             return
+        if should_cancel is not None and offset >= next_cancel_check:
+            if should_cancel():
+                return
+            next_cancel_check = offset + CANCEL_CHECK_BYTES
         parsed = parse_line(line) or parse_line_fallback(line)
         if parsed is not None:
             yield (parsed, offset)
