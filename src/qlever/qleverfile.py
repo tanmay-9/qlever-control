@@ -355,6 +355,13 @@ class Qleverfile:
             help="Whether to use the patterns precomputed during the index "
             "build (see `qlever index --help` for their utility)",
         )
+        server_args["metrics_log"] = arg(
+            "--metrics-log",
+            choices=["yes", "no"],
+            default="yes",
+            help="Whether to produce the per-query metrics log, a JSONL log of "
+            "query start/end events (`.metrics-log.jsonl`)",
+        )
         server_args["use_text_index"] = arg(
             "--use-text-index",
             choices=["yes", "no"],
