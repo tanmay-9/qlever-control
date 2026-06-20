@@ -320,7 +320,7 @@ def render_usage_plot(
     log_path = output_dir / f"{dataset}.index-log.txt"
     plot_path = output_dir / f"{dataset}.resource-usage-plot.png"
     if not tsv_path.exists():
-        log.warning(f"Resource-usage log not found: {tsv_path}")
+        log.warning(f"Resource-usage log not found: `{tsv_path.name}`")
         return None
     try:
         rendered = write_usage_plot(
@@ -337,8 +337,8 @@ def render_usage_plot(
         return None
     if not rendered:
         log.warning(
-            f"Resource-usage plot not rendered: no usable samples in the "
-            f"resource-usage log {tsv_path}"
+            "Resource-usage plot not rendered: no usable samples in the "
+            f"resource-usage log `{tsv_path.name}`"
         )
         return None
     return plot_path

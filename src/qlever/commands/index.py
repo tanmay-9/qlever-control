@@ -38,13 +38,12 @@ def render_usage_plot(
         if plot_only:
             log.error(
                 "Resource-usage plot needs matplotlib and numpy "
-                "(pip: `pip install qlever[plot]`). Install them and "
-                "rerun."
+                "(`pip install qlever[plot]`). Install them and rerun."
             )
         else:
             log.info(
                 "To plot the resource-usage log, install matplotlib and "
-                "numpy (pip: `pip install qlever[plot]`), then run "
+                "numpy (`pip install qlever[plot]`), then run "
                 "`qlever index --resource-usage-plot-only`."
             )
         return None
@@ -243,7 +242,7 @@ class IndexCommand(QleverCommand):
             )
             if plot_path is None:
                 return False
-            log.info(f"Resource-usage plot saved to {plot_path}")
+            log.info(f"Resource-usage plot saved to `{plot_path.name}`")
             return True
 
         # The mandatory part of the command line (specifying the input, the
@@ -395,6 +394,7 @@ class IndexCommand(QleverCommand):
                 interval=args.resource_usage_interval,
             ) as monitor:
                 run_command(index_cmd, show_output=True)
+                log.info("")
         except Exception as e:
             log.error(f"Building the index failed: {e}")
             return False
@@ -408,6 +408,6 @@ class IndexCommand(QleverCommand):
                 plot_only=False,
             )
             if plot_path is not None:
-                log.info(f"Resource-usage plot saved to {plot_path}")
+                log.info(f"Resource-usage plot saved to `{plot_path.name}`")
 
         return True

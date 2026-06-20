@@ -12,7 +12,6 @@ from qlever.log import log
 from qlever.util import (
     container_memory_to_bytes,
     find_process_by_binary,
-    format_size,
     run_command,
 )
 
@@ -173,8 +172,10 @@ class ResourceMonitor:
         self.thread.join()
         self.log_file.close()
         if self.peak_rss > 0:
-            log.info(f"Resource-usage log saved to {self.log_path}")
-            log.info(f"Peak memory RSS {format_size(self.peak_rss)}")
+            log.info(
+                "Resource-usage log (RSS memory and CPU usage) saved to "
+                f"`{self.log_path.name}`"
+            )
         else:
             log.warning(
                 "Resource usage was not recorded (no samples collected)."
