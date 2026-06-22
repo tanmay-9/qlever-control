@@ -43,6 +43,7 @@ class TestStartCommand(unittest.TestCase):
                     "only_pso_and_pos_permutations",
                     "use_patterns",
                     "use_text_index",
+                    "metrics_log",
                     "preload_materialized_views",
                     "warmup_cmd",
                 ],
