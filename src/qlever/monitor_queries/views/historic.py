@@ -30,7 +30,10 @@ from qlever.monitor_queries.models import (
     SparqlContent,
     TimelineBounds,
 )
-from qlever.monitor_queries.views.filter_modal import FILTER_STATUSES, FilterModal
+from qlever.monitor_queries.views.filter_modal import (
+    FILTER_STATUSES,
+    FilterModal,
+)
 from qlever.monitor_queries.widgets.controls_row import HistoricControlsRow
 from qlever.monitor_queries.widgets.header_row import HeaderRow
 from qlever.monitor_queries.widgets.metrics_row import MetricsRow
@@ -267,6 +270,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.show_loading_state()
             self.schedule_rescan()
         else:
+            self.query_one("#table-status", Static).update("Switching mode…")
             self.refresh_data(rescan=False)
 
     def schedule_rescan(self) -> None:
@@ -347,6 +351,11 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.status_text(len(self.all_rows))
         )
         self.refresh_sort_indicator()
+
+    def sort_rows(self) -> None:
+        """Hint that a re-sort is underway, then rebuild the visible rows."""
+        self.query_one("#table-status", Static).update("Sorting…")
+        self.refresh_visible()
 
     @work(thread=True, exclusive=True, group="refresh_data")
     def refresh_visible(self) -> None:
@@ -459,7 +468,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.sort_column = SORT_COLUMNS[
             (index + direction) % len(SORT_COLUMNS)
         ]
-        self.refresh_visible()
+        self.sort_rows()
 
     def action_sort_next_column(self) -> None:
         """Sort by the next column (wraps)."""
@@ -472,7 +481,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def action_invert_sort(self) -> None:
         """Flip the sort direction."""
         self.sort_reverse = not self.sort_reverse
-        self.refresh_visible()
+        self.sort_rows()
 
     def action_edit_filter(self) -> None:
         """Open the filter modal and apply its result to the table."""
@@ -582,7 +591,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.sort_reverse = not self.sort_reverse
         else:
             self.sort_column = column
-        self.refresh_visible()
+        self.sort_rows()
 
     def on_data_table_row_selected(
         self, message: HistoricQueryTable.RowSelected
