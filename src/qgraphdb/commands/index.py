@@ -129,7 +129,7 @@ class IndexCommand(QleverCommand):
             return True
 
         # Check if all of the input files exist.
-        if not util.input_files_exist(args.input_files, self.script_name):
+        if not util.input_files_exist(args.input_files):
             return False
 
         # When running natively, check if the binary exists and works.
@@ -158,7 +158,9 @@ class IndexCommand(QleverCommand):
                 f"want to overwrite them, use --overwrite-existing"
             )
             log.info("")
-            log.info(f"Index directory found in current directory: {index_dir}")
+            log.info(
+                f"Index directory found in current directory: {index_dir}"
+            )
             return False
 
         # Run the index command.

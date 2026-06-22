@@ -82,7 +82,7 @@ class IndexCommand(QleverCommand):
                 f"{system} build -f {dockerfile_path} -t {args.image} --build-arg "
                 f"UID=$(id -u) --build-arg GID=$(id -g) {dockerfile_dir}"
             )
-            image_id = util.get_container_image_id(system, args.image) 
+            image_id = util.get_container_image_id(system, args.image)
             cmd_to_show = (
                 f"{build_cmd}\n\n{index_cmd}"
                 if not image_id or args.rebuild_image
@@ -95,7 +95,7 @@ class IndexCommand(QleverCommand):
             return True
 
         # Check if all of the input files exist.
-        if not util.input_files_exist(input_files, self.script_name):
+        if not util.input_files_exist(input_files):
             return False
 
         # When running natively, check if the binary exists and works.

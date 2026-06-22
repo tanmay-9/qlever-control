@@ -87,7 +87,7 @@ class IndexCommand(QleverCommand):
             return True
 
         # Check if all of the input files exist.
-        if not util.input_files_exist(input_files, self.script_name):
+        if not util.input_files_exist(input_files):
             return False
 
         # When running natively, check if the binary exists and works.

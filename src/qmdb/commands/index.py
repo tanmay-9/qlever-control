@@ -172,7 +172,6 @@ class IndexCommand(QleverCommand):
         # Run the index command.
         try:
             with MemoryMonitor(
-                engine="millenniumdb",
                 dataset=args.name,
                 cmdline_regex=args.index_binary,
                 container=args.index_container,

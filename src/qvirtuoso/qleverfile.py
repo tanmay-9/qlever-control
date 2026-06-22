@@ -55,7 +55,7 @@ def qleverfile_args(all_args: dict[str, dict[str, tuple]]) -> None:
     server_args["server_binary"] = arg(
         "--server-binary",
         type=str,
-        default="virtuoso-t",
+        default="/opt/virtuoso-opensource/bin/virtuoso-t",
         help=(
             "The binary for starting the server (default: virtuoso-t) "
             "(this requires that you have virtuoso binaries installed "
