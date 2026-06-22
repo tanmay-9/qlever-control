@@ -8,8 +8,8 @@ from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Static
 
-from qlever.monitor.models import TimelineBounds
-from qlever.monitor.util import format_timestamp
+from qlever.monitor_queries.models import TimelineBounds
+from qlever.monitor_queries.util import format_timestamp
 
 # Width of a full "YYYY-MM-DD HH:MM:SS" stamp, and the gap that
 # separates the edge labels from the bar.

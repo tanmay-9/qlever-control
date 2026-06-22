@@ -1,6 +1,6 @@
 """Tests for read_window, filtering, metrics, and detail loading."""
 
-from qlever.monitor.historic_data import (
+from qlever.monitor_queries.historic_data import (
     DURATION_UNKNOWN,
     LoggedQuery,
     filter_by_text,
@@ -12,7 +12,7 @@ from qlever.monitor.historic_data import (
     read_window,
     window_metrics,
 )
-from qlever.monitor.models import FilterState, HistoricQueryRow
+from qlever.monitor_queries.models import FilterState, HistoricQueryRow
 
 PAD_MS = 10_000
 SLOW_MS = 60_000

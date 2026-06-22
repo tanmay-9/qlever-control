@@ -3,10 +3,10 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 
-from qlever.monitor.models import ControlsState
-from qlever.monitor.widgets.mode_picker import ModePicker
-from qlever.monitor.widgets.selected_window import SelectedWindow
-from qlever.monitor.widgets.window_stepper import WindowStepper
+from qlever.monitor_queries.models import ControlsState
+from qlever.monitor_queries.widgets.mode_picker import ModePicker
+from qlever.monitor_queries.widgets.selected_window import SelectedWindow
+from qlever.monitor_queries.widgets.window_stepper import WindowStepper
 
 
 class HistoricControlsRow(Horizontal):

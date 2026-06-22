@@ -3,8 +3,8 @@ from __future__ import annotations
 from rich.text import Text
 from textual.widgets import DataTable
 
-from qlever.monitor.models import HistoricQueryRow, LiveQueryRow
-from qlever.monitor.util import format_clock
+from qlever.monitor_queries.models import HistoricQueryRow, LiveQueryRow
+from qlever.monitor_queries.util import format_clock
 
 SPARQL_WIDTH = 280
 

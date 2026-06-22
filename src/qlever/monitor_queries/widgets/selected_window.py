@@ -3,8 +3,8 @@ from __future__ import annotations
 from textual.reactive import reactive
 from textual.widgets import Static
 
-from qlever.monitor.models import ControlsState
-from qlever.monitor.util import format_clock
+from qlever.monitor_queries.models import ControlsState
+from qlever.monitor_queries.util import format_clock
 
 
 def format_selected_window(state: ControlsState) -> str:

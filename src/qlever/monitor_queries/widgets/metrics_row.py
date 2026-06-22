@@ -5,7 +5,7 @@ from textual.containers import Vertical
 from textual.reactive import reactive
 from textual.widgets import Static
 
-from qlever.monitor.models import MetricsCounts
+from qlever.monitor_queries.models import MetricsCounts
 
 METRIC_COLORS = {
     "ok": "$success",

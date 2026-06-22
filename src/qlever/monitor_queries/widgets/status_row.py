@@ -3,7 +3,7 @@ from __future__ import annotations
 from textual.reactive import Reactive
 from textual.widgets import Static
 
-from qlever.monitor.models import LiveSubtitle
+from qlever.monitor_queries.models import LiveSubtitle
 
 
 def format_subtitle(subtitle: LiveSubtitle) -> str:

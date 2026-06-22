@@ -9,7 +9,7 @@ import statistics
 from collections.abc import Collection, Iterable
 from typing import NamedTuple
 
-from qlever.monitor.log_reader import CompletedQuery
+from qlever.monitor_queries.log_reader import CompletedQuery
 
 
 class MetricsSnapshot(NamedTuple):

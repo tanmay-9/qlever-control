@@ -10,7 +10,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Select
 from textual.worker import get_current_worker
 
-from qlever.monitor.live_data import (
+from qlever.monitor_queries.live_data import (
     LIVE_HORIZON_MS,
     LiveLogReader,
     LiveState,
@@ -18,13 +18,13 @@ from qlever.monitor.live_data import (
     find_active_queries,
     load_completed_history,
 )
-from qlever.monitor.log_reader import read_first_timestamp
-from qlever.monitor.util import clipboard_install_hint, copy_text
-from qlever.monitor.views.historic import HistoricScreen
-from qlever.monitor.views.live import LiveScreen
-from qlever.monitor.widgets.header_row import ThemeSelect
-from qlever.monitor.widgets.query_table import QueryTable
-from qlever.monitor.widgets.sparql_pane import SparqlPane, SparqlScroll
+from qlever.monitor_queries.log_reader import read_first_timestamp
+from qlever.monitor_queries.util import clipboard_install_hint, copy_text
+from qlever.monitor_queries.views.historic import HistoricScreen
+from qlever.monitor_queries.views.live import LiveScreen
+from qlever.monitor_queries.widgets.header_row import ThemeSelect
+from qlever.monitor_queries.widgets.query_table import QueryTable
+from qlever.monitor_queries.widgets.sparql_pane import SparqlPane, SparqlScroll
 from qlever.util import pretty_printed_query
 
 

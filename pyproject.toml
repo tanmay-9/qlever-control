@@ -36,7 +36,7 @@ bugtracker = "https://github.com/ad-freiburg/qlever/issues"
 "qlever" = "qlever.qlever_main:main"
 
 [tool.setuptools]
-package-data = { "qlever" = ["Qleverfiles/*", "evaluation/www/*"] }
+package-data = { "qlever" = ["Qleverfiles/*", "evaluation/www/*", "monitor_queries/*.tcss"] }
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

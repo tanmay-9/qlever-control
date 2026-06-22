@@ -7,7 +7,7 @@ from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import Footer, Static
 
-from qlever.monitor.live_data import (
+from qlever.monitor_queries.live_data import (
     PING_FAILS_TO_UNREACHABLE,
     PING_INTERVAL_S,
     current_ms,
@@ -16,13 +16,13 @@ from qlever.monitor.live_data import (
     get_live_query_rows,
     is_log_fresh,
 )
-from qlever.monitor.models import LiveSubtitle, SparqlContent
-from qlever.monitor.widgets.header_row import HeaderRow
-from qlever.monitor.widgets.metrics_row import MetricsRow
-from qlever.monitor.widgets.nav_pill import NavPill
-from qlever.monitor.widgets.query_table import LiveQueryTable
-from qlever.monitor.widgets.sparql_pane import SparqlPane
-from qlever.monitor.widgets.status_row import LiveStatusRow
+from qlever.monitor_queries.models import LiveSubtitle, SparqlContent
+from qlever.monitor_queries.widgets.header_row import HeaderRow
+from qlever.monitor_queries.widgets.metrics_row import MetricsRow
+from qlever.monitor_queries.widgets.nav_pill import NavPill
+from qlever.monitor_queries.widgets.query_table import LiveQueryTable
+from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
+from qlever.monitor_queries.widgets.status_row import LiveStatusRow
 from qlever.util import is_qlever_server_alive
 
 TITLE = "QLever monitor-queries: Live"

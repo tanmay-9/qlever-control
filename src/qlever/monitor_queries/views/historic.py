@@ -10,7 +10,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Static
 from textual.worker import get_current_worker
 
-from qlever.monitor.historic_data import (
+from qlever.monitor_queries.historic_data import (
     display_duration_ms,
     filter_by_text,
     filter_queries,
@@ -20,9 +20,9 @@ from qlever.monitor.historic_data import (
     read_window,
     window_metrics,
 )
-from qlever.monitor.live_data import current_ms
-from qlever.monitor.metrics import EMPTY_FIELDS
-from qlever.monitor.models import (
+from qlever.monitor_queries.live_data import current_ms
+from qlever.monitor_queries.metrics import EMPTY_FIELDS
+from qlever.monitor_queries.models import (
     ControlsState,
     FilterState,
     HistoricQueryRow,
@@ -30,21 +30,21 @@ from qlever.monitor.models import (
     SparqlContent,
     TimelineBounds,
 )
-from qlever.monitor.views.filter_modal import FILTER_STATUSES, FilterModal
-from qlever.monitor.widgets.controls_row import HistoricControlsRow
-from qlever.monitor.widgets.header_row import HeaderRow
-from qlever.monitor.widgets.metrics_row import MetricsRow
-from qlever.monitor.widgets.mode_picker import MODES, ModePicker
-from qlever.monitor.widgets.nav_pill import NavPill
-from qlever.monitor.widgets.query_table import (
+from qlever.monitor_queries.views.filter_modal import FILTER_STATUSES, FilterModal
+from qlever.monitor_queries.widgets.controls_row import HistoricControlsRow
+from qlever.monitor_queries.widgets.header_row import HeaderRow
+from qlever.monitor_queries.widgets.metrics_row import MetricsRow
+from qlever.monitor_queries.widgets.mode_picker import MODES, ModePicker
+from qlever.monitor_queries.widgets.nav_pill import NavPill
+from qlever.monitor_queries.widgets.query_table import (
     HistoricQueryTable,
     oneline,
     truncate,
 )
-from qlever.monitor.widgets.selected_window import SelectedWindow
-from qlever.monitor.widgets.sparql_pane import SparqlPane
-from qlever.monitor.widgets.timeline import Timeline
-from qlever.monitor.widgets.window_stepper import (
+from qlever.monitor_queries.widgets.selected_window import SelectedWindow
+from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
+from qlever.monitor_queries.widgets.timeline import Timeline
+from qlever.monitor_queries.widgets.window_stepper import (
     WindowStepper,
     available_presets,
     preset_ms,

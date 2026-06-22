@@ -3,7 +3,7 @@
 import threading
 import time
 
-from qlever.monitor.live_data import (
+from qlever.monitor_queries.live_data import (
     LIVE_HORIZON_MS,
     ActiveQuery,
     CompletedQueries,
@@ -15,8 +15,8 @@ from qlever.monitor.live_data import (
     get_live_query_rows,
     load_completed_history,
 )
-from qlever.monitor.log_reader import CompletedQuery
-from qlever.monitor.metrics import MetricsSnapshot, percentiles
+from qlever.monitor_queries.log_reader import CompletedQuery
+from qlever.monitor_queries.metrics import MetricsSnapshot, percentiles
 
 NOW_MS = 1_700_000_000_000
 MIN_MS = 60_000

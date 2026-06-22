@@ -8,8 +8,8 @@ from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.widgets import Static
 
-from qlever.monitor.models import SparqlContent
-from qlever.monitor.util import format_timestamp, resolve_client_name
+from qlever.monitor_queries.models import SparqlContent
+from qlever.monitor_queries.util import format_timestamp, resolve_client_name
 
 LIGHT_SYNTAX_THEME = "friendly"
 DARK_SYNTAX_THEME = "monokai"

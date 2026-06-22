@@ -12,7 +12,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
-from qlever.monitor.log_reader import (
+from qlever.monitor_queries.log_reader import (
     CLIENT_IP_KEY,
     CompletedQuery,
     extract_qid_ip_query,
@@ -22,8 +22,8 @@ from qlever.monitor.log_reader import (
     scan_range,
     slice_string_value,
 )
-from qlever.monitor.metrics import metrics_for_queries
-from qlever.monitor.models import (
+from qlever.monitor_queries.metrics import metrics_for_queries
+from qlever.monitor_queries.models import (
     FilterState,
     HistoricQueryRow,
     MetricsCounts,

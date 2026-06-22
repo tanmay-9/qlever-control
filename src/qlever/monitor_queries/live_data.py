@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
-from qlever.monitor.log_reader import (
+from qlever.monitor_queries.log_reader import (
     STATUS_SET,
     CompletedQuery,
     load_sparql_at,
@@ -25,12 +25,12 @@ from qlever.monitor.log_reader import (
     read_last_timestamp,
     scan_range,
 )
-from qlever.monitor.metrics import (
+from qlever.monitor_queries.metrics import (
     EMPTY_FIELDS,
     MetricsSnapshot,
     metrics_for_ranges,
 )
-from qlever.monitor.models import LiveQueryRow, MetricsCounts
+from qlever.monitor_queries.models import LiveQueryRow, MetricsCounts
 
 LIVE_METRIC_WINDOWS_MS = [1 * 60_000, 5 * 60_000, 60 * 60_000]
 LIVE_HORIZON_MS = LIVE_METRIC_WINDOWS_MS[2]

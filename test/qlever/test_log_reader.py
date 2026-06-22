@@ -1,7 +1,7 @@
 import pytest
 
-from qlever.monitor import log_reader
-from qlever.monitor.log_reader import (
+from qlever.monitor_queries import log_reader
+from qlever.monitor_queries.log_reader import (
     CompletedQuery,
     extract_qid_ip_query,
     load_sparql_at,
