@@ -274,7 +274,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.show_loading_state()
             self.schedule_rescan()
         else:
-            self.query_one("#table-status", Static).update("Switching mode…")
+            self.query_one("#table-status", Static).update(
+                f"Switching to {self.mode} mode…"
+            )
             self.refresh_data(rescan=False)
 
     def schedule_rescan(self) -> None:
@@ -358,7 +360,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
 
     def sort_rows(self) -> None:
         """Hint that a re-sort is underway, then rebuild the visible rows."""
-        self.query_one("#table-status", Static).update("Sorting…")
+        self.query_one("#table-status", Static).update(
+            f"Sorting by {self.sort_phrase()}…"
+        )
         self.refresh_visible()
 
     @work(thread=True, exclusive=True, group="refresh_data")
