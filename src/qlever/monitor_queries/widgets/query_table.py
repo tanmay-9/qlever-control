@@ -8,7 +8,11 @@ from qlever.monitor_queries.util import (
     format_clock,
     format_duration,
     oneline,
+    truncate,
 )
+
+# Full text is read in the SparqlPane.
+SPARQL_WIDTH = 280
 
 
 class QueryTable(DataTable):
@@ -98,7 +102,7 @@ class LiveQueryTable(QueryTable):
             format_clock(row.started_at_ms),
             Text(format_duration(row.duration_ms), justify="right"),
             row.client_ip or "-",
-            oneline(row.sparql),
+            truncate(oneline(row.sparql), SPARQL_WIDTH),
         )
 
     def row_key(self, row: LiveQueryRow) -> str:
@@ -175,7 +179,7 @@ class HistoricQueryTable(QueryTable):
             Text(format_duration(row.duration_ms), justify="right"),
             row.status,
             row.client_ip or "-",
-            oneline(row.sparql),
+            truncate(oneline(row.sparql), SPARQL_WIDTH),
         )
 
     def row_key(self, row: HistoricQueryRow) -> str:
