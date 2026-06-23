@@ -284,9 +284,7 @@ def load_query_details(
     line, which `read_window` did not read. Offsets already cached are
     reused; the rest are read in one pass, opening the file only when
     something is missing. The cache is scoped to one window so a sort
-    or mode change repaints from memory. Used for the visible slice and,
-    under a text filter, for the whole window so `passes_filter` can
-    read each query's text by offset.
+    or mode change repaints from memory.
     """
     missing = [
         offset for offset in offsets if offset not in query_details_cache

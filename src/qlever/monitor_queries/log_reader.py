@@ -49,7 +49,7 @@ def slice_string_value(line_bytes: bytes, key: bytes) -> str | None:
 def peek_ts_ms(line_bytes: bytes) -> int | None:
     """Read only the leading ts-ms timestamp from a log line.
 
-    The producer always writes ts-ms first, so the integer sits between
+    Every log line begins with ts-ms, so the integer sits between
     the fixed prefix and the next comma. Lets navigation compare
     timestamps without parsing the rest of the line. Returns None if the
     prefix is absent or the value is not an integer.
@@ -70,10 +70,10 @@ def parse_line(
 ) -> tuple[int, str, str, str | None] | None:
     """Byte-slice one log line into (ts_ms, event, qid, status).
 
-    The fast path: no json.loads, the query blob is never scanned.
-    `status` is None on start lines. Returns None on any sanity-check
-    miss so the caller can fall back to parse_line_fallback. Never
-    raises.
+    Avoids json.loads and never scans the query blob, so the common
+    line stays cheap to parse. `status` is None on start lines. Returns
+    None on anything unexpected so the caller can fall back to
+    parse_line_fallback. Never raises.
     """
     ts_ms = peek_ts_ms(line_bytes)
     if ts_ms is None:
@@ -99,10 +99,10 @@ def parse_line(
 def parse_line_fallback(
     line_bytes: bytes,
 ) -> tuple[int, str, str, str | None] | None:
-    """Real json.loads for a line parse_line rejected.
+    """Full json.loads for a line parse_line rejected.
 
-    Same 4-tuple shape as parse_line so callers treat both paths
-    alike. Returns None on a malformed line or a contract miss; never
+    Same 4-tuple shape as parse_line so callers treat both alike.
+    Returns None on a malformed line or a missing/wrong field; never
     raises.
     """
     try:

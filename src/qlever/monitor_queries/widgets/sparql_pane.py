@@ -76,7 +76,7 @@ class SparqlPane(Vertical):
 
     Shared by Live and Historic. The screen builds the SparqlContent and
     fills `status` (Live: None, Historic: real status); the pane never
-    reads stub data itself.
+    fills it itself.
     """
 
     can_focus = False

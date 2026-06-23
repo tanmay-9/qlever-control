@@ -125,9 +125,9 @@ def render_ticks(bounds: TimelineBounds, bar_width: int) -> str:
     step = label_width + MIN_TICK_GAP
     tick_count = max(1, bar_width // step)
     cells = [" "] * bar_width
-    for i in range(1, tick_count + 1):
+    for tick_index in range(1, tick_count + 1):
         # Interior positions only; the edges hold the Log start/end labels.
-        fraction = i / (tick_count + 1)
+        fraction = tick_index / (tick_count + 1)
         center = fraction_to_column(fraction, bar_width)
         # Time at this position: that same fraction into the log span.
         label = format_tick(

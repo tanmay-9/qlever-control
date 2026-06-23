@@ -35,8 +35,8 @@ class MonitorQueriesApp(App):
     The app has two tabs:
     1. Live view which tails an active `qlever-server` metrics.log file to
        show currently-active queries on the server plus rolling metrics
-    2. Historic view which parses the log file in a given time window for
-       active queries and metrics.
+    2. Historic view which parses the log file over a given time window
+       to show the queries observed in it plus metrics.
 
     In both tabs, the user has the option of selecting a particular query and
     view the full SPARQL query with syntax highlighting plus copy it.
@@ -137,7 +137,9 @@ class MonitorQueriesApp(App):
 
     @work(thread=True, group="load_metrics_history")
     def load_metrics_history(self) -> None:
-        """Prepend the hour before cut_offset into completed history so metrics aren't empty at boot."""
+        """Prepend the hour before cut_offset into completed history so
+        metrics aren't empty at boot.
+        """
         load_completed_history(
             self.log_file,
             self.live_state,

@@ -31,7 +31,7 @@ class LiveStatusRow(Static):
     subtitle = Reactive(None, init=False)
 
     def __init__(self, subtitle: LiveSubtitle) -> None:
-        """Render the subtitle text computed from `subtitle` and `endpoint`."""
+        """Render the subtitle text computed from `subtitle`."""
         super().__init__(format_subtitle(subtitle))
         self.set_reactive(LiveStatusRow.subtitle, subtitle)
 

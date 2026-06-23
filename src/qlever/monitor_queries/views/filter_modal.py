@@ -80,7 +80,7 @@ class FilterModal(ModalScreen[FilterState | None]):
         yield Footer(show_command_palette=False)
 
     def action_apply(self) -> None:
-        """Return a FilterState from the checked statuses and min duration."""
+        """Return a FilterState from the checked statuses and the inputs."""
         selected = self.query_one(SelectionList).selected
         duration = self.query_one("#filter-duration", Input).value.strip()
         min_duration_s = int(duration) if duration.isdigit() else None

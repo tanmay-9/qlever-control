@@ -49,7 +49,7 @@ def format_count(n: int | None) -> str:
 def format_ms(ms: int | None) -> str:
     """Render a duration in seconds, ellipsis if not computed.
 
-    Smart precision: 2 decimals under 1 s, 1 decimal otherwise.
+    Uses 2 decimals under 1 s, 1 decimal otherwise.
     """
     if ms is None:
         return "…"
@@ -72,8 +72,8 @@ def column_widths(rows: list[MetricsCounts]) -> list[int]:
     """
     widths = []
     for name, kind in COLUMNS:
-        cells = (format_value(getattr(r, name), kind) for r in rows)
-        widths.append(max((len(c) for c in cells), default=1))
+        cells = (format_value(getattr(row, name), kind) for row in rows)
+        widths.append(max((len(cell) for cell in cells), default=1))
     return widths
 
 

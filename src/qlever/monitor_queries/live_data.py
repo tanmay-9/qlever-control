@@ -255,8 +255,9 @@ class LiveLogReader:
         """Drop old completions and finished or stale active entries.
 
         An active entry leaves once a repaint has shown it and it has
-        finished, or once its start is older than the 2t safety horizon
-        (a missing end event, since no real query lives that long).
+        finished, or once its start is older than window_pad_ms, which
+        means its end event was missed since no real query runs that
+        long.
         """
         now = self.now_ms()
         completed_cutoff = now - LIVE_HORIZON_MS

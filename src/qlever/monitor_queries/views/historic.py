@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+from collections.abc import Callable
 
 from rich.markup import escape
 from textual import work
@@ -11,6 +12,7 @@ from textual.widgets import Footer, Static
 from textual.worker import get_current_worker
 
 from qlever.monitor_queries.historic_data import (
+    LoggedQuery,
     display_duration_ms,
     filter_by_text,
     filter_queries,
@@ -64,7 +66,9 @@ MODE_PHRASES = {
 SORT_COLUMNS = ["Started", "Duration", "Status"]
 
 
-def sort_key(column, log_end_ms):
+def sort_key(
+    column: str, log_end_ms: int
+) -> Callable[[LoggedQuery], int | str]:
     """Return the sort key over a LoggedQuery for the given column.
 
     Duration measures against `log_end_ms` for running queries and
@@ -124,7 +128,7 @@ def filter_summary(filters: FilterState) -> str:
 
 
 class HistoricScreen(Screen, inherit_bindings=False):
-    """Historic view: shows active queries parsed from the log over a time window."""
+    """Historic view: shows queries observed in the log over a time window."""
 
     BINDINGS = [
         Binding("tab", "app.swap_screen", "<Live", priority=True),

@@ -22,7 +22,9 @@ def preset_ms(preset: str) -> int | None:
 def available_presets(span_ms: int) -> tuple[str, ...]:
     """Presets that fit within the log span; `all` is always offered."""
     fits = tuple(
-        p for p in WINDOW_PRESETS if p != "all" and preset_ms(p) <= span_ms
+        preset
+        for preset in WINDOW_PRESETS
+        if preset != "all" and preset_ms(preset) <= span_ms
     )
     return fits + ("all",)
 
