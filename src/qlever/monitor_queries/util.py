@@ -21,11 +21,23 @@ def format_clock(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000).strftime("%H:%M:%S")
 
 
+def format_duration(ms: int) -> str:
+    """Render a duration in seconds to one decimal, or '?' when unknown."""
+    if ms < 0:
+        return "?"
+    return f"{ms / 1000:.1f}s"
+
+
 def truncate(text: str, max_len: int) -> str:
     """Trim text to max_len with an ellipsis."""
     if len(text) <= max_len:
         return text
     return text[: max_len - 1] + "…"
+
+
+def oneline(text: str) -> str:
+    """Collapse all runs of whitespace (incl. newlines) to single spaces."""
+    return " ".join(text.split())
 
 
 @lru_cache(maxsize=1024)

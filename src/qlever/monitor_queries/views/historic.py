@@ -32,6 +32,7 @@ from qlever.monitor_queries.models import (
     SparqlContent,
     TimelineBounds,
 )
+from qlever.monitor_queries.util import oneline, truncate
 from qlever.monitor_queries.views.filter_modal import (
     FILTER_STATUSES,
     FilterModal,
@@ -41,11 +42,7 @@ from qlever.monitor_queries.widgets.header_row import HeaderRow
 from qlever.monitor_queries.widgets.metrics_row import MetricsRow
 from qlever.monitor_queries.widgets.mode_picker import MODES, ModePicker
 from qlever.monitor_queries.widgets.nav_pill import NavPill
-from qlever.monitor_queries.widgets.query_table import (
-    HistoricQueryTable,
-    oneline,
-    truncate,
-)
+from qlever.monitor_queries.widgets.query_table import HistoricQueryTable
 from qlever.monitor_queries.widgets.selected_window import SelectedWindow
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
 from qlever.monitor_queries.widgets.timeline import Timeline
@@ -135,12 +132,15 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("w", "cycle_window", "Window size"),
         Binding("m", "cycle_mode", "Mode"),
         Binding(
-            "shift+left",
+            "left",
             "shift_earlier",
             "Shift window",
-            key_display="⇧ ←→",
+            key_display="←→",
+            priority=True,
         ),
-        Binding("shift+right", "shift_later", "Shift window", show=False),
+        Binding(
+            "right", "shift_later", "Shift window", show=False, priority=True
+        ),
         Binding("g", "snap_start", "Window start/end", key_display="g/G"),
         Binding("G", "snap_end", "Window end", show=False),
         Binding(

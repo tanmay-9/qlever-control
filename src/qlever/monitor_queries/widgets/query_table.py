@@ -4,28 +4,11 @@ from rich.text import Text
 from textual.widgets import DataTable
 
 from qlever.monitor_queries.models import HistoricQueryRow, LiveQueryRow
-from qlever.monitor_queries.util import format_clock
-
-SPARQL_WIDTH = 280
-
-
-def oneline(text: str) -> str:
-    """Collapse all runs of whitespace (incl. newlines) to single spaces."""
-    return " ".join(text.split())
-
-
-def truncate(text: str, width: int) -> str:
-    """Clip `text` to `width` characters, ending with an ellipsis if cut."""
-    if len(text) <= width:
-        return text
-    return text[: width - 1] + "…"
-
-
-def format_duration(ms: int) -> str:
-    """Render a duration in seconds to one decimal, or '?' when unknown."""
-    if ms < 0:
-        return "?"
-    return f"{ms / 1000:.1f}s"
+from qlever.monitor_queries.util import (
+    format_clock,
+    format_duration,
+    oneline,
+)
 
 
 class QueryTable(DataTable):
@@ -115,7 +98,7 @@ class LiveQueryTable(QueryTable):
             format_clock(row.started_at_ms),
             Text(format_duration(row.duration_ms), justify="right"),
             row.client_ip or "-",
-            truncate(oneline(row.sparql), SPARQL_WIDTH),
+            oneline(row.sparql),
         )
 
     def row_key(self, row: LiveQueryRow) -> str:
@@ -192,7 +175,7 @@ class HistoricQueryTable(QueryTable):
             Text(format_duration(row.duration_ms), justify="right"),
             row.status,
             row.client_ip or "-",
-            truncate(oneline(row.sparql), SPARQL_WIDTH),
+            oneline(row.sparql),
         )
 
     def row_key(self, row: HistoricQueryRow) -> str:

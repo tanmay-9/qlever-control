@@ -97,8 +97,11 @@ HistoricScreen MetricsRow {
 
 /* query tables (Live + Historic) */
 
+/* Wide SPARQL cells are read in the SparqlPane, not by scrolling sideways */
+
 QueryTable {
     height: 1fr;
+    overflow-x: hidden;
 }
 
 QueryTable > .datatable--cursor {
@@ -115,11 +118,12 @@ QueryTable > .datatable--cursor {
     display: none;
 }
 
-/* table status line, flush under the table */
+/* table status line; a muted caption flush under the table reads as part of it */
 
 #table-status {
     height: 1;
     margin-left: 1;
+    color: $text-muted;
 }
 
 /* SparqlPane */
