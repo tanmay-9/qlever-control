@@ -254,10 +254,11 @@ class MonitorQueriesApp(App):
     def check_action(
         self, action: str, parameters: tuple[object, ...]
     ) -> bool | None:
-        """Show the scroll bindings only when the query overflows the pane.
+        """Gate the global SPARQL/theme bindings on the active screen.
 
-        Returns False (hidden) rather than None (grayed) so the footer
-        entry disappears entirely until there is something to scroll.
+        Their target widgets are absent on a modal (e.g. the filter modal);
+        returning False there makes the keypress an inert no-op and hides
+        the footer entry, instead of crashing with `NoMatches`.
         """
         if action in ("scroll_sparql_up", "scroll_sparql_down"):
             try:
@@ -265,6 +266,10 @@ class MonitorQueriesApp(App):
             except NoMatches:
                 return False
             return scroll.max_scroll_y > 0
+        if action in ("copy_query", "pretty_print", "clear_query"):
+            return bool(self.screen.query(SparqlPane))
+        if action == "open_theme_picker":
+            return bool(self.screen.query(ThemeSelect))
         return True
 
     def action_open_theme_picker(self) -> None:

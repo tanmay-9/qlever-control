@@ -97,12 +97,15 @@ class LiveQueryTable(QueryTable):
         self.fill_rows()
 
     def render_row(self, row: LiveQueryRow) -> tuple:
-        """Render one active query to its Started/Duration/SPARQL cells."""
+        """Render one active query to its Started/Duration/Client IP/SPARQL
+        cells. Client IP and SPARQL are wrapped in `Text` so the table does
+        not parse their free-form text as Rich markup.
+        """
         return (
             format_clock(row.started_at_ms),
             Text(format_duration(row.duration_ms), justify="right"),
-            row.client_ip or "-",
-            truncate(oneline(row.sparql), SPARQL_WIDTH),
+            Text(row.client_ip or "-"),
+            Text(truncate(oneline(row.sparql), SPARQL_WIDTH)),
         )
 
     def row_key(self, row: LiveQueryRow) -> str:
@@ -173,13 +176,16 @@ class HistoricQueryTable(QueryTable):
         self.fill_rows()
 
     def render_row(self, row: HistoricQueryRow) -> tuple:
-        """Render one finished query to Started/Duration/Status/SPARQL cells."""
+        """Render one finished query to Started/Duration/Status/Client IP/SPARQL
+        cells. Client IP and SPARQL are wrapped in `Text` so the table does
+        not parse their free-form text as Rich markup.
+        """
         return (
             format_clock(row.started_at_ms),
             Text(format_duration(row.duration_ms), justify="right"),
             row.status,
-            row.client_ip or "-",
-            truncate(oneline(row.sparql), SPARQL_WIDTH),
+            Text(row.client_ip or "-"),
+            Text(truncate(oneline(row.sparql), SPARQL_WIDTH)),
         )
 
     def row_key(self, row: HistoricQueryRow) -> str:
