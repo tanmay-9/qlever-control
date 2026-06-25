@@ -11,9 +11,10 @@ import socket
 import string
 import subprocess
 import time
+from collections.abc import Iterator
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 import psutil
 
@@ -240,6 +241,28 @@ def show_process_info(psutil_process, cmdline_regex, show_heading=True):
     except Exception as e:
         log.error(f"Could not get process info: {e}")
         return False
+
+
+def find_process_by_binary(
+    parent_pid: int | None, binary: str
+) -> psutil.Process | None:
+    """Find a descendant of parent_pid whose argv[0] basename matches binary."""
+    try:
+        root = psutil.Process(parent_pid)
+        candidates = [root] + root.children(recursive=True)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return None
+    # Both sides use Path(...).name so any path form (relative, absolute,
+    # bare, symlink) matches as long as argv[0] preserves the binary's name.
+    target = Path(binary).name
+    for proc in candidates:
+        try:
+            cmdline = proc.cmdline()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if cmdline and Path(cmdline[0]).name == target:
+            return proc
+    return None
 
 
 def get_random_string(length: int) -> str:
@@ -479,6 +502,33 @@ def parse_memory(value: str) -> str:
     return value.upper()
 
 
+def container_memory_to_bytes(memory_string: str) -> int:
+    """
+    Parse a memory usage string from `docker stats` or `podman stats`
+    into bytes.  Docker reports binary units (GiB, MiB) while Podman
+    reports decimal units (GB, MB).
+    """
+    memory_string = memory_string.strip()
+    # Order matters: the first endswith match wins, and "B" is a suffix
+    # of every other unit, so it must stay last.
+    units = {
+        "TIB": 1024**4,
+        "TB": 1000**4,
+        "GIB": 1024**3,
+        "GB": 1000**3,
+        "MIB": 1024**2,
+        "MB": 1000**2,
+        "KIB": 1024,
+        "KB": 1000,
+        "B": 1,
+    }
+    for suffix, multiplier in units.items():
+        if memory_string.upper().endswith(suffix):
+            number = float(memory_string[: len(memory_string) - len(suffix)])
+            return int(number * multiplier)
+    return 0
+
+
 def add_memory_options(subparser, index=True, server=True):
     """
     Add total memory-related options to a subparser for setup-config command.
@@ -532,3 +582,139 @@ def tail_log_file(
         waited += 0.1
     tail_cmd = f"exec tail -n +1 -f {log_file}"
     return subprocess.Popen(tail_cmd, shell=True)
+
+
+def parse_git_hash(log_path: Path) -> str | None:
+    """Return the git hash printed on the first line of a QLever index log."""
+    try:
+        first_line = log_path.read_text().splitlines()[0]
+    except (OSError, IndexError):
+        return None
+    match = re.search(r"git hash ([0-9a-f]+)", first_line)
+    return match.group(1) if match else None
+
+
+class PhaseMarkers(NamedTuple):
+    """
+    Timestamp markers delimiting each phase of an index build. Any
+    marker absent from the log is None. `permutations` holds one
+    (begin_time, name) pair per permutation, in log order.
+    """
+
+    overall_begin: datetime | None
+    merge_begin: datetime | None
+    convert_begin: datetime | None
+    permutations: list[tuple[datetime, str]]
+    normal_end: datetime | None
+    text_begin: datetime | None
+    text_end: datetime | None
+
+
+def parse_phase_markers(lines: list[str]) -> PhaseMarkers:
+    """
+    Scan index-build log lines and extract the timestamp markers that
+    delimit each indexing phase. Handles both the old and new
+    permutation log formats. Absent timestamps come back as None;
+    callers decide how to report missing phases.
+    """
+    current_line = 0
+
+    # Find the next line at or after `current_line` matching `regex` and
+    # parse its leading timestamp. Returns (timestamp, match). When
+    # nothing matches and `update_current_line` is False, the cursor is
+    # rewound so a failed lookup does not consume the rest of the log.
+    def find_next_line(regex: str, update_current_line: bool = True):
+        nonlocal current_line
+        current_line_backup = current_line
+        timestamp_regex = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
+        timestamp_format = "%Y-%m-%d %H:%M:%S"
+        while current_line < len(lines):
+            line = lines[current_line]
+            current_line += 1
+            regex_match = re.search(regex, line)
+            if regex_match:
+                try:
+                    return datetime.strptime(
+                        re.match(timestamp_regex, line).group(),
+                        timestamp_format,
+                    ), regex_match
+                except Exception as parse_error:
+                    log.error(
+                        f"Could not parse timestamp of form "
+                        f'"{timestamp_regex}" from line '
+                        f' "{line.rstrip()}" ({parse_error})'
+                    )
+        if not update_current_line:
+            current_line = current_line_backup
+        return None, None
+
+    overall_begin, _ = find_next_line(r"INFO:\s*Processing")
+    merge_begin, _ = find_next_line(r"INFO:\s*Merging partial vocab")
+    convert_begin, _ = find_next_line(r"INFO:\s*Converting triples")
+
+    # Collect permutations. The old log format announces a permutation
+    # with "Creating a pair" and names it later in "Writing meta data
+    # for ..."; the new format names it directly in "Creating
+    # permutations ...".
+    permutations = []
+    while True:
+        perm_begin, _ = find_next_line(
+            r"INFO:\s*Creating a pair", update_current_line=False
+        )
+        if perm_begin is None:
+            perm_begin, perm_info = find_next_line(
+                r"INFO:\s*Creating permutations ([A-Z]+ and [A-Z]+)",
+                update_current_line=False,
+            )
+        else:
+            _, perm_info = find_next_line(
+                r"INFO:\s*Writing meta data for ([A-Z]+ and [A-Z]+)",
+                update_current_line=False,
+            )
+        if perm_info is None:
+            break
+        name = perm_info.group(1).replace(" and ", " & ")
+        permutations.append((perm_begin, name))
+
+    normal_end, _ = find_next_line(r"INFO:\s*Index build completed")
+    text_begin, _ = find_next_line(
+        r"INFO:\s*Adding text index", update_current_line=False
+    )
+    text_end, _ = find_next_line(
+        r"INFO:\s*Text index build comp", update_current_line=False
+    )
+
+    return PhaseMarkers(
+        overall_begin=overall_begin,
+        merge_begin=merge_begin,
+        convert_begin=convert_begin,
+        permutations=permutations,
+        normal_end=normal_end,
+        text_begin=text_begin,
+        text_end=text_end,
+    )
+
+
+def iter_permutation_phases(
+    permutations: list[tuple[datetime, str]],
+    normal_end: datetime | None,
+) -> Iterator[tuple[str, datetime, datetime | None]]:
+    """
+    Yield (name, begin, end) for each permutation phase. A permutation
+    ends where the next one begins, or at `normal_end` for the last.
+    Repeated names are disambiguated with a numeric suffix.
+    """
+    seen = set()
+    for index, (begin, name) in enumerate(permutations):
+        end = (
+            permutations[index + 1][0]
+            if index + 1 < len(permutations)
+            else normal_end
+        )
+        if name in seen:
+            suffix = 2
+            while f"{name} ({suffix})" in seen:
+                suffix += 1
+            name = f"{name} ({suffix})"
+        seen.add(name)
+        yield name, begin, end
