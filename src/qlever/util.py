@@ -151,15 +151,47 @@ def run_curl_command(
     return result.stdout
 
 
-def is_qlever_server_alive(endpoint_url: str) -> bool:
+def pretty_printed_query(
+    query: str, show_prefixes: bool, system: str = "docker"
+) -> str | None:
     """
-    Helper function that checks if a QLever server is running on the given
-    endpoint. Return `True` if the server is alive, `False` otherwise.
+    Pretty-print a SPARQL query using the sparql-formatter Docker image.
+    Optionally strips PREFIX declarations from the output. Argument
+    `system` can either be docker or podman. Returns None if the query
+    could not be pretty-printed.
     """
+    from qlever.containerize import Containerize
 
+    if system not in Containerize.supported_systems():
+        system = "docker"
+    remove_prefixes_cmd = " | sed '/^PREFIX /Id'" if not show_prefixes else ""
+    pretty_print_query_cmd = (
+        f"echo {shlex.quote(query)}"
+        f" | {system} run -i --rm docker.io/sparqling/sparql-formatter"
+        f"{remove_prefixes_cmd} | grep -v '^$'"
+    )
+    try:
+        query_pretty_printed = run_command(
+            pretty_print_query_cmd, return_output=True
+        )
+        return query_pretty_printed.rstrip()
+    except Exception as e:
+        log.debug(f"Failed to pretty-print query, returning None: {e}")
+        return None
+
+
+def is_qlever_server_alive(
+    endpoint_url: str, max_time: int | None = None
+) -> bool:
+    """Check if a QLever server is running on the given endpoint.
+
+    `max_time` (seconds) caps the curl invocation when set; default is
+    unbounded so existing callers behave as before.
+    """
     message = "from the `qlever` CLI"
+    max_time_flag = f"--max-time {max_time} " if max_time is not None else ""
     curl_cmd = (
-        f"curl -s {endpoint_url}/ping"
+        f"curl -s {max_time_flag}{endpoint_url}/ping"
         f" --data-urlencode msg={shlex.quote(message)}"
     )
     log.debug(curl_cmd)
