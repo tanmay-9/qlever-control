@@ -10,7 +10,10 @@ QID_KEY = b'"qid":"'
 CLIENT_IP_KEY = b'"client-ip":"'
 STATUS_KEY = b'"status":"'
 
-STATUS_SET = frozenset({"ok", "failed", "cancelled", "timeout", "unknown"})
+# Statuses the server writes; anything else maps to UNKNOWN_STATUS.
+STATUS_SET = frozenset({"ok", "failed", "cancelled", "timeout"})
+
+UNKNOWN_STATUS = "unknown"
 
 
 class CompletedQuery(NamedTuple):
@@ -65,6 +68,11 @@ def peek_ts_ms(line_bytes: bytes) -> int | None:
         return None
 
 
+def normalize_status(status: str) -> str:
+    """Pass a known status through, map anything else to unknown."""
+    return status if status in STATUS_SET else UNKNOWN_STATUS
+
+
 def parse_line(
     line_bytes: bytes,
 ) -> tuple[int, str, str, str | None] | None:
@@ -91,9 +99,9 @@ def parse_line(
         return (ts_ms, event, qid, None)
 
     status = slice_string_value(line_bytes, STATUS_KEY)
-    if status not in STATUS_SET:
+    if status is None:
         return None
-    return (ts_ms, event, qid, status)
+    return (ts_ms, event, qid, normalize_status(status))
 
 
 def parse_line_fallback(
@@ -126,9 +134,9 @@ def parse_line_fallback(
         return (ts_ms, event, qid, None)
 
     status = obj.get("status")
-    if status not in STATUS_SET:
+    if not isinstance(status, str):
         return None
-    return (ts_ms, event, qid, status)
+    return (ts_ms, event, qid, normalize_status(status))
 
 
 def next_whole_line(

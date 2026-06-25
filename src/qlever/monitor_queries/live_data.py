@@ -17,9 +17,9 @@ from pathlib import Path
 from typing import BinaryIO
 
 from qlever.monitor_queries.log_reader import (
-    STATUS_SET,
     CompletedQuery,
     load_sparql_at,
+    normalize_status,
     offset_for_ts,
     pair_start_end_events,
     read_last_timestamp,
@@ -306,7 +306,7 @@ class LiveLogReader:
 
         if event == "end":
             status = obj.get("status")
-            if status not in STATUS_SET:
+            if not isinstance(status, str):
                 return
             with self.state.lock:
                 self.state.latest_event_ms = max(
@@ -321,7 +321,7 @@ class LiveLogReader:
                         start_ms=entry.start_ms,
                         end_ms=ts_ms,
                         duration_ms=ts_ms - entry.start_ms,
-                        status=status,
+                        status=normalize_status(status),
                         start_line_offset=None,
                     )
                 )

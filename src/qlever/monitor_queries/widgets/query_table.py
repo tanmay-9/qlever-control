@@ -12,11 +12,11 @@ from qlever.monitor_queries.util import (
 )
 
 # Full text is read in the SparqlPane.
-SPARQL_WIDTH = 280
+SPARQL_WIDTH = 200
 
 
 class QueryTable(DataTable):
-    """Common behaviour for the Live and Historic query tables.
+    """Common behavior for the Live and Historic query tables.
 
     Each subclass defines its own columns, gives each row a key, and
     renders a row to its cells. The base uses those to fill the table

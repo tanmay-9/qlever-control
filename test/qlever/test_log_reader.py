@@ -22,7 +22,7 @@ START = (
 )
 END = b'{"ts-ms":1716000000050,"event":"end","qid":"q-8a4f","status":"ok"}'
 
-VALID_STATUSES = ["ok", "failed", "cancelled", "timeout", "unknown"]
+VALID_STATUSES = ["ok", "failed", "cancelled", "timeout"]
 
 
 def test_parse_line_start_has_no_status_and_ignores_query():
@@ -61,9 +61,9 @@ def test_parse_line_unknown_event_is_a_miss():
     assert parse_line(b'{"ts-ms":1,"event":"ping","qid":"q1"}') is None
 
 
-def test_parse_line_end_status_outside_closed_set_is_a_miss():
+def test_parse_line_end_status_outside_known_set_maps_to_unknown():
     line = b'{"ts-ms":1,"event":"end","qid":"q1","status":"weird"}'
-    assert parse_line(line) is None
+    assert parse_line(line) == (1, "end", "q1", "unknown")
 
 
 def test_parse_line_missing_qid_is_a_miss():
@@ -100,9 +100,9 @@ def test_fallback_non_integer_ts_returns_none():
     assert parse_line_fallback(line) is None
 
 
-def test_fallback_status_outside_closed_set_returns_none():
+def test_fallback_status_outside_known_set_maps_to_unknown():
     line = b'{"ts-ms":1,"event":"end","qid":"q1","status":"weird"}'
-    assert parse_line_fallback(line) is None
+    assert parse_line_fallback(line) == (1, "end", "q1", "unknown")
 
 
 FIRST_LINE = b'{"ts-ms":1000,"event":"start","qid":"q1","query":"SELECT 1"}\n'

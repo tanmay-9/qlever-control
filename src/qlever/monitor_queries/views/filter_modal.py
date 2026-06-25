@@ -18,7 +18,6 @@ FILTER_STATUSES = (
     "failed",
     "timeout",
     "cancelled",
-    "unknown",
     "orphaned",
 )
 

@@ -17,18 +17,19 @@ METRIC_COLORS = {
 }
 
 # (MetricsCounts field, kind) in render order; the field name is the label.
+# unknown is last so hiding it never shifts the other columns.
 COLUMNS = [
     ("seen", "count"),
     ("ok", "count"),
     ("failed", "count"),
     ("timeout", "count"),
     ("cancelled", "count"),
-    ("unknown", "count"),
     ("am", "ms"),
     ("gm", "ms"),
     ("p50", "ms"),
     ("p95", "ms"),
     ("slow", "count"),
+    ("unknown", "count"),
 ]
 
 
@@ -64,14 +65,23 @@ def format_value(value: int | None, kind: str) -> str:
     return format_ms(value)
 
 
-def column_widths(rows: list[MetricsCounts]) -> list[int]:
+def visible_columns(rows: list[MetricsCounts]) -> list[tuple[str, str]]:
+    """Columns to render; unknown is shown only when some row has one."""
+    if any((row.unknown or 0) > 0 for row in rows):
+        return COLUMNS
+    return [column for column in COLUMNS if column[0] != "unknown"]
+
+
+def column_widths(
+    rows: list[MetricsCounts], columns: list[tuple[str, str]]
+) -> list[int]:
     """Width of each column, sized to its own widest value across all rows.
 
     Per-column (not one shared width) so every column uses the least
     horizontal space while still aligning across the rolling-window rows.
     """
     widths = []
-    for name, kind in COLUMNS:
+    for name, kind in columns:
         cells = (format_value(getattr(row, name), kind) for row in rows)
         widths.append(max((len(cell) for cell in cells), default=1))
     return widths
@@ -101,7 +111,10 @@ def render_cell(
 
 
 def format_row(
-    row: MetricsCounts, widths: list[int], slow_threshold_s: int
+    row: MetricsCounts,
+    columns: list[tuple[str, str]],
+    widths: list[int],
+    slow_threshold_s: int,
 ) -> str:
     """Format one rolling-window row as a single line with markup."""
     if row.not_ready_message:
@@ -114,7 +127,7 @@ def format_row(
             width,
             kind,
         )
-        for (name, kind), width in zip(COLUMNS, widths)
+        for (name, kind), width in zip(columns, widths)
     ]
     return f"[bold]{row.label:<8}[/] │ " + " · ".join(cells)
 
@@ -135,12 +148,18 @@ class MetricsRow(Vertical):
         self.set_reactive(MetricsRow.rows, rows)
 
     def compose(self) -> ComposeResult:
-        widths = column_widths(self.rows)
+        columns = visible_columns(self.rows)
+        widths = column_widths(self.rows, columns)
         for row in self.rows:
-            yield Static(format_row(row, widths, self.slow_threshold_s))
+            yield Static(
+                format_row(row, columns, widths, self.slow_threshold_s)
+            )
 
     def watch_rows(self, rows: list[MetricsCounts]) -> None:
         """Repaint each line static when the row data changes."""
-        widths = column_widths(rows)
+        columns = visible_columns(rows)
+        widths = column_widths(rows, columns)
         for line, row in zip(self.query(Static), rows):
-            line.update(format_row(row, widths, self.slow_threshold_s))
+            line.update(
+                format_row(row, columns, widths, self.slow_threshold_s)
+            )
