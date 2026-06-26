@@ -234,15 +234,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
             return state.latest_event_ms
 
     def show_loading_state(self) -> None:
-        """Blank the table and metrics row while a rescan is in flight."""
-        self.query_one(HistoricQueryTable).set_rows([])
-        self.query_one(MetricsRow).rows = [
-            MetricsCounts(
-                label=self.window_size,
-                **EMPTY_FIELDS,
-                not_ready_message="loading…",
-            )
-        ]
+        """Dim the rows so a window change registers before the scan lands."""
+        self.query_one(HistoricQueryTable).add_class("stale")
+        self.query_one(MetricsRow).add_class("stale")
         self.query_one("#table-status", Static).update("Loading window…")
 
     def refresh_view(self, rescan: bool) -> None:
@@ -355,6 +349,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
         metrics: MetricsCounts,
     ) -> None:
         """Push fresh rows, metrics, and status line into the widgets."""
+        self.query_one(HistoricQueryTable).remove_class("stale")
+        self.query_one(MetricsRow).remove_class("stale")
         self.query_one(HistoricQueryTable).set_rows(rows)
         self.query_one(MetricsRow).rows = [metrics]
         self.query_one("#table-status", Static).update(

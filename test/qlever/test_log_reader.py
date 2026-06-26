@@ -2,9 +2,11 @@ import pytest
 
 from qlever.monitor_queries import log_reader
 from qlever.monitor_queries.log_reader import (
+    SNIPPET_BYTES,
     CompletedQuery,
     extract_qid_ip_query,
     load_sparql_at,
+    load_sparql_snippet_at,
     next_whole_line,
     offset_for_ts,
     open_log_buffer,
@@ -474,6 +476,71 @@ def test_load_sparql_at_reads_the_line_at_the_given_offset():
         "q2",
         "5.6.7.8",
         "SECOND",
+    )
+
+
+def snippet_line(query: bytes) -> bytes:
+    """A start line whose query value is the raw (escaped) `query` bytes."""
+    return (
+        b'{"ts-ms":1,"event":"start","qid":"q1","client-ip":"1.2.3.4",'
+        b'"query":"' + query + b'"}\n'
+    )
+
+
+def test_load_sparql_snippet_at_short_query_decodes_in_full():
+    assert load_sparql_snippet_at(
+        snippet_line(b"SELECT * { ?s ?p ?o }"), 0
+    ) == (
+        "q1",
+        "1.2.3.4",
+        "SELECT * { ?s ?p ?o }",
+    )
+
+
+def test_load_sparql_snippet_at_handles_escapes():
+    # Escaped quote, backslash, and newline in a short query.
+    buf = snippet_line(b'a\\"b\\\\c\\nd')
+    assert load_sparql_snippet_at(buf, 0) == ("q1", "1.2.3.4", 'a"b\\c\nd')
+
+
+def test_load_sparql_snippet_at_reads_at_the_given_offset():
+    first = snippet_line(b"FIRST")
+    second = (
+        b'{"ts-ms":2,"event":"start","qid":"q2","client-ip":"5.6.7.8",'
+        b'"query":"SECOND"}\n'
+    )
+    assert load_sparql_snippet_at(first + second, len(first)) == (
+        "q2",
+        "5.6.7.8",
+        "SECOND",
+    )
+
+
+def test_load_sparql_snippet_at_caps_a_long_query():
+    # A query far past the cap is read only up to SNIPPET_BYTES chars.
+    qid, client_ip, sparql = load_sparql_snippet_at(
+        snippet_line(b"x" * (SNIPPET_BYTES * 4)), 0
+    )
+    assert (qid, client_ip) == ("q1", "1.2.3.4")
+    assert sparql == "x" * SNIPPET_BYTES
+
+
+def test_load_sparql_snippet_at_trims_an_escape_split_by_the_cap():
+    # The cap lands on the backslash of a `\n` escape. The split escape
+    # is dropped so the snippet still decodes, one char short of the cap.
+    buf = snippet_line(b"a" * (SNIPPET_BYTES - 1) + b"\\n" + b"b" * 50)
+    assert load_sparql_snippet_at(buf, 0) == (
+        "q1",
+        "1.2.3.4",
+        "a" * (SNIPPET_BYTES - 1),
+    )
+
+
+def test_load_sparql_snippet_at_empty_query():
+    assert load_sparql_snippet_at(snippet_line(b""), 0) == (
+        "q1",
+        "1.2.3.4",
+        "",
     )
 
 
