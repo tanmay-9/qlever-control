@@ -16,7 +16,7 @@ from qlever.monitor_queries.log_reader import (
     CLIENT_IP_KEY,
     CompletedQuery,
     extract_qid_ip_query,
-    load_sparql_at,
+    load_sparql_snippet_at,
     offset_for_ts,
     open_log_buffer,
     pair_start_end_events,
@@ -284,10 +284,12 @@ def load_query_details(
     """Fill the details cache for any of the given start-line offsets.
 
     The `qid`, `client_ip`, and SPARQL text live on each query's start
-    line, which `read_window` did not read. Offsets already cached are
-    reused; the rest are read in one pass, opening the file only when
-    something is missing. The cache is scoped to one window so a sort
-    or mode change repaints from memory.
+    line, which `read_window` did not read. Only the start of the query
+    is read, since the table truncates it; the SparqlPane reads the full
+    text on demand. Offsets already cached are reused; the rest are read
+    in one pass, opening the file only when something is missing. The
+    cache is scoped to one window so a sort or mode change repaints from
+    memory.
     """
     missing = [
         offset for offset in offsets if offset not in query_details_cache
@@ -297,7 +299,9 @@ def load_query_details(
             if buf is None:
                 return
             for offset in missing:
-                query_details_cache[offset] = load_sparql_at(buf, offset)
+                query_details_cache[offset] = load_sparql_snippet_at(
+                    buf, offset
+                )
 
 
 def load_query_details_for_rows(

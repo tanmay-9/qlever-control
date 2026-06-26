@@ -13,6 +13,7 @@ EVENT_KEY = b'"event":"'
 QID_KEY = b'"qid":"'
 CLIENT_IP_KEY = b'"client-ip":"'
 STATUS_KEY = b'"status":"'
+QUERY_KEY = b'"query":"'
 
 # Statuses the server writes; anything else maps to UNKNOWN_STATUS.
 STATUS_SET = frozenset({"ok", "failed", "cancelled", "timeout"})
@@ -25,6 +26,10 @@ LogBuffer = mmap.mmap | bytes
 # Bytes read from the start of a line to get its header fields
 # (timestamp, event, qid), skipping the large query text after them.
 HEAD_BYTES = 256
+
+# Query bytes read for the table, where the text is truncated to ~200
+# display chars. The extra leaves room for escapes and whitespace.
+SNIPPET_BYTES = 256
 
 
 @contextmanager
@@ -122,12 +127,12 @@ def parse_line(
         return None
 
     if event == "start":
-        return (ts_ms, event, qid, None)
+        return ts_ms, event, qid, None
 
     status = slice_string_value(line_bytes, STATUS_KEY)
     if status is None:
         return None
-    return (ts_ms, event, qid, normalize_status(status))
+    return ts_ms, event, qid, normalize_status(status)
 
 
 def parse_line_fallback(
@@ -157,12 +162,12 @@ def parse_line_fallback(
         return None
 
     if event == "start":
-        return (ts_ms, event, qid, None)
+        return ts_ms, event, qid, None
 
     status = obj.get("status")
     if not isinstance(status, str):
         return None
-    return (ts_ms, event, qid, normalize_status(status))
+    return ts_ms, event, qid, normalize_status(status)
 
 
 def next_whole_line(buf: LogBuffer, probe: int) -> tuple[int, int] | None:
@@ -190,7 +195,7 @@ def next_whole_line(buf: LogBuffer, probe: int) -> tuple[int, int] | None:
     ts_ms = peek_ts_ms(buf[line_start : line_start + HEAD_BYTES])
     if ts_ms is None:
         return None
-    return (line_start, ts_ms)
+    return line_start, ts_ms
 
 
 def read_first_timestamp(buf: LogBuffer) -> int | None:
@@ -241,6 +246,13 @@ def offset_for_ts(buf: LogBuffer, target_ms: int) -> int:
     first_start, first_ts = first
     if first_ts >= target_ms:
         return 0
+
+    # Target past the last line: start there, skip the gallop.
+    last_newline = buf.rfind(b"\n")
+    last_start = buf.rfind(b"\n", 0, last_newline) + 1
+    last_ts = peek_ts_ms(buf[last_start : last_start + HEAD_BYTES])
+    if last_ts is not None and target_ms > last_ts:
+        return last_start
 
     # Gallop backward from the end, doubling the step until a probed
     # line is old enough (ts <= target). before_target brackets the
@@ -321,7 +333,7 @@ def scan_range(
         if parsed is None:
             parsed = parse_line_fallback(buf[offset:newline])
         if parsed is not None:
-            yield (parsed, offset)
+            yield parsed, offset
         offset = newline + 1
 
 
@@ -360,7 +372,7 @@ def pair_start_end_events(
                 start_line_offset=start_line_offset,
             )
         )
-    return (completed_queries, still_open)
+    return completed_queries, still_open
 
 
 def extract_qid_ip_query(line_bytes: bytes) -> tuple[str, str, str]:
@@ -374,8 +386,8 @@ def extract_qid_ip_query(line_bytes: bytes) -> tuple[str, str, str]:
     try:
         obj = json.loads(line_bytes)
     except (ValueError, TypeError):
-        return ("", "", "")
-    return (obj["qid"], obj.get("client-ip", ""), obj["query"])
+        return "", "", ""
+    return obj["qid"], obj.get("client-ip", ""), obj["query"]
 
 
 def load_sparql_at(buf: LogBuffer, line_offset: int) -> tuple[str, str, str]:
@@ -388,3 +400,34 @@ def load_sparql_at(buf: LogBuffer, line_offset: int) -> tuple[str, str, str]:
     end = buf.find(b"\n", line_offset)
     line = buf[line_offset:] if end == -1 else buf[line_offset:end]
     return extract_qid_ip_query(line)
+
+
+def load_sparql_snippet_at(
+    buf: LogBuffer, line_offset: int
+) -> tuple[str, str, str]:
+    """Read qid, client-ip, and the start of the query.
+
+    The table only shows a short, truncated query, so reading a large
+    one in full is wasted. This reads just the start of it instead.
+    """
+    head = buf[line_offset : line_offset + HEAD_BYTES]
+    qid = slice_string_value(head, QID_KEY) or ""
+    client_ip = slice_string_value(head, CLIENT_IP_KEY) or ""
+
+    value_start = buf.find(QUERY_KEY, line_offset) + len(QUERY_KEY)
+    limit = value_start + SNIPPET_BYTES
+    # Bounded so a large query is never scanned past the cap.
+    end = buf.find(b"\n", line_offset, limit + 2)
+    if end == -1:
+        value = buf[value_start:limit]
+    else:
+        # Drop the line's closing quote and brace.
+        value = buf[value_start : end - 2]
+
+    # The cap can split an escape, so retry shorter until it decodes.
+    while value:
+        try:
+            return qid, client_ip, json.loads(b'"' + value + b'"')
+        except ValueError:
+            value = value[:-1]
+    return qid, client_ip, ""
