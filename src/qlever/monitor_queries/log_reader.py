@@ -1,8 +1,12 @@
 """Pure primitives for reading the query metrics log"""
 
 import json
+import mmap
+import os
 from collections.abc import Callable, Iterator
-from typing import BinaryIO, NamedTuple
+from contextlib import contextmanager
+from pathlib import Path
+from typing import NamedTuple
 
 TS_PREFIX = b'{"ts-ms":'
 EVENT_KEY = b'"event":"'
@@ -14,6 +18,28 @@ STATUS_KEY = b'"status":"'
 STATUS_SET = frozenset({"ok", "failed", "cancelled", "timeout"})
 
 UNKNOWN_STATUS = "unknown"
+
+# The log buffer: an mmap in normal use, plain bytes in tests.
+LogBuffer = mmap.mmap | bytes
+
+# Bytes read from the start of a line to get its header fields
+# (timestamp, event, qid), skipping the large query text after them.
+HEAD_BYTES = 256
+
+
+@contextmanager
+def open_log_buffer(path: Path) -> Iterator[mmap.mmap | None]:
+    """Open the log file for reading and yield it as a buffer.
+
+    Yields None if the file is empty, since you cannot mmap an empty
+    file. Callers should check `if buf is None` before using it.
+    """
+    with path.open("rb") as f:
+        if os.fstat(f.fileno()).st_size == 0:
+            yield None
+            return
+        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as buf:
+            yield buf
 
 
 class CompletedQuery(NamedTuple):
@@ -139,81 +165,58 @@ def parse_line_fallback(
     return (ts_ms, event, qid, normalize_status(status))
 
 
-def next_whole_line(
-    log_stream: BinaryIO, probe: int, file_size: int
-) -> tuple[int, int] | None:
-    """Find the first complete line starting at or after `probe`.
+def next_whole_line(buf: LogBuffer, probe: int) -> tuple[int, int] | None:
+    """Find the first whole line at or after `probe`.
 
-    A raw probe usually lands mid-line, so we align to the start of the
-    next whole line. Returns (line_start, ts_ms), or None when `probe`
-    falls in the file's trailing partial line or past EOF.
+    A probe usually lands mid-line, so we move to the next line start.
+    Returns (line_start, ts_ms), or None if there is no whole line
+    after `probe`.
     """
-    if probe >= file_size:
+    if probe >= len(buf):
         return None
     if probe == 0:
         line_start = 0
-        log_stream.seek(0)
     else:
-        log_stream.seek(probe)
-        # Discard the partial line the probe landed in; the next read
-        # then starts on a whole line.
-        log_stream.readline()
-        line_start = log_stream.tell()
+        # Skip the partial line the probe landed in.
+        newline = buf.find(b"\n", probe)
+        if newline == -1:
+            return None
+        line_start = newline + 1
 
-    line = log_stream.readline()
-    # An empty read or a line with no terminating newline is the file's
-    # trailing partial line, not a complete record.
-    if not line.endswith(b"\n"):
+    end = buf.find(b"\n", line_start)
+    # No newline left means this is the file's trailing partial line.
+    if end == -1:
         return None
-    ts_ms = peek_ts_ms(line)
+    ts_ms = peek_ts_ms(buf[line_start : line_start + HEAD_BYTES])
     if ts_ms is None:
         return None
     return (line_start, ts_ms)
 
 
-def read_first_timestamp(log_stream: BinaryIO, file_size: int) -> int | None:
-    """Return the ts_ms of the first complete line, or None.
-
-    Scans forward from the start of the file, skipping malformed
-    lines, and returns the first ts_ms that parses.
-    """
-    if file_size == 0:
+def read_first_timestamp(buf: LogBuffer) -> int | None:
+    """Return the timestamp of the first whole line, or None."""
+    end = buf.find(b"\n")
+    if end == -1:
         return None
-    log_stream.seek(0)
-    while True:
-        line = log_stream.readline()
-        # No newline means EOF or a partial line: nothing complete left.
-        if not line.endswith(b"\n"):
-            return None
-        ts_ms = peek_ts_ms(line)
+    return peek_ts_ms(buf[:HEAD_BYTES])
+
+
+def read_last_timestamp(buf: LogBuffer) -> int | None:
+    """Return the timestamp of the last whole line, or None.
+
+    Walks backward from the end, skipping a trailing partial line and
+    any malformed lines.
+    """
+    end = buf.rfind(b"\n")
+    if end == -1:
+        return None
+    while end > 0:
+        start = buf.rfind(b"\n", 0, end) + 1
+        ts_ms = peek_ts_ms(buf[start : start + HEAD_BYTES])
         if ts_ms is not None:
             return ts_ms
-
-
-def read_last_timestamp(log_stream: BinaryIO, file_size: int) -> int | None:
-    """Return the ts_ms of the last complete line, or None.
-
-    Reads a 32KB tail buffer and walks its lines backward, returning
-    the first ts_ms that parses. A trailing partial line is skipped by
-    its missing newline; a leading mid-line fragment is skipped because
-    it does not start with the ts_ms prefix. Doubles the buffer and
-    retries if nothing parses, capped at the whole file.
-    """
-    if file_size == 0:
-        return None
-    tail_bytes = 32 * 1024
-    while True:
-        probe = max(0, file_size - tail_bytes)
-        log_stream.seek(probe)
-        for line in reversed(log_stream.readlines()):
-            if not line.endswith(b"\n"):
-                continue
-            ts_ms = peek_ts_ms(line)
-            if ts_ms is not None:
-                return ts_ms
-        if probe == 0:
-            return None
-        tail_bytes *= 2
+        end = start - 1
+    return None
 
 
 GALLOP_START = 128 * 1024
@@ -222,7 +225,7 @@ GALLOP_START = 128 * 1024
 CANCEL_CHECK_BYTES = 8 * 1024 * 1024
 
 
-def offset_for_ts(log_stream: BinaryIO, target_ms: int, file_size: int) -> int:
+def offset_for_ts(buf: LogBuffer, target_ms: int) -> int:
     """Find where to start reading so a forward read sees every line
     at or after target_ms.
 
@@ -231,7 +234,8 @@ def offset_for_ts(log_stream: BinaryIO, target_ms: int, file_size: int) -> int:
     few extra older lines. Returns 0 if target_ms is at or before the
     first line, and a spot near the end if it is past the last line.
     """
-    first = next_whole_line(log_stream, 0, file_size)
+    file_size = len(buf)
+    first = next_whole_line(buf, 0)
     if first is None:
         return 0
     first_start, first_ts = first
@@ -248,7 +252,7 @@ def offset_for_ts(log_stream: BinaryIO, target_ms: int, file_size: int) -> int:
         probe = file_size - step
         if probe <= before_target:
             break
-        found = next_whole_line(log_stream, probe, file_size)
+        found = next_whole_line(buf, probe)
         if found is None:
             step *= 2
             continue
@@ -263,7 +267,7 @@ def offset_for_ts(log_stream: BinaryIO, target_ms: int, file_size: int) -> int:
     # result never sits past the first matching line.
     while after_target - before_target > 1:
         mid = (before_target + after_target) // 2
-        found = next_whole_line(log_stream, mid, file_size)
+        found = next_whole_line(buf, mid)
         if found is None:
             after_target = mid
             continue
@@ -282,7 +286,7 @@ def offset_for_ts(log_stream: BinaryIO, target_ms: int, file_size: int) -> int:
 
 
 def scan_range(
-    log_stream: BinaryIO,
+    buf: LogBuffer,
     lo_offset: int,
     hi_bound: int,
     should_cancel: Callable[[], bool] | None = None,
@@ -294,26 +298,31 @@ def scan_range(
     hi_bound is included; a trailing line without a newline is left for a
     later read. Malformed lines are skipped.
 
+    Only the line's head is parsed, so the large query text is never
+    read. The rare line that needs more falls back to a full parse.
+
     When should_cancel is given, it is polled every CANCEL_CHECK_BYTES and
     the scan returns early if it is true. That yields a partial stream, so
     a caller that cancels must re-check before trusting the result.
     """
-    log_stream.seek(lo_offset)
     offset = lo_offset
     next_cancel_check = lo_offset + CANCEL_CHECK_BYTES
-    for line in log_stream:
-        if offset > hi_bound:
-            return
-        if not line.endswith(b"\n"):
+    while offset <= hi_bound:
+        newline = buf.find(b"\n", offset)
+        # No newline left means a trailing partial line; leave it.
+        if newline == -1:
             return
         if should_cancel is not None and offset >= next_cancel_check:
             if should_cancel():
                 return
             next_cancel_check = offset + CANCEL_CHECK_BYTES
-        parsed = parse_line(line) or parse_line_fallback(line)
+        head = buf[offset : min(newline, offset + HEAD_BYTES)]
+        parsed = parse_line(head)
+        if parsed is None:
+            parsed = parse_line_fallback(buf[offset:newline])
         if parsed is not None:
             yield (parsed, offset)
-        offset += len(line)
+        offset = newline + 1
 
 
 def pair_start_end_events(
@@ -369,14 +378,13 @@ def extract_qid_ip_query(line_bytes: bytes) -> tuple[str, str, str]:
     return (obj["qid"], obj.get("client-ip", ""), obj["query"])
 
 
-def load_sparql_at(
-    log_stream: BinaryIO, line_offset: int
-) -> tuple[str, str, str]:
+def load_sparql_at(buf: LogBuffer, line_offset: int) -> tuple[str, str, str]:
     """Return (qid, client_ip, sparql) for the start line at line_offset.
 
     Used by callers that have only the offset, not the line bytes:
     find_active_queries on survivors (qid already known, ignored), and
     Historic on displayed rows (needs all three for the SparqlPane).
     """
-    log_stream.seek(line_offset)
-    return extract_qid_ip_query(log_stream.readline())
+    end = buf.find(b"\n", line_offset)
+    line = buf[line_offset:] if end == -1 else buf[line_offset:end]
+    return extract_qid_ip_query(line)
