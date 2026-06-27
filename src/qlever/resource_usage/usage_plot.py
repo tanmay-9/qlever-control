@@ -314,7 +314,7 @@ def render_usage_plot(
     plot_max_points: int = 500,
 ) -> Path | None:
     """
-    Render `<dataset>.resource-usage-plot.png` from
+    Render `<dataset>.index.resource-usage-plot.png` from
     `<dataset>.index.resource-usage-log.tsv` in `output_dir`. Returns the
     plot path on success, None if the log is missing or the plot
     could not be rendered.
@@ -322,7 +322,7 @@ def render_usage_plot(
     output_dir = output_dir or Path.cwd()
     tsv_path = output_dir / f"{dataset}.index.resource-usage-log.tsv"
     log_path = output_dir / f"{dataset}.index-log.txt"
-    plot_path = output_dir / f"{dataset}.resource-usage-plot.png"
+    plot_path = output_dir / f"{dataset}.index.resource-usage-plot.png"
     if not tsv_path.exists():
         log.warning(f"Resource-usage log not found: `{tsv_path.name}`")
         return None
