@@ -1,0 +1,99 @@
+"""A bar gauge whose height and color both scale to a fixed capacity.
+
+textual's Sparkline normalizes bars to the data's own min/max, so the
+window's largest reading is always full and red. Here every bar is
+value/total instead, so a light load stays short and green and only a
+near-capacity load reads tall and red.
+"""
+
+from __future__ import annotations
+
+from rich.text import Text
+from textual.color import Color
+from textual.reactive import Reactive
+from textual.widgets import Static
+
+from qlever.monitor_queries.models import ResourceSeries
+
+BARS = "▁▂▃▄▅▆▇█"
+
+# Load-color ramp stops: green (idle) → amber (busy) → red (near full).
+GREEN = Color(0, 200, 0)
+AMBER = Color(220, 180, 0)
+RED = Color(220, 0, 0)
+
+
+def load_color(ratio: float) -> str:
+    """Hex color for a 0..1 load: green to amber by half, then to red."""
+    if ratio < 0.5:
+        return GREEN.blend(AMBER, ratio * 2).hex
+    return AMBER.blend(RED, (ratio - 0.5) * 2).hex
+
+
+def bucket_max(values: tuple[float, ...], width: int) -> list[float]:
+    """Group values into `width` columns, each the max of its slice."""
+    step = len(values) / width
+    columns = []
+    for i in range(width):
+        lo, hi = int(i * step), int((i + 1) * step)
+        chunk = values[lo:hi] or values[lo : lo + 1] or values[-1:]
+        columns.append(max(chunk))
+    return columns
+
+
+def series_title(series: ResourceSeries) -> str:
+    """Border label: name, window, and the latest reading against capacity."""
+    latest = series.values[-1] if series.values else 0
+    return (
+        f"[b]{series.label}[/]: "
+        f"{latest:.1f} / {series.total:.1f} {series.unit} (last 5m)"
+    )
+
+
+class ResourceSparkline(Static):
+    """One bordered bar gauge for a ResourceSeries.
+
+    Bar height and color both come from value/total, drawn over the two
+    content rows under a blank top border that carries the label.
+    """
+
+    can_focus = False
+
+    series = Reactive(None, init=False)
+
+    def __init__(self, series: ResourceSeries) -> None:
+        super().__init__()
+        self.set_reactive(ResourceSparkline.series, series)
+        self.border_title = series_title(series)
+
+    def watch_series(self, series: ResourceSeries) -> None:
+        self.border_title = series_title(series)
+        self.refresh()
+
+    def on_resize(self) -> None:
+        self.refresh()
+
+    def render(self) -> Text:
+        width, height = self.size.width, self.size.height
+        total = self.series.total
+        if width < 1 or height < 1 or not total or not self.series.values:
+            return Text()
+        # One (height, color) per column, both from the column's load ratio.
+        cells = []
+        for value in bucket_max(self.series.values, width):
+            ratio = min(1.0, max(0.0, value / total))
+            cells.append((int(ratio * (8 * height - 1)), load_color(ratio)))
+        # Draw top row down to bottom; each row shows its slice of the bar.
+        lines = []
+        for row in reversed(range(height)):
+            low, high = row * 8, (row + 1) * 8
+            line = Text()
+            for index, color in cells:
+                if index < low:
+                    line.append(" ")
+                elif index >= high:
+                    line.append("█", style=color)
+                else:
+                    line.append(BARS[index % 8], style=color)
+            lines.append(line)
+        return Text("\n").join(lines)

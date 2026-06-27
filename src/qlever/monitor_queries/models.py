@@ -127,3 +127,40 @@ class FilterState:
         return (
             self.client_ip_substr is not None or self.sparql_substr is not None
         )
+
+
+@dataclass(frozen=True)
+class ResourceSample:
+    """One reading of server resource usage, kept in raw source units.
+
+    rss is bytes; cpu_percent is psutil's percent, summed across cores,
+    so it can exceed 100. Conversion to GB and cores happens at the read
+    seam, not here, so storage stays a literal record of what was sampled.
+    """
+
+    ts_ms: int
+    rss: int
+    cpu_percent: float
+
+
+@dataclass(frozen=True)
+class ResourceSeries:
+    """One sparkline's data, already in display units.
+
+    values is the recent series the sparkline draws, total the capacity
+    it scales against, both in unit. The widget renders this as-is and
+    does no math of its own.
+    """
+
+    label: str
+    values: tuple[float, ...]
+    total: float
+    unit: str
+
+
+@dataclass(frozen=True)
+class ResourceUsage:
+    """The two resource sparklines shown in the Live header, as one unit."""
+
+    rss: ResourceSeries
+    cpu: ResourceSeries

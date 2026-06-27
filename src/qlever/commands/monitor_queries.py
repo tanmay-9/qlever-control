@@ -106,6 +106,10 @@ class MonitorQueriesCommand(QleverCommand):
             else f"{args.host_name}:{args.port}"
         )
 
+        resource_log = (
+            Path.cwd() / f"{args.name}.server.resource-usage-log.tsv"
+        )
+
         MonitorQueriesApp(
             log_file=args.metrics_log,
             sparql_endpoint=sparql_endpoint,
@@ -113,5 +117,6 @@ class MonitorQueriesCommand(QleverCommand):
             slow_threshold=args.slow_threshold,
             refresh_interval=args.refresh,
             system=args.system,
+            resource_log=resource_log,
         ).run()
         return True

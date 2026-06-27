@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import time
+
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.reactive import reactive
 from textual.screen import Screen
 from textual.widgets import Footer, Static
+from textual.worker import get_current_worker
 
 from qlever.monitor_queries.live_data import (
     PING_FAILS_TO_UNREACHABLE,
@@ -16,13 +19,25 @@ from qlever.monitor_queries.live_data import (
     get_live_query_rows,
     is_log_fresh,
 )
-from qlever.monitor_queries.models import LiveSubtitle, SparqlContent
+from qlever.monitor_queries.models import (
+    LiveSubtitle,
+    ResourceSample,
+    SparqlContent,
+)
+from qlever.monitor_queries.resource_data import (
+    SAMPLE_INTERVAL_S,
+    ResourceHistory,
+    ResourceLogReader,
+    get_resource_usage,
+    is_resource_sample_fresh,
+    system_totals,
+)
 from qlever.monitor_queries.widgets.header_row import HeaderRow
 from qlever.monitor_queries.widgets.metrics_row import MetricsRow
 from qlever.monitor_queries.widgets.nav_pill import NavPill
 from qlever.monitor_queries.widgets.query_table import LiveQueryTable
+from qlever.monitor_queries.widgets.resource_row import ResourceRow
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
-from qlever.monitor_queries.widgets.status_row import LiveStatusRow
 from qlever.util import is_qlever_server_alive
 
 TITLE = "QLever monitor-queries: Live"
@@ -58,12 +73,17 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.consecutive_ping_fails = 0
         self.ping_timer = None
 
-        yield LiveStatusRow(
+        self.resource_totals = system_totals()
+        self.resource_history = ResourceHistory()
+        self.resource_reader = ResourceLogReader()
+
+        yield ResourceRow(
             LiveSubtitle(
                 endpoint=self.app.sparql_endpoint,
                 state=self.liveness,
                 n_active=len(rows),
-            )
+            ),
+            get_resource_usage(self.resource_history, self.resource_totals),
         )
         yield MetricsRow(
             get_live_metrics(state, slow_ms, current_ms()),
@@ -80,6 +100,9 @@ class LiveScreen(Screen, inherit_bindings=False):
             self.app.refresh_interval, self.refresh_table
         )
         self.metrics_timer = self.set_interval(2.0, self.refresh_metrics)
+        # A worker, not a paused-on-suspend timer: it keeps reading the
+        # log regardless of the active tab so the history never gaps.
+        self.tail_resource_log()
         if self.liveness == "checking":
             self.start_pinging(initial=True)
         # Focus the table so the header theme dropdown can't take it.
@@ -165,23 +188,29 @@ class LiveScreen(Screen, inherit_bindings=False):
     def refresh_subtitle(self) -> None:
         """Rebuild the subtitle to match the table currently on screen."""
         rows = self.query_one(LiveQueryTable).query_rows
-        self.query_one(LiveStatusRow).subtitle = LiveSubtitle(
+        self.query_one(ResourceRow).subtitle = LiveSubtitle(
             endpoint=self.app.sparql_endpoint,
             state=self.liveness,
             n_active=len(rows),
         )
 
     def update_liveness_from_log(self) -> None:
-        """Re-evaluate the reachability state from log freshness alone.
+        """Re-evaluate reachability: a fresh resource sample first, then
+        log freshness.
 
-        Runs on each refresh_table tick. A fresh log line is enough
-        evidence to flip back to reachable from any non-reachable state;
-        a long quiet log moves us from reachable into pinging.
+        Runs on each refresh_table tick. A growing resource log or a
+        fresh log line flips back to reachable from any non-reachable
+        state; losing both moves us from reachable into pinging. The
+        sample check is first and short-circuits, so a live local server
+        skips the log read entirely.
         """
-        log_fresh = is_log_fresh(self.app.live_state, current_ms())
-        if self.liveness == "reachable" and not log_fresh:
+        now = current_ms()
+        alive = is_resource_sample_fresh(
+            self.resource_reader.last_ts_ms, now
+        ) or is_log_fresh(self.app.live_state, now)
+        if self.liveness == "reachable" and not alive:
             self.start_pinging(initial=False)
-        elif self.liveness != "reachable" and log_fresh:
+        elif self.liveness != "reachable" and alive:
             self.mark_reachable()
 
     def display_clock_ms(self) -> int:
@@ -220,6 +249,34 @@ class LiveScreen(Screen, inherit_bindings=False):
         slow_ms = self.app.slow_threshold * 1000
         self.query_one(MetricsRow).rows = get_live_metrics(
             state, slow_ms, current_ms()
+        )
+
+    @work(thread=True, exclusive=True, group="tail_resource_log")
+    def tail_resource_log(self) -> None:
+        """Read the resource log off the UI thread, seeding then tailing.
+
+        I/O and parsing stay on this thread; only the buffer update and
+        repaint are handed to the UI thread, so a slow read can never
+        freeze the screen.
+        """
+        worker = get_current_worker()
+        with self.app.resource_log.open("rb") as stream:
+            seeded = self.resource_reader.seed(stream, current_ms())
+            self.app.call_from_thread(self.apply_resource_samples, seeded)
+            while not worker.is_cancelled:
+                fresh = self.resource_reader.read_new(stream)
+                if fresh:
+                    self.app.call_from_thread(
+                        self.apply_resource_samples, fresh
+                    )
+                time.sleep(SAMPLE_INTERVAL_S)
+
+    def apply_resource_samples(self, samples: list[ResourceSample]) -> None:
+        """Add new samples to the buffer and repaint; runs on the UI thread."""
+        for sample in samples:
+            self.resource_history.add(sample)
+        self.query_one(ResourceRow).usage = get_resource_usage(
+            self.resource_history, self.resource_totals
         )
 
     def watch_frozen(self, frozen: bool) -> None:

@@ -66,6 +66,41 @@ LiveStatusRow {
     color: $text;
 }
 
+/* ResourceRow: RSS sparkline | server status | CPU sparkline.
+   Four rows tall; the side sparklines spend 2 of those on their border. */
+
+ResourceRow {
+    height: 3;
+    width: 100%;
+    margin-bottom: 1;
+    margin-left: 1;
+    margin-right: 1;
+}
+
+/* A blank top border: it reserves the row and carries the label/reading,
+   but draws no rule, so only the title text shows above the 2 rows of bars.
+   The bars color themselves green→red by load in ResourceSparkline.render. */
+ResourceRow ResourceSparkline {
+    width: 1fr;
+    height: 3;
+    border-top: blank $surface;
+    border-title-align: center;
+    border-title-color: $text;
+}
+
+/* Width is pinned in Python to the widest subtitle line; content-box keeps
+   that the text width so padding adds around it. The sparklines (1fr) split
+   the rest of the row. */
+ResourceRow .resource-center {
+    box-sizing: content-box;
+    height: 3;
+    padding: 0 4;
+    content-align: center bottom;
+    text-align: center;
+    text-style: italic;
+    color: $text;
+}
+
 
 /* MetricsRow */
 

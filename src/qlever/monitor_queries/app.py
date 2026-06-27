@@ -73,6 +73,7 @@ class MonitorQueriesApp(App):
         timeout: int,
         slow_threshold: int,
         refresh_interval: float,
+        resource_log: Path,
         system: str = "docker",
     ) -> None:
         super().__init__()
@@ -82,6 +83,7 @@ class MonitorQueriesApp(App):
         self.window_pad_ms = 2000 * timeout
         self.slow_threshold = slow_threshold
         self.refresh_interval = refresh_interval
+        self.resource_log = resource_log
         self.system = system
         self.live_state = LiveState()
         self.log_start_ms = None
