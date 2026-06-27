@@ -321,11 +321,15 @@ def render_usage_plot(
     """
     output_dir = output_dir or Path.cwd()
     tsv_path = output_dir / f"{dataset}.index.resource-usage-log.tsv"
+    # Back-compat: indexes built before the `.index.` infix wrote this name.
+    legacy_tsv_path = output_dir / f"{dataset}.resource-usage-log.tsv"
     log_path = output_dir / f"{dataset}.index-log.txt"
     plot_path = output_dir / f"{dataset}.index.resource-usage-plot.png"
     if not tsv_path.exists():
-        log.warning(f"Resource-usage log not found: `{tsv_path.name}`")
-        return None
+        if not legacy_tsv_path.exists():
+            log.warning(f"Resource-usage log not found: `{tsv_path.name}`")
+            return None
+        tsv_path = legacy_tsv_path
     try:
         rendered = write_usage_plot(
             tsv_path=tsv_path,
