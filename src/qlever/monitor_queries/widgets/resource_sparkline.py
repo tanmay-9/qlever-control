@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from rich.text import Text
 from textual.color import Color
+from textual.message import Message
 from textual.reactive import Reactive
 from textual.widgets import Static
 
@@ -69,6 +70,9 @@ class ResourceSparkline(Static):
 
     can_focus = False
 
+    class Clicked(Message):
+        """Posted when the gauge is clicked, to open the plot modal."""
+
     series = Reactive(None, init=False)
     stale = Reactive(False, init=False)
 
@@ -87,6 +91,9 @@ class ResourceSparkline(Static):
 
     def on_resize(self) -> None:
         self.refresh()
+
+    def on_click(self) -> None:
+        self.post_message(self.Clicked())
 
     def render(self) -> Text:
         width, height = self.size.width, self.size.height

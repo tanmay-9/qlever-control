@@ -11,6 +11,7 @@ from typing import BinaryIO
 import psutil
 
 from qlever.monitor_queries.models import (
+    ResourcePlot,
     ResourceSample,
     ResourceSeries,
     ResourceUsage,
@@ -168,4 +169,37 @@ def get_resource_usage(
     return ResourceUsage(
         rss=ResourceSeries("RSS", rss_values, rss_total_gb, "GB"),
         cpu=ResourceSeries("CPU", cpu_values, cpu_cores, "cores"),
+    )
+
+
+def get_resource_plot(
+    samples: list[ResourceSample],
+    totals: tuple[float, float],
+    start_ms: int,
+    end_ms: int,
+) -> ResourcePlot:
+    """Turn samples in a time window into the dual-axis plot model.
+
+    Keeps only samples inside [start_ms, end_ms] and converts each to
+    display units: rss bytes to GB, cpu percent to cores. totals is
+    (rss_total_gb, cpu_cores). The window edges frame the plot's x-axis
+    and may be wider than the samples that fall inside them.
+    """
+    rss_total_gb, cpu_cores = totals
+    times_s = []
+    rss_gb = []
+    cpu_cores_series = []
+    for sample in samples:
+        if start_ms <= sample.ts_ms <= end_ms:
+            times_s.append(sample.ts_ms / 1000)
+            rss_gb.append(sample.rss / 1e9)
+            cpu_cores_series.append(sample.cpu_percent / 100)
+    return ResourcePlot(
+        times_s=tuple(times_s),
+        rss_gb=tuple(rss_gb),
+        cpu_cores=tuple(cpu_cores_series),
+        rss_total=rss_total_gb,
+        cpu_total=cpu_cores,
+        start_s=start_ms / 1000,
+        end_s=end_ms / 1000,
     )

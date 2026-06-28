@@ -21,13 +21,16 @@ from qlever.monitor_queries.live_data import (
 )
 from qlever.monitor_queries.models import (
     LiveSubtitle,
+    ResourcePlot,
     ResourceSample,
     SparqlContent,
 )
 from qlever.monitor_queries.resource_data import (
+    LIVE_WINDOW_S,
     SAMPLE_INTERVAL_S,
     ResourceHistory,
     ResourceLogReader,
+    get_resource_plot,
     get_resource_usage,
     is_resource_sample_fresh,
     system_totals,
@@ -37,7 +40,9 @@ from qlever.monitor_queries.widgets.metrics_row import MetricsRow
 from qlever.monitor_queries.widgets.nav_pill import NavPill
 from qlever.monitor_queries.widgets.query_table import LiveQueryTable
 from qlever.monitor_queries.widgets.resource_row import ResourceRow
+from qlever.monitor_queries.widgets.resource_sparkline import ResourceSparkline
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
+from qlever.monitor_queries.views.resource_plot_modal import ResourcePlotModal
 from qlever.util import is_qlever_server_alive
 
 TITLE = "QLever monitor-queries: Live"
@@ -49,6 +54,7 @@ class LiveScreen(Screen, inherit_bindings=False):
     BINDINGS = [
         Binding("tab", "app.swap_screen", "Historic>", priority=True),
         Binding("f", "toggle_freeze", "Freeze/Unfreeze"),
+        Binding("r", "open_resource_plot", "Resource plot"),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
 
@@ -281,6 +287,35 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.query_one(ResourceRow).usage = get_resource_usage(
             self.resource_history, self.resource_totals
         )
+
+    def live_resource_plot(self) -> ResourcePlot:
+        """Snapshot the buffer as the rolling 5-minute plot window.
+
+        Recomputes the window end on each call, so the modal's timer
+        rolls the view forward the same way the sparklines roll.
+        """
+        now = current_ms()
+        return get_resource_plot(
+            list(self.resource_history.samples),
+            self.resource_totals,
+            now - LIVE_WINDOW_S * 1000,
+            now,
+        )
+
+    def action_open_resource_plot(self) -> None:
+        """Open the dual-axis plot modal over the live rolling window."""
+        self.app.push_screen(
+            ResourcePlotModal(
+                source=self.live_resource_plot,
+                refresh_interval=SAMPLE_INTERVAL_S,
+            )
+        )
+
+    def on_resource_sparkline_clicked(
+        self, message: ResourceSparkline.Clicked
+    ) -> None:
+        """Open the plot when a resource gauge is clicked."""
+        self.action_open_resource_plot()
 
     def watch_frozen(self, frozen: bool) -> None:
         """Reflect the frozen state in the table status line."""

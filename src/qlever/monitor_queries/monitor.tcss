@@ -291,3 +291,20 @@ FilterModal {
 #filter-modal Input {
     margin-bottom: 1;
 }
+
+/* ResourcePlotModal */
+
+ResourcePlotModal {
+    align: center middle;
+}
+
+#resource-plot-modal {
+    width: 90%;
+    height: 90%;
+    padding: 1 2;
+    background: $surface;
+}
+
+#resource-plot-modal PlotextPlot {
+    height: 1fr;
+}

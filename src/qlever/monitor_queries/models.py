@@ -164,3 +164,23 @@ class ResourceUsage:
 
     rss: ResourceSeries
     cpu: ResourceSeries
+
+
+@dataclass(frozen=True)
+class ResourcePlot:
+    """Points and frame for the dual-axis resource plot modal.
+
+    times_s is the shared x-axis in epoch seconds; rss_gb and cpu_cores
+    are the two y-series in display units. rss_total and cpu_total are
+    the capacities the left and right axes scale against. start_s and
+    end_s are the requested window edges the plot frames its x-axis to,
+    which may be wider than the samples that fall inside it.
+    """
+
+    times_s: tuple[float, ...]
+    rss_gb: tuple[float, ...]
+    cpu_cores: tuple[float, ...]
+    rss_total: float
+    cpu_total: float
+    start_s: float
+    end_s: float
