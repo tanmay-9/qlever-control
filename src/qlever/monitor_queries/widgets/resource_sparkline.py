@@ -41,8 +41,18 @@ def bucket_max(values: tuple[float, ...], width: int) -> list[float]:
     return columns
 
 
-def series_title(series: ResourceSeries) -> str:
-    """Border label: name, window, and the latest reading against capacity."""
+def series_title(series: ResourceSeries, stale: bool) -> str:
+    """Border label: name, window, and the latest reading against capacity.
+
+    When stale, no recent sample has arrived, so the bars are frozen old
+    history. The value is shown as a dash and the window note says so,
+    rather than claiming a live reading over the last 5 minutes.
+    """
+    if stale:
+        return (
+            f"[b]{series.label}[/]: "
+            f"- / {series.total:.1f} {series.unit} (no recent samples)"
+        )
     latest = series.values[-1] if series.values else 0
     return (
         f"[b]{series.label}[/]: "
@@ -60,15 +70,20 @@ class ResourceSparkline(Static):
     can_focus = False
 
     series = Reactive(None, init=False)
+    stale = Reactive(False, init=False)
 
-    def __init__(self, series: ResourceSeries) -> None:
+    def __init__(self, series: ResourceSeries, stale: bool) -> None:
         super().__init__()
         self.set_reactive(ResourceSparkline.series, series)
-        self.border_title = series_title(series)
+        self.set_reactive(ResourceSparkline.stale, stale)
+        self.border_title = series_title(series, stale)
 
     def watch_series(self, series: ResourceSeries) -> None:
-        self.border_title = series_title(series)
+        self.border_title = series_title(series, self.stale)
         self.refresh()
+
+    def watch_stale(self, stale: bool) -> None:
+        self.border_title = series_title(self.series, stale)
 
     def on_resize(self) -> None:
         self.refresh()
@@ -81,8 +96,11 @@ class ResourceSparkline(Static):
         # One (height, color) per column, both from the column's load ratio.
         cells = []
         for value in bucket_max(self.series.values, width):
-            ratio = min(1.0, max(0.0, value / total))
-            cells.append((int(ratio * (8 * height - 1)), load_color(ratio)))
+            load = min(1.0, max(0.0, value / total))
+            # The curve expands the low band the process actually uses and
+            # compresses the top it never reaches
+            scaled = load**0.7
+            cells.append((int(scaled * (8 * height - 1)), load_color(scaled)))
         # Draw top row down to bottom; each row shows its slice of the bar.
         lines = []
         for row in reversed(range(height)):

@@ -114,6 +114,12 @@ QueryTable.stale, MetricsRow.stale {
     color: $text-muted;
 }
 
+/* Frozen resource gauges. text-opacity, not color, so the bars'
+   inline per-cell colors dim along with the title and status. */
+ResourceRow.stale {
+    text-opacity: 50%;
+}
+
 /* Timeline (Historic only) */
 
 Timeline {

@@ -42,6 +42,7 @@ class ResourceRow(Horizontal):
 
     subtitle = Reactive(None, init=False)
     usage = Reactive(None, init=False)
+    stale = Reactive(False, init=False)
 
     def __init__(
         self, server_subtitle: LiveSubtitle, usage: ResourceUsage
@@ -51,14 +52,14 @@ class ResourceRow(Horizontal):
         self.set_reactive(ResourceRow.usage, usage)
 
     def compose(self) -> ComposeResult:
-        self.rss_spark = ResourceSparkline(self.usage.rss)
+        self.rss_spark = ResourceSparkline(self.usage.rss, self.stale)
         yield self.rss_spark
         center = Static(
             format_subtitle(self.subtitle), classes="resource-center"
         )
         center.styles.width = subtitle_width(self.subtitle.endpoint)
         yield center
-        self.cpu_spark = ResourceSparkline(self.usage.cpu)
+        self.cpu_spark = ResourceSparkline(self.usage.cpu, self.stale)
         yield self.cpu_spark
 
     def watch_subtitle(self, subtitle: LiveSubtitle) -> None:
@@ -68,3 +69,8 @@ class ResourceRow(Horizontal):
     def watch_usage(self, usage: ResourceUsage) -> None:
         self.rss_spark.series = usage.rss
         self.cpu_spark.series = usage.cpu
+
+    def watch_stale(self, stale: bool) -> None:
+        self.set_class(stale, "stale")
+        self.rss_spark.stale = stale
+        self.cpu_spark.stale = stale

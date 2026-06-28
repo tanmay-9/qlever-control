@@ -202,12 +202,15 @@ class LiveScreen(Screen, inherit_bindings=False):
         fresh log line flips back to reachable from any non-reachable
         state; losing both moves us from reachable into pinging. The
         sample check is first and short-circuits, so a live local server
-        skips the log read entirely.
+        skips the log read entirely. The same sample-freshness check
+        marks the resource row stale.
         """
         now = current_ms()
-        alive = is_resource_sample_fresh(
+        samples_fresh = is_resource_sample_fresh(
             self.resource_reader.last_ts_ms, now
-        ) or is_log_fresh(self.app.live_state, now)
+        )
+        self.query_one(ResourceRow).stale = not samples_fresh
+        alive = samples_fresh or is_log_fresh(self.app.live_state, now)
         if self.liveness == "reachable" and not alive:
             self.start_pinging(initial=False)
         elif self.liveness != "reachable" and alive:
