@@ -13,6 +13,10 @@ from textual_plotext import PlotextPlot
 
 from qlever.monitor_queries.models import ResourcePlot
 
+# Saturated line colors
+RSS_COLOR = (204, 0, 0)
+CPU_COLOR = (31, 119, 180)
+
 
 def clock_ticks(
     start_s: float, end_s: float, count: int = 5
@@ -88,11 +92,20 @@ class ResourcePlotModal(ModalScreen):
         positions, labels = clock_ticks(data.start_s, data.end_s)
         plt.xticks(positions, labels)
         if data.times_s:
-            plt.plot(data.times_s, data.rss_gb, yside="left", label="RSS (GB)")
+            plt.plot(
+                data.times_s,
+                data.rss_gb,
+                yside="left",
+                marker="fhd",
+                color=RSS_COLOR,
+                label="RSS (GB)",
+            )
             plt.plot(
                 data.times_s,
                 data.cpu_cores,
                 yside="right",
+                marker="fhd",
+                color=CPU_COLOR,
                 label="CPU (cores)",
             )
         else:
@@ -106,8 +119,9 @@ class ResourcePlotModal(ModalScreen):
         plot.refresh()
 
     def action_close(self) -> None:
-        """Close the modal."""
-        self.dismiss()
+        """Close the modal, unless a prior event already closed it."""
+        if self.is_current:
+            self.dismiss()
 
     def on_click(self, event: events.Click) -> None:
         """Close when the dimmed area outside the plot is clicked."""
