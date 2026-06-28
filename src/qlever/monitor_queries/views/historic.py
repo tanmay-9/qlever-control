@@ -219,13 +219,22 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.query_one(HistoricQueryTable).focus()
 
     def on_screen_resume(self) -> None:
-        """Catch up on log growth, then push state and rescan."""
+        """Catch up on log growth, then push state and rescan.
+
+        If the window was sitting at the log end when we left, follow the
+        log to its new end so a query that finished meanwhile is in view.
+        Otherwise, keep the parked window where the user left it.
+        """
+        was_at_end = self.window_end_ms == self.log_end_ms
         self.log_end_ms = self.read_log_end()
         self.available_presets = available_presets(
             self.log_end_ms - self.log_start_ms
         )
-        self.clamp_window()
-        self.refresh_view(rescan=True)
+        if was_at_end:
+            self.action_snap_end()
+        else:
+            self.clamp_window()
+            self.refresh_view(rescan=True)
 
     def read_log_end(self) -> int:
         """Return the freshest log timestamp the tailer has seen."""
