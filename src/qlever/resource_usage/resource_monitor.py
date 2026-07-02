@@ -11,7 +11,7 @@ from qlever.containerize import Containerize
 from qlever.log import log
 from qlever.util import (
     container_memory_to_bytes,
-    find_process_by_binary,
+    iter_processes_matching_regex,
     run_command,
 )
 
@@ -22,14 +22,24 @@ class Sample:
     fields are written as empty TSV columns."""
 
     elapsed_s: float | None = None
+    ts_ms: int | None = None
     rss: int | None = None
     cpu_percent: float | None = None
 
 
-def sample_to_tsv_row(sample: Sample) -> str:
+def sample_to_tsv_row(sample: Sample, use_epoch_ms: bool = False) -> str:
     """Format a Sample as a TSV row; None fields become empty columns."""
-    values = [getattr(sample, field.name) for field in fields(sample)]
+    names = tsv_column_names(use_epoch_ms)
+    values = [getattr(sample, name) for name in names]
     return "\t".join("" if v is None else str(v) for v in values) + "\n"
+
+
+def tsv_column_names(use_epoch_ms: bool) -> list[str]:
+    """Ordered TSV column names; the time column is `ts_ms` when
+    `use_epoch_ms`, else `elapsed_s`, and the other time field is
+    dropped so there is a single time column."""
+    skip = "elapsed_s" if use_epoch_ms else "ts_ms"
+    return [field.name for field in fields(Sample) if field.name != skip]
 
 
 def sample_process(proc: psutil.Process) -> Sample:
@@ -64,18 +74,13 @@ def sample_container(system: str, container: str) -> Sample:
 
 class ResourceMonitor:
     """
-    Monitor resource usage (memory, CPU) of an index-building
-    process. Works in both native mode (via psutil) and container mode
+    Monitor resource usage (memory, CPU) of a process.
+    Works in both native mode (via psutil) and container mode
     (via docker/podman stats).
 
     Usage as a context manager:
-
-        with ResourceMonitor(dataset="wikidata", binary="qlever-index"):
-            run_command(cmd, show_output=True)
-
-        # For container mode:
         with ResourceMonitor(dataset="wikidata",
-                             binary="qlever-index",
+                             cmdline_regex="^qlever-index.* -i wikidata",
                              container="qlever.index.wikidata",
                              system="docker"):
             run_command(cmd, show_output=True)
@@ -84,49 +89,55 @@ class ResourceMonitor:
     def __init__(
         self,
         dataset: str,
-        binary: str,
+        cmdline_regex: str,
         container: str | None = None,
         system: str | None = None,
         interval: float = 1.0,
         output_dir: Path | None = None,
-        parent_pid: int | None = None,
+        log_name: str | None = None,
+        append_mode: bool = False,
+        use_epoch_ms: bool = False,
     ):
         """
         Args:
-            dataset:    Name of the dataset being indexed.
-            binary:     Name of the index executable, matched against the
-                        descendant processes (native mode only).
-            container:  Container name to sample; when set with `system`,
-                        sampling uses `docker/podman stats` not psutil.
-            system:     Container runtime ("docker" or "podman").
-            interval:   Seconds between samples.
-            output_dir: Directory for the TSV usage log file.
-            parent_pid: PID whose descendants are searched for the index
-                        process. Defaults to the current process; pass a
-                        different PID when the target re-parents away from
-                        us.
+            dataset:       Name of the dataset.
+            cmdline_regex: Regex matched against each running process's
+                           joined command line to find the one to sample
+                           (native mode only).
+            container:     Container name to sample; when set with `system`,
+                           sampling uses `docker/podman stats` not psutil.
+            system:        Container runtime ("docker" or "podman").
+            interval:      Seconds between samples.
+            output_dir:    Directory for the TSV usage log file.
+            log_name:      TSV file name (default
+                           `{dataset}.resource-usage-log.tsv`).
+            append_mode:   Open the log file in append or write mode.
+            use_epoch_ms:  Write epoch_ms instead of elapsed_s to tsv log
         """
         self.dataset = dataset
-        self.binary = binary
+        self.cmdline_regex = cmdline_regex
         self.container = container
         self.system = system
         self.interval = interval
         self.output_dir = output_dir or Path.cwd()
-        self.parent_pid = parent_pid
+        self.log_name = log_name or f"{dataset}.resource-usage-log.tsv"
         self.peak_rss = 0
         self.worker_proc = None
         self.log_file = None
         self.stop_event = threading.Event()
         self.start_time = 0
+        self.mode = "a" if append_mode else "w"
+        self.use_epoch_ms = use_epoch_ms
 
     def take_sample(self) -> Sample:
         """Dispatch to container or native sampling, caching the resolved process."""
         if self.system in Containerize.supported_systems():
             return sample_container(self.system, self.container)
         if self.worker_proc is None or not self.worker_proc.is_running():
-            self.worker_proc = find_process_by_binary(
-                self.parent_pid, self.binary
+            match = next(
+                iter_processes_matching_regex(self.cmdline_regex), None
             )
+            self.worker_proc = match[0] if match else None
             if self.worker_proc is None:
                 return Sample()
             # cpu_percent reports usage since the previous call, so this
@@ -146,21 +157,26 @@ class ResourceMonitor:
         while not self.stop_event.is_set():
             sample = self.take_sample()
             sample.elapsed_s = round(time.monotonic() - self.start_time, 1)
+            sample.ts_ms = int(time.time() * 1000)
             if sample.rss is not None and self.log_file is not None:
                 self.peak_rss = max(self.peak_rss, sample.rss)
-                self.log_file.write(sample_to_tsv_row(sample))
+                self.log_file.write(
+                    sample_to_tsv_row(sample, self.use_epoch_ms)
+                )
                 self.log_file.flush()
             self.stop_event.wait(self.interval)
 
     def __enter__(self):
         """Open the TSV log, write the header, start sampling thread."""
-        self.log_path = (
-            self.output_dir / f"{self.dataset}.resource-usage-log.tsv"
+        self.log_path = self.output_dir / self.log_name
+        is_empty = (
+            not self.log_path.exists() or self.log_path.stat().st_size == 0
         )
-        self.log_file = open(self.log_path, "w")
-        header = "\t".join(f.name for f in fields(Sample)) + "\n"
-        self.log_file.write(header)
-        self.log_file.flush()
+        self.log_file = open(self.log_path, self.mode)
+        if is_empty:
+            header = "\t".join(tsv_column_names(self.use_epoch_ms)) + "\n"
+            self.log_file.write(header)
+            self.log_file.flush()
         self.start_time = time.monotonic()
         self.thread = threading.Thread(target=self.run_loop, daemon=True)
         self.thread.start()

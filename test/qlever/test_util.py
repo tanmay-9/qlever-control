@@ -1,9 +1,12 @@
+import re
+
 import pytest
 
 from qlever.util import (
     container_memory_to_bytes,
     get_random_string,
     parse_git_hash,
+    process_cmdline_regex,
 )
 
 
@@ -66,3 +69,55 @@ def test_parse_git_hash_empty_file(tmp_path):
     path = tmp_path / "empty.txt"
     path.write_text("")
     assert parse_git_hash(path) is None
+
+
+@pytest.mark.parametrize(
+    "binary,name,cmdline,expected",
+    [
+        # Exact match for the dataset the server was started for.
+        (
+            "qlever-server",
+            "wikidata",
+            "qlever-server -i wikidata -j 8 -p 7001",
+            True,
+        ),
+        # `-i name` is followed by end of command line.
+        ("qlever-server", "wikidata", "qlever-server -i wikidata", True),
+        # A different binary order of flags still matches.
+        (
+            "qlever-server",
+            "wikidata",
+            "qlever-server -p 7001 -j 8 -i wikidata",
+            True,
+        ),
+        # A longer dataset name must not match a prefix of it.
+        (
+            "qlever-server",
+            "wikidata",
+            "qlever-server -i wikidata2 -j 8",
+            False,
+        ),
+        # A longer binary name must not match a prefix of it.
+        ("qlever-server", "wikidata", "qlever-serverX -i wikidata", False),
+        # The binary must be at the start of the command line.
+        (
+            "qlever-server",
+            "wikidata",
+            "nohup qlever-server -i wikidata",
+            False,
+        ),
+        # A full path binary matches when invoked with that path.
+        (
+            "/opt/qlever-server",
+            "wikidata",
+            "/opt/qlever-server -i wikidata -p 1",
+            True,
+        ),
+        # Regex characters in the name are matched literally.
+        ("qlever-server", "my.data", "qlever-server -i my.data -p 1", True),
+        ("qlever-server", "my.data", "qlever-server -i myXdata -p 1", False),
+    ],
+)
+def test_process_cmdline_regex(binary, name, cmdline, expected):
+    regex = process_cmdline_regex(binary, name)
+    assert bool(re.search(regex, cmdline)) is expected

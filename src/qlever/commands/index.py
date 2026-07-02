@@ -15,6 +15,7 @@ from qlever.util import (
     get_existing_index_files,
     get_total_file_size,
     input_files_exist,
+    process_cmdline_regex,
     run_command,
 )
 
@@ -107,7 +108,7 @@ class IndexCommand(QleverCommand):
             action="store_true",
             default=False,
             help="Only render the resource-usage plot from the existing "
-            "`<name>.resource-usage-log.tsv`; do not build the index. Use "
+            "`<name>.index.resource-usage-log.tsv`; do not build the index. Use "
             "after installing the plotting libraries, or to re-render with "
             "a different `--resource-usage-plot-max-points`",
         )
@@ -388,10 +389,13 @@ class IndexCommand(QleverCommand):
         try:
             with ResourceMonitor(
                 dataset=args.name,
-                binary=args.index_binary,
+                cmdline_regex=process_cmdline_regex(
+                    args.index_binary, args.name
+                ),
                 container=args.index_container,
                 system=args.system,
                 interval=args.resource_usage_interval,
+                log_name=f"{args.name}.index.resource-usage-log.tsv",
             ) as monitor:
                 run_command(index_cmd, show_output=True)
                 log.info("")

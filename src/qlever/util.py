@@ -275,28 +275,6 @@ def show_process_info(psutil_process, cmdline_regex, show_heading=True):
         return False
 
 
-def find_process_by_binary(
-    parent_pid: int | None, binary: str
-) -> psutil.Process | None:
-    """Find a descendant of parent_pid whose argv[0] basename matches binary."""
-    try:
-        root = psutil.Process(parent_pid)
-        candidates = [root] + root.children(recursive=True)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return None
-    # Both sides use Path(...).name so any path form (relative, absolute,
-    # bare, symlink) matches as long as argv[0] preserves the binary's name.
-    target = Path(binary).name
-    for proc in candidates:
-        try:
-            cmdline = proc.cmdline()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-        if cmdline and Path(cmdline[0]).name == target:
-            return proc
-    return None
-
-
 def get_random_string(length: int) -> str:
     """
     Helper function that returns a randomly chosen string of the given
@@ -365,6 +343,22 @@ def stop_process_with_regex(cmdline_regex: str) -> list[bool] | None:
     Show the matched processes as log info.
     """
     stop_process_results = []
+    for proc, pinfo, cmdline in iter_processes_matching_regex(cmdline_regex):
+        log.info(
+            f"Found process {pinfo['pid']} from user "
+            f"{pinfo['username']} with command line: {cmdline}"
+        )
+        log.info("")
+        stop_process_results.append(stop_process(proc, pinfo))
+    return stop_process_results
+
+
+def iter_processes_matching_regex(cmdline_regex: str):
+    """
+    Yield `(process, pinfo, cmdline)` for every running process whose
+    joined command line matches `cmdline_regex`. `pinfo` is the process
+    info dict and `cmdline` is the joined command line string.
+    """
     for proc in psutil.process_iter():
         try:
             pinfo = proc.as_dict(
@@ -386,13 +380,13 @@ def stop_process_with_regex(cmdline_regex: str) -> list[bool] | None:
             log.debug(f"Error getting process info: {e}")
             continue
         if re.search(cmdline_regex, cmdline):
-            log.info(
-                f"Found process {pinfo['pid']} from user "
-                f"{pinfo['username']} with command line: {cmdline}"
-            )
-            log.info("")
-            stop_process_results.append(stop_process(proc, pinfo))
-    return stop_process_results
+            yield proc, pinfo, cmdline
+
+
+def process_cmdline_regex(binary: str, name: str) -> str:
+    """Regex matching `binary` invoked with `-i {name}`. Both parts are
+    matched exactly, so `wikidata` does not match `wikidata2`."""
+    return rf"^{re.escape(binary)}\b.* -i {re.escape(name)}(?: |$)"
 
 
 def binary_exists(binary: str, cmd_arg: str, args) -> bool:
