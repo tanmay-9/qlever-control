@@ -5,6 +5,7 @@ from qlever.monitor_queries.log_reader import (
     SNIPPET_BYTES,
     CompletedQuery,
     extract_qid_ip_query,
+    line_query_contains,
     load_sparql_at,
     load_sparql_snippet_at,
     next_whole_line,
@@ -420,6 +421,59 @@ def test_extract_qid_ip_query_missing_client_ip_falls_back_to_empty():
 
 def test_extract_qid_ip_query_malformed_json_returns_empty():
     assert extract_qid_ip_query(b"this is not json\n") == ("", "", "")
+
+
+def query_contains(query, raw_search):
+    """Build a start line around `query` and run line_query_contains."""
+    line = (
+        b'{"ts-ms":1,"event":"start","qid":"q77","client-ip":"1.2.3.4",'
+        b'"query":"' + query + b'"}\n'
+    )
+    return line_query_contains(line, 0, len(line) - 1, raw_search)
+
+
+def test_line_query_contains_finds_plain_text():
+    assert query_contains(b"SELECT * WHERE { ?s ?p ?o }", b"where")
+
+
+def test_line_query_contains_is_case_insensitive():
+    assert query_contains(b"SELECT * WHERE { ?s ?p ?o }", b"select")
+
+
+def test_line_query_contains_missing_text_is_false():
+    assert not query_contains(b"SELECT * WHERE { ?s ?p ?o }", b"construct")
+
+
+def test_line_query_contains_matches_escaped_quote():
+    # The file holds \"berlin\"; the search is escaped the same way.
+    assert query_contains(b'name \\"Berlin\\"', b'\\"berlin\\"')
+
+
+def test_line_query_contains_rejects_hit_inside_escape():
+    # The query is a, backslash, n, t, b: its bytes contain \nt, the
+    # escaped form of newline + t, but the query has no newline.
+    assert not query_contains(b"a\\\\ntb", b"\\nt")
+
+
+def test_line_query_contains_skips_fake_hit_then_finds_real_one():
+    # The query is a, backslash, newline, t, b: the first \nt hit
+    # starts inside the \\ escape, the second is the real newline.
+    assert query_contains(b"a\\\\\\ntb", b"\\nt")
+
+
+def test_line_query_contains_ignores_other_fields():
+    # q77 appears in the qid field, not in the query.
+    assert not query_contains(b"SELECT 1", b"q77")
+
+
+def test_line_query_contains_ignores_line_closing_bytes():
+    # The trailing "} closes the line itself, not query text.
+    assert not query_contains(b"SELECT 1", b'1"}')
+
+
+def test_line_query_contains_line_without_query_key_is_false():
+    line = b'{"ts-ms":1,"event":"end","qid":"q1","status":"ok"}\n'
+    assert not line_query_contains(line, 0, len(line) - 1, b"ok")
 
 
 def test_load_sparql_at_returns_qid_ip_and_query():

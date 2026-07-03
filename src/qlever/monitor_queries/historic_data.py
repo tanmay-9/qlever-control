@@ -7,6 +7,7 @@ mode at render time. A window change reruns the scan; a mode change
 reuses the scanned list.
 """
 
+import json
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -14,8 +15,10 @@ from typing import NamedTuple
 
 from qlever.monitor_queries.log_reader import (
     CLIENT_IP_KEY,
+    HEAD_BYTES,
     CompletedQuery,
     extract_qid_ip_query,
+    line_query_contains,
     load_sparql_snippet_at,
     offset_for_ts,
     open_log_buffer,
@@ -247,14 +250,23 @@ def filter_by_text(
 ) -> list[LoggedQuery]:
     """Keep queries whose start-line text passes the text filters.
 
-    Reads each surviving start line in ascending offset order and runs
-    the case-insensitive substring tests, retaining no text. The client
-    IP is sliced from the line bytes (IPs never escape), so only a
-    SPARQL filter decodes the line, and only for IP-test survivors.
-    Returns the same list when no text filter is set.
+    Both tests are case-insensitive substring checks. The client IP
+    test reads only the first HEAD_BYTES of the line. The SPARQL test
+    escapes the search text like the log itself and searches the raw
+    line bytes, so no line is decoded; only non-ASCII search text
+    falls back to decoding every line. Returns the same list when no
+    text filter is set.
     """
     if not filters.has_text_filter():
         return queries
+    ip_search = (filters.client_ip_substr or "").lower()
+    sparql_search = (filters.sparql_substr or "").lower()
+    # bytes.lower() only folds ASCII, so non-ASCII search text skips
+    # the raw search and decodes every line instead.
+    raw_search = None
+    if filters.sparql_substr is not None and filters.sparql_substr.isascii():
+        escaped = json.dumps(filters.sparql_substr, ensure_ascii=False)[1:-1]
+        raw_search = escaped.lower().encode()
     ordered = sorted(queries, key=lambda query: query.start_line_offset)
     kept = []
     with open_log_buffer(log_path) as buf:
@@ -262,16 +274,31 @@ def filter_by_text(
             return queries
         for query in ordered:
             offset = query.start_line_offset
-            end = buf.find(b"\n", offset)
-            line = buf[offset:] if end == -1 else buf[offset:end]
             if filters.client_ip_substr is not None:
-                client_ip = slice_string_value(line, CLIENT_IP_KEY) or ""
-                if filters.client_ip_substr.lower() not in client_ip.lower():
+                # Bounded so a short line cannot spill the next line's
+                # fields into the test.
+                head_end = buf.find(b"\n", offset, offset + HEAD_BYTES)
+                if head_end == -1:
+                    head_end = offset + HEAD_BYTES
+                head = buf[offset:head_end]
+                client_ip = slice_string_value(head, CLIENT_IP_KEY) or ""
+                if ip_search not in client_ip.lower():
                     continue
             if filters.sparql_substr is not None:
-                _, _, sparql = extract_qid_ip_query(line)
-                if filters.sparql_substr.lower() not in sparql.lower():
-                    continue
+                line_end = buf.find(b"\n", offset)
+                if line_end == -1:
+                    line_end = len(buf)
+                if raw_search is not None:
+                    if not line_query_contains(
+                        buf, offset, line_end, raw_search
+                    ):
+                        continue
+                else:
+                    # Non-ASCII search text: bytes cannot case-fold
+                    # it, so decode the line and compare as strings.
+                    _, _, sparql = extract_qid_ip_query(buf[offset:line_end])
+                    if sparql_search not in sparql.lower():
+                        continue
             kept.append(query)
     return kept
 
