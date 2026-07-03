@@ -31,6 +31,13 @@ class QleverCommand(ABC):
         """
         pass
 
+    def show_in_help(self) -> bool:
+        """
+        Whether to list this command in `qlever --help`. Hidden commands can
+        still be invoked, they are just not advertised.
+        """
+        return True
+
     @abstractmethod
     def should_have_qleverfile(self) -> bool:
         """

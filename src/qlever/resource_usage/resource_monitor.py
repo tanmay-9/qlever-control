@@ -72,6 +72,18 @@ def sample_container(system: str, container: str) -> Sample:
         return Sample()
 
 
+# Seconds the server may be missing before the standalone monitor exits.
+GRACE_PERIOD_S = 15
+
+
+def next_missing_count(missing_count: int, sample: Sample) -> int:
+    """Consecutive count of samples where the server was not found; resets
+    to 0 on any sample that has data."""
+    if sample.rss is None:
+        return missing_count + 1
+    return 0
+
+
 class ResourceMonitor:
     """
     Monitor resource usage (memory, CPU) of a process.
@@ -149,25 +161,29 @@ class ResourceMonitor:
                 return Sample()
         return sample_process(self.worker_proc)
 
+    def write_one_sample(self) -> Sample:
+        """Take one sample, stamp it with time, and append it to the log if
+        it has data; returns the sample."""
+        sample = self.take_sample()
+        sample.elapsed_s = round(time.monotonic() - self.start_time, 1)
+        sample.ts_ms = int(time.time() * 1000)
+        if sample.rss is not None and self.log_file is not None:
+            self.peak_rss = max(self.peak_rss, sample.rss)
+            self.log_file.write(sample_to_tsv_row(sample, self.use_epoch_ms))
+            self.log_file.flush()
+        return sample
+
     def run_loop(self):
         """
         Polling loop on a background thread. Samples resource usage
         and appends one TSV row per iteration until stop_event is set.
         """
         while not self.stop_event.is_set():
-            sample = self.take_sample()
-            sample.elapsed_s = round(time.monotonic() - self.start_time, 1)
-            sample.ts_ms = int(time.time() * 1000)
-            if sample.rss is not None and self.log_file is not None:
-                self.peak_rss = max(self.peak_rss, sample.rss)
-                self.log_file.write(
-                    sample_to_tsv_row(sample, self.use_epoch_ms)
-                )
-                self.log_file.flush()
+            self.write_one_sample()
             self.stop_event.wait(self.interval)
 
-    def __enter__(self):
-        """Open the TSV log, write the header, start sampling thread."""
+    def open_log(self):
+        """Open the TSV log, writing the header if the file is new or empty."""
         self.log_path = self.output_dir / self.log_name
         is_empty = (
             not self.log_path.exists() or self.log_path.stat().st_size == 0
@@ -177,6 +193,26 @@ class ResourceMonitor:
             header = "\t".join(tsv_column_names(self.use_epoch_ms)) + "\n"
             self.log_file.write(header)
             self.log_file.flush()
+
+    def run_until_server_gone(self):
+        """Sample in the calling thread until the server has been missing for
+        `GRACE_PERIOD_S`, then close the log. Used by the standalone monitor
+        process, which has no with-block body to end sampling."""
+        self.open_log()
+        self.start_time = time.monotonic()
+        missing_limit = round(GRACE_PERIOD_S / self.interval)
+        missing_count = 0
+        while True:
+            sample = self.write_one_sample()
+            missing_count = next_missing_count(missing_count, sample)
+            if missing_count >= missing_limit:
+                break
+            time.sleep(self.interval)
+        self.log_file.close()
+
+    def __enter__(self):
+        """Open the TSV log, write the header, start sampling thread."""
+        self.open_log()
         self.start_time = time.monotonic()
         self.thread = threading.Thread(target=self.run_loop, daemon=True)
         self.thread.start()

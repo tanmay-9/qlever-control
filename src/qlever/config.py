@@ -75,11 +75,14 @@ class QleverConfig:
             log.info("")
             exit(1)
 
-        # Add the subparser.
+        # Add the subparser. Passing no `help` (not `SUPPRESS`) is what keeps
+        # a hidden command out of the `qlever --help` listing; its own
+        # `description` is still shown on `qlever <command> --help`.
         description = command_object.description()
-        subparser = subparsers.add_parser(
-            command_name, description=description, help=description
-        )
+        add_parser_kwargs = {"description": description}
+        if command_object.show_in_help():
+            add_parser_kwargs["help"] = description
+        subparser = subparsers.add_parser(command_name, **add_parser_kwargs)
 
         # Add the arguments relevant for the command.
         for section in arg_names:
@@ -224,7 +227,15 @@ class QleverConfig:
                 version=f"%(prog)s {version('qlever')}",
             )
         add_qleverfile_option(parser)
-        subparsers = parser.add_subparsers(dest="command")
+        # Build the `{start,stop,...}` usage line from visible commands only.
+        visible_commands = [
+            name
+            for name, command_object in command_objects.items()
+            if command_object.show_in_help()
+        ]
+        subparsers = parser.add_subparsers(
+            dest="command", metavar="{" + ",".join(visible_commands) + "}"
+        )
         subparsers.required = True
         all_args = Qleverfile.all_arguments()
         for command_name, command_object in command_objects.items():

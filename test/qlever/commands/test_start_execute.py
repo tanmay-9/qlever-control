@@ -304,6 +304,13 @@ def test_set_text_description_exception(mock_log, mock_run_cmd):
 
 
 class TestStartCommand(unittest.TestCase):
+    def setUp(self):
+        # `execute` spawns the detached resource monitor; that behavior is
+        # tested separately, so neutralize it here.
+        patcher = patch("qlever.commands.start.spawn_resource_monitor")
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
     @staticmethod
     def _mock_log_file(mock_path_cls, name):
         mock_log_file = mock_path_cls.return_value

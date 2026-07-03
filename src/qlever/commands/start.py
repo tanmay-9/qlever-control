@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 import shlex
 import time
 from pathlib import Path
 
+from qlever import script_name
 from qlever.command import QleverCommand
 from qlever.commands.cache_stats import CacheStatsCommand
 from qlever.commands.settings import SettingsCommand
@@ -16,6 +18,7 @@ from qlever.qleverfile import Qleverfile
 from qlever.util import (
     binary_exists,
     is_qlever_server_alive,
+    iter_processes_matching_regex,
     run_command,
     tail_log_file,
 )
@@ -121,6 +124,33 @@ def set_text_description(access_arg, port, text_desc) -> bool:
         log.error(f"Setting the text description failed ({e})")
         return False
     return True
+
+
+def spawn_resource_monitor(args) -> None:
+    """Spawn the detached resource monitor for this dataset unless one is
+    already running. Best-effort: a failure here does not fail `start`."""
+    monitor_regex = (
+        rf"{re.escape(script_name)}\b.* server-resource-monitor\b.* "
+        rf"--name {re.escape(args.name)}\b"
+    )
+    if next(iter_processes_matching_regex(monitor_regex), None):
+        log.info("Resource monitor is already running")
+        return
+    monitor_cmd = (
+        f"{script_name} server-resource-monitor"
+        f" --name {shlex.quote(args.name)}"
+        f" --server-binary {shlex.quote(args.server_binary)}"
+        f" --system {shlex.quote(args.system)}"
+    )
+    if args.server_container:
+        monitor_cmd += (
+            f" --server-container {shlex.quote(args.server_container)}"
+        )
+    try:
+        run_command(f"nohup {monitor_cmd} > /dev/null 2>&1 &")
+        log.info("Resource monitor started")
+    except Exception as e:
+        log.warning(f"Could not start the resource monitor: {e}")
 
 
 class StartCommand(QleverCommand):
@@ -329,6 +359,9 @@ class StartCommand(QleverCommand):
                 tail_proc.terminate()
                 return False
             time.sleep(1)
+
+        # Start the detached resource monitor for the server's lifetime.
+        spawn_resource_monitor(args)
 
         # Set the description for the index and text.
         access_arg = f'--data-urlencode "access-token={args.access_token}"'

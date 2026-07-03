@@ -5,6 +5,7 @@ import pytest
 
 from qlever.resource_usage.resource_monitor import (
     Sample,
+    next_missing_count,
     sample_container,
     sample_process,
     sample_to_tsv_row,
@@ -57,3 +58,25 @@ def test_sample_process_returns_empty_when_process_gone():
     proc.memory_info.side_effect = psutil.NoSuchProcess(pid=123)
     sample = sample_process(proc)
     assert sample == Sample()
+
+
+def test_next_missing_count_increments_on_missing_sample():
+    assert next_missing_count(3, Sample()) == 4
+
+
+def test_next_missing_count_resets_on_sample_with_data():
+    assert next_missing_count(3, Sample(rss=2048)) == 0
+
+
+def test_next_missing_count_accumulates_over_consecutive_misses():
+    count = 0
+    for _ in range(5):
+        count = next_missing_count(count, Sample())
+    assert count == 5
+
+
+def test_next_missing_count_reset_interrupts_a_streak():
+    count = next_missing_count(0, Sample())
+    count = next_missing_count(count, Sample())
+    count = next_missing_count(count, Sample(rss=1))
+    assert count == 0
