@@ -423,13 +423,13 @@ def test_extract_qid_ip_query_malformed_json_returns_empty():
     assert extract_qid_ip_query(b"this is not json\n") == ("", "", "")
 
 
-def query_contains(query, raw_search):
+def query_contains(query, raw_search, ignore_case=True):
     """Build a start line around `query` and run line_query_contains."""
     line = (
         b'{"ts-ms":1,"event":"start","qid":"q77","client-ip":"1.2.3.4",'
         b'"query":"' + query + b'"}\n'
     )
-    return line_query_contains(line, 0, len(line) - 1, raw_search)
+    return line_query_contains(line, 0, len(line) - 1, raw_search, ignore_case)
 
 
 def test_line_query_contains_finds_plain_text():
@@ -461,6 +461,16 @@ def test_line_query_contains_skips_fake_hit_then_finds_real_one():
     assert query_contains(b"a\\\\\\ntb", b"\\nt")
 
 
+def test_line_query_contains_exact_matches_same_case():
+    query = "label 'Zürich'".encode()
+    assert query_contains(query, "Zürich".encode(), ignore_case=False)
+
+
+def test_line_query_contains_exact_rejects_other_case():
+    query = "label 'Zürich'".encode()
+    assert not query_contains(query, "zürich".encode(), ignore_case=False)
+
+
 def test_line_query_contains_ignores_other_fields():
     # q77 appears in the qid field, not in the query.
     assert not query_contains(b"SELECT 1", b"q77")
@@ -473,7 +483,7 @@ def test_line_query_contains_ignores_line_closing_bytes():
 
 def test_line_query_contains_line_without_query_key_is_false():
     line = b'{"ts-ms":1,"event":"end","qid":"q1","status":"ok"}\n'
-    assert not line_query_contains(line, 0, len(line) - 1, b"ok")
+    assert not line_query_contains(line, 0, len(line) - 1, b"ok", True)
 
 
 def test_load_sparql_at_returns_qid_ip_and_query():

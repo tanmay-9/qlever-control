@@ -17,7 +17,6 @@ from qlever.monitor_queries.log_reader import (
     CLIENT_IP_KEY,
     HEAD_BYTES,
     CompletedQuery,
-    extract_qid_ip_query,
     line_query_contains,
     load_sparql_snippet_at,
     offset_for_ts,
@@ -260,13 +259,17 @@ def filter_by_text(
     if not filters.has_text_filter():
         return queries
     ip_search = (filters.client_ip_substr or "").lower()
-    sparql_search = (filters.sparql_substr or "").lower()
-    # bytes.lower() only folds ASCII, so non-ASCII search text skips
-    # the raw search and decodes every line instead.
+    # An ASCII term matches case-insensitively; a term with any
+    # non-ASCII char matches exactly, since bytes.lower() only folds
+    # ASCII.
     raw_search = None
-    if filters.sparql_substr is not None and filters.sparql_substr.isascii():
+    ignore_case = True
+    if filters.sparql_substr is not None:
+        ignore_case = filters.sparql_substr.isascii()
         escaped = json.dumps(filters.sparql_substr, ensure_ascii=False)[1:-1]
-        raw_search = escaped.lower().encode()
+        raw_search = (
+            escaped.lower().encode() if ignore_case else escaped.encode()
+        )
     ordered = sorted(queries, key=lambda query: query.start_line_offset)
     kept = []
     with open_log_buffer(log_path) as buf:
@@ -288,17 +291,10 @@ def filter_by_text(
                 line_end = buf.find(b"\n", offset)
                 if line_end == -1:
                     line_end = len(buf)
-                if raw_search is not None:
-                    if not line_query_contains(
-                        buf, offset, line_end, raw_search
-                    ):
-                        continue
-                else:
-                    # Non-ASCII search text: bytes cannot case-fold
-                    # it, so decode the line and compare as strings.
-                    _, _, sparql = extract_qid_ip_query(buf[offset:line_end])
-                    if sparql_search not in sparql.lower():
-                        continue
+                if not line_query_contains(
+                    buf, offset, line_end, raw_search, ignore_case
+                ):
+                    continue
             kept.append(query)
     return kept
 

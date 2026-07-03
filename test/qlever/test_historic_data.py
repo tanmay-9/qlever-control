@@ -611,8 +611,18 @@ def test_filter_by_text_non_ascii_search_text_matches(write_log):
             ("q2", "SELECT b", "x"),
         ],
     )
-    filters = FilterState(sparql_substr="zürich")
+    # A non-ASCII term matches exactly, so the same case is kept.
+    filters = FilterState(sparql_substr="Zürich")
     assert filter_by_text(path, queries, filters) == [queries[0]]
+
+
+def test_filter_by_text_non_ascii_search_text_is_case_sensitive(write_log):
+    path, queries = text_log(
+        write_log, [("q1", "SELECT ?s { ?s rdfs:label 'Zürich' }", "x")]
+    )
+    # Different case on the non-ASCII term does not match.
+    filters = FilterState(sparql_substr="zürich")
+    assert filter_by_text(path, queries, filters) == []
 
 
 def test_filter_by_text_client_ip_on_line_longer_than_head(write_log):

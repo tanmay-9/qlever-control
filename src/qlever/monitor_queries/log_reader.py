@@ -391,22 +391,27 @@ def extract_qid_ip_query(line_bytes: bytes) -> tuple[str, str, str]:
 
 
 def line_query_contains(
-    buf: LogBuffer, line_offset: int, line_end: int, raw_search: bytes
+    buf: LogBuffer,
+    line_offset: int,
+    line_end: int,
+    raw_search: bytes,
+    ignore_case: bool,
 ) -> bool:
     """Whether the start line's query text contains the raw search.
 
-    `raw_search` must be lowercased and JSON-escaped like the log
-    itself. Only the query value is searched: it starts after the
-    `query` key and ends before the line's closing quote and brace. A
-    hit preceded by an odd number of backslashes starts inside an
-    escape sequence, so it is not a real occurrence and the search
-    moves on to the next hit.
+    `raw_search` must be JSON-escaped like the log. When `ignore_case`
+    is true both it and the value are lowercased for a case-insensitive
+    match; when false both stay as-is for an exact match. A hit
+    preceded by an odd number of backslashes sits inside an escape
+    sequence, so it is skipped.
     """
     value_start = buf.find(QUERY_KEY, line_offset, line_end)
     if value_start == -1:
         return False
     value_start += len(QUERY_KEY)
-    value = buf[value_start : max(line_end - 2, value_start)].lower()
+    value = buf[value_start : max(line_end - 2, value_start)]
+    if ignore_case:
+        value = value.lower()
     position = value.find(raw_search)
     while position != -1:
         backslashes = 0
