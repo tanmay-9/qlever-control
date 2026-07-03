@@ -449,7 +449,10 @@ def load_sparql_snippet_at(
     qid = slice_string_value(head, QID_KEY) or ""
     client_ip = slice_string_value(head, CLIENT_IP_KEY) or ""
 
-    value_start = buf.find(QUERY_KEY, line_offset) + len(QUERY_KEY)
+    key_at = buf.find(QUERY_KEY, line_offset)
+    if key_at == -1:
+        return qid, client_ip, ""
+    value_start = key_at + len(QUERY_KEY)
     limit = value_start + SNIPPET_BYTES
     # Bounded so a large query is never scanned past the cap.
     end = buf.find(b"\n", line_offset, limit + 2)
