@@ -6,6 +6,7 @@ from textual.reactive import reactive
 from textual.widgets import Static
 
 from qlever.monitor_queries.models import MetricsCounts
+from qlever.monitor_queries.util import format_seconds
 
 METRIC_COLORS = {
     "ok": "$success",
@@ -48,14 +49,10 @@ def format_count(n: int | None) -> str:
 
 
 def format_ms(ms: int | None) -> str:
-    """Render a duration in seconds, ellipsis if not computed.
-
-    Uses 2 decimals under 1 s, 1 decimal otherwise.
-    """
+    """Render a duration to 3 significant figures, ellipsis if unset."""
     if ms is None:
         return "…"
-    seconds = ms / 1000
-    return f"{seconds:.2f}s" if seconds < 1 else f"{seconds:.1f}s"
+    return f"{format_seconds(ms / 1000)}s"
 
 
 def format_value(value: int | None, kind: str) -> str:

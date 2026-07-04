@@ -61,10 +61,9 @@ class MonitorQueriesCommand(QleverCommand):
         subparser.add_argument(
             "--refresh",
             type=float,
-            default=REFRESH_MIN_S,
+            default=1,
             help="Live view screen refresh interval in seconds, between"
-            f" {REFRESH_MIN_S} and {REFRESH_MAX_S}"
-            f" (default = {REFRESH_MIN_S})",
+            f" {REFRESH_MIN_S} and {REFRESH_MAX_S} (default = 1)",
         )
 
     def execute(self, args) -> bool:

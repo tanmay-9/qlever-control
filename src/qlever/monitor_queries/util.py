@@ -21,11 +21,28 @@ def format_clock(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000).strftime("%H:%M:%S")
 
 
+def format_seconds(seconds: float) -> str:
+    """Format seconds to 3 shown digits, no unit suffix.
+
+    The leading zero counts as a digit, so it is dropped below 0.1
+    (.032) to keep exactly three digits on screen.
+    """
+    if seconds >= 10.0:
+        text = f"{seconds:.1f}"
+    elif seconds >= 0.1:
+        text = f"{seconds:.2f}"
+    elif seconds == 0:
+        text = "0"
+    else:
+        text = f"{seconds:.3f}"[1:]
+    return text
+
+
 def format_duration(ms: int) -> str:
-    """Render a duration in seconds to one decimal, or '?' when unknown."""
+    """Render a duration in seconds to 3 significant figures, or '?'."""
     if ms < 0:
         return "?"
-    return f"{ms / 1000:.1f}s"
+    return f"{format_seconds(ms / 1000)}s"
 
 
 def truncate(text: str, max_len: int) -> str:
