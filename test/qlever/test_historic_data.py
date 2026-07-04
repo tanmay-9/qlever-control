@@ -572,3 +572,64 @@ def test_filter_by_text_combines_client_ip_and_sparql(write_log):
     )
     filters = FilterState(client_ip_substr="192.168", sparql_substr="select")
     assert filter_by_text(path, queries, filters) == [queries[0]]
+
+
+def test_filter_by_text_sparql_with_quotes_matches_escaped_line(write_log):
+    # The file holds \"Berlin\"; the filter uses plain quotes.
+    path, queries = text_log(
+        write_log,
+        [("q1", 'name \\"Berlin\\"', "x"), ("q2", "SELECT b", "x")],
+    )
+    filters = FilterState(sparql_substr='"berlin"')
+    assert filter_by_text(path, queries, filters) == [queries[0]]
+
+
+def test_filter_by_text_sparql_with_newline_matches_escaped_line(write_log):
+    # The file holds line1\nline2; the filter uses a real newline.
+    path, queries = text_log(
+        write_log,
+        [("q1", "line1\\nline2", "x"), ("q2", "SELECT b", "x")],
+    )
+    filters = FilterState(sparql_substr="e1\nl")
+    assert filter_by_text(path, queries, filters) == [queries[0]]
+
+
+def test_filter_by_text_rejects_fake_byte_hit(write_log):
+    # The query is a, backslash, n, t, b, stored as a\\ntb. Those bytes
+    # contain \nt, the escaped form of newline + t, but the decoded
+    # query has no newline, so the query must be dropped.
+    path, queries = text_log(write_log, [("q1", "a\\\\ntb", "x")])
+    filters = FilterState(sparql_substr="\nt")
+    assert filter_by_text(path, queries, filters) == []
+
+
+def test_filter_by_text_non_ascii_search_text_matches(write_log):
+    path, queries = text_log(
+        write_log,
+        [
+            ("q1", "SELECT ?s { ?s rdfs:label 'Zürich' }", "x"),
+            ("q2", "SELECT b", "x"),
+        ],
+    )
+    # A non-ASCII term matches exactly, so the same case is kept.
+    filters = FilterState(sparql_substr="Zürich")
+    assert filter_by_text(path, queries, filters) == [queries[0]]
+
+
+def test_filter_by_text_non_ascii_search_text_is_case_sensitive(write_log):
+    path, queries = text_log(
+        write_log, [("q1", "SELECT ?s { ?s rdfs:label 'Zürich' }", "x")]
+    )
+    # Different case on the non-ASCII term does not match.
+    filters = FilterState(sparql_substr="zürich")
+    assert filter_by_text(path, queries, filters) == []
+
+
+def test_filter_by_text_client_ip_on_line_longer_than_head(write_log):
+    long_query = "SELECT " + "x" * 1000
+    path, queries = text_log(
+        write_log,
+        [("q1", long_query, "192.168.0.7"), ("q2", long_query, "10.0.0.1")],
+    )
+    filters = FilterState(client_ip_substr="192.168")
+    assert filter_by_text(path, queries, filters) == [queries[0]]

@@ -7,6 +7,7 @@ mode at render time. A window change reruns the scan; a mode change
 reuses the scanned list.
 """
 
+import json
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -14,10 +15,12 @@ from typing import NamedTuple
 
 from qlever.monitor_queries.log_reader import (
     CLIENT_IP_KEY,
+    HEAD_BYTES,
     CompletedQuery,
-    extract_qid_ip_query,
-    load_sparql_at,
+    line_query_contains,
+    load_sparql_snippet_at,
     offset_for_ts,
+    open_log_buffer,
     pair_start_end_events,
     scan_range,
     slice_string_value,
@@ -73,13 +76,12 @@ def read_window(
     `pad_ms` of `log_end_ms` and the log itself is fresh
     (`now_ms - log_end_ms <= pad_ms`); otherwise `"orphaned"`.
     """
-    with log_path.open("rb") as log_stream:
-        file_size = log_path.stat().st_size
-        lo_offset = offset_for_ts(
-            log_stream, window_start_ms - pad_ms, file_size
-        )
-        hi_bound = offset_for_ts(log_stream, window_end_ms + pad_ms, file_size)
-        events = scan_range(log_stream, lo_offset, hi_bound, should_cancel)
+    with open_log_buffer(log_path) as buf:
+        if buf is None:
+            return []
+        lo_offset = offset_for_ts(buf, window_start_ms - pad_ms)
+        hi_bound = offset_for_ts(buf, window_end_ms + pad_ms)
+        events = scan_range(buf, lo_offset, hi_bound, should_cancel)
         completed, still_open = pair_start_end_events(events)
 
         queries = []
@@ -247,27 +249,51 @@ def filter_by_text(
 ) -> list[LoggedQuery]:
     """Keep queries whose start-line text passes the text filters.
 
-    Reads each surviving start line in ascending offset order and runs
-    the case-insensitive substring tests, retaining no text. The client
-    IP is sliced from the line bytes (IPs never escape), so only a
-    SPARQL filter decodes the line, and only for IP-test survivors.
-    Returns the same list when no text filter is set.
+    Both tests are case-insensitive substring checks. The client IP
+    test reads only the first HEAD_BYTES of the line. The SPARQL test
+    escapes the search text like the log itself and searches the raw
+    line bytes, so no line is decoded; only non-ASCII search text
+    falls back to decoding every line. Returns the same list when no
+    text filter is set.
     """
     if not filters.has_text_filter():
         return queries
+    ip_search = (filters.client_ip_substr or "").lower()
+    # An ASCII term matches case-insensitively; a term with any
+    # non-ASCII char matches exactly, since bytes.lower() only folds
+    # ASCII.
+    raw_search = None
+    ignore_case = True
+    if filters.sparql_substr is not None:
+        ignore_case = filters.sparql_substr.isascii()
+        escaped = json.dumps(filters.sparql_substr, ensure_ascii=False)[1:-1]
+        raw_search = (
+            escaped.lower().encode() if ignore_case else escaped.encode()
+        )
     ordered = sorted(queries, key=lambda query: query.start_line_offset)
     kept = []
-    with log_path.open("rb") as log_stream:
+    with open_log_buffer(log_path) as buf:
+        if buf is None:
+            return queries
         for query in ordered:
-            log_stream.seek(query.start_line_offset)
-            line = log_stream.readline()
+            offset = query.start_line_offset
             if filters.client_ip_substr is not None:
-                client_ip = slice_string_value(line, CLIENT_IP_KEY) or ""
-                if filters.client_ip_substr.lower() not in client_ip.lower():
+                # Bounded so a short line cannot spill the next line's
+                # fields into the test.
+                head_end = buf.find(b"\n", offset, offset + HEAD_BYTES)
+                if head_end == -1:
+                    head_end = offset + HEAD_BYTES
+                head = buf[offset:head_end]
+                client_ip = slice_string_value(head, CLIENT_IP_KEY) or ""
+                if ip_search not in client_ip.lower():
                     continue
             if filters.sparql_substr is not None:
-                _, _, sparql = extract_qid_ip_query(line)
-                if filters.sparql_substr.lower() not in sparql.lower():
+                line_end = buf.find(b"\n", offset)
+                if line_end == -1:
+                    line_end = len(buf)
+                if not line_query_contains(
+                    buf, offset, line_end, raw_search, ignore_case
+                ):
                     continue
             kept.append(query)
     return kept
@@ -281,19 +307,23 @@ def load_query_details(
     """Fill the details cache for any of the given start-line offsets.
 
     The `qid`, `client_ip`, and SPARQL text live on each query's start
-    line, which `read_window` did not read. Offsets already cached are
-    reused; the rest are read in one pass, opening the file only when
-    something is missing. The cache is scoped to one window so a sort
-    or mode change repaints from memory.
+    line, which `read_window` did not read. Only the start of the query
+    is read, since the table truncates it; the SparqlPane reads the full
+    text on demand. Offsets already cached are reused; the rest are read
+    in one pass, opening the file only when something is missing. The
+    cache is scoped to one window so a sort or mode change repaints from
+    memory.
     """
     missing = [
         offset for offset in offsets if offset not in query_details_cache
     ]
     if missing:
-        with log_path.open("rb") as log_stream:
+        with open_log_buffer(log_path) as buf:
+            if buf is None:
+                return
             for offset in missing:
-                query_details_cache[offset] = load_sparql_at(
-                    log_stream, offset
+                query_details_cache[offset] = load_sparql_snippet_at(
+                    buf, offset
                 )
 
 
