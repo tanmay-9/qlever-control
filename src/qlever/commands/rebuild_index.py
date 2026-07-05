@@ -142,6 +142,7 @@ class RebuildIndexCommand(QleverCommand):
                 "only_pso_and_pos_permutations",
                 "use_patterns",
                 "use_text_index",
+                "metrics_log",
                 "warmup_cmd",
             ],
             "runtime": [
