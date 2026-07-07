@@ -252,12 +252,18 @@ class Qleverfile:
             help="File with the documents for the text index (one line "
             "per document, format: `id\tdocument text`)",
         )
+        index_args["resource_usage_log"] = arg(
+            "--resource-usage-log",
+            choices=["yes", "no"],
+            default="yes",
+            help="Whether the index binary writes a TSV log of its RSS "
+            "and CPU usage (`<name>.index.resource-usage-log.tsv`)",
+        )
         index_args["resource_usage_interval"] = arg(
             "--resource-usage-interval",
-            type=float,
-            default=1.0,
-            help="Seconds between resource-usage samples (memory, CPU) "
-            "collected during the index build",
+            type=int,
+            default=1,
+            help="Seconds between the samples in the resource-usage log",
         )
         index_args["resource_usage_plot_max_points"] = arg(
             "--resource-usage-plot-max-points",
@@ -361,6 +367,19 @@ class Qleverfile:
             default="yes",
             help="Whether to produce the per-query metrics log, a JSONL log of "
             "query start/end events (`.metrics-log.jsonl`)",
+        )
+        server_args["resource_usage_log"] = arg(
+            "--resource-usage-log",
+            choices=["yes", "no"],
+            default="yes",
+            help="Whether the server writes a TSV log of its RSS and "
+            "CPU usage (`<name>.server.resource-usage-log.tsv`)",
+        )
+        server_args["resource_usage_interval"] = arg(
+            "--resource-usage-interval",
+            type=int,
+            default=2,
+            help="Seconds between the samples in the resource-usage log",
         )
         server_args["use_text_index"] = arg(
             "--use-text-index",

@@ -44,6 +44,9 @@ def validate_index(args, index_dir: str) -> bool:
     validation_args.cache_max_size_single_entry = "10M"
     validation_args.timeout = "1s"
     validation_args.warmup_cmd = ""
+    # No resource-usage log for the throwaway validation server; its file
+    # would later be moved over the live server's log.
+    validation_args.resource_usage_log = "no"
     validation_args.show = False
     # Additional arguments expected by StartCommand and StopCommand
     # (normally set by argparse, but we call execute() directly).
@@ -143,6 +146,8 @@ class RebuildIndexCommand(QleverCommand):
                 "use_patterns",
                 "use_text_index",
                 "metrics_log",
+                "resource_usage_log",
+                "resource_usage_interval",
                 "warmup_cmd",
             ],
             "runtime": [
