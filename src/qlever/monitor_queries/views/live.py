@@ -290,11 +290,13 @@ class LiveScreen(Screen, inherit_bindings=False):
             self.resource_history, self.resource_totals
         )
 
-    def live_resource_plot(self) -> ResourcePlot:
+    def live_resource_plot(self, max_points: int) -> ResourcePlot:
         """Snapshot the buffer as the rolling 5-minute plot window.
 
         Recomputes the window end on each call, so the plot's timer rolls
-        the view forward the same way the sparklines roll.
+        the view forward the same way the sparklines roll. max_points is
+        unused: the buffer never exceeds the plot's point budget, so the
+        live window is drawn without bucketing.
         """
         now = current_ms()
         return get_resource_plot(

@@ -24,7 +24,7 @@ class ResourcePlotModal(ModalScreen):
 
     def __init__(
         self,
-        source: Callable[[], ResourcePlot],
+        source: Callable[[int], ResourcePlot],
         refresh_interval: float | None = None,
     ) -> None:
         super().__init__()

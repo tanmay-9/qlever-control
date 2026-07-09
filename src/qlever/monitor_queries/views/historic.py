@@ -33,8 +33,13 @@ from qlever.monitor_queries.models import (
     FilterState,
     HistoricQueryRow,
     MetricsCounts,
+    ResourcePlot,
     SparqlContent,
     TimelineBounds,
+)
+from qlever.monitor_queries.resource_data import (
+    get_resource_plot,
+    read_resource_window,
 )
 from qlever.monitor_queries.util import oneline, truncate
 from qlever.monitor_queries.views.filter_modal import (
@@ -42,13 +47,17 @@ from qlever.monitor_queries.views.filter_modal import (
     FilterModal,
 )
 from qlever.monitor_queries.widgets.controls_row import HistoricControlsRow
+from qlever.monitor_queries.widgets.detail_switcher import DetailSwitcher
 from qlever.monitor_queries.widgets.header_row import HeaderRow
 from qlever.monitor_queries.widgets.metrics_row import MetricsRow
 from qlever.monitor_queries.widgets.mode_picker import MODES, ModePicker
 from qlever.monitor_queries.widgets.nav_pill import NavPill
 from qlever.monitor_queries.widgets.query_table import HistoricQueryTable
+from qlever.monitor_queries.widgets.resource_plot_pane import (
+    ResourcePlotPane,
+    point_budget,
+)
 from qlever.monitor_queries.widgets.selected_window import SelectedWindow
-from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
 from qlever.monitor_queries.widgets.timeline import Timeline
 from qlever.monitor_queries.widgets.window_stepper import (
     WindowStepper,
@@ -157,6 +166,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("i", "invert_sort", "Invert sort"),
         Binding("f", "edit_filter", "Filter"),
         Binding("F", "clear_filters", "Clear filters"),
+        Binding("r", "show_plot", "Resource plot"),
+        Binding("s", "show_sparql", "SPARQL"),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
 
@@ -185,6 +196,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.render_cache = {}
         self.rescan_timer = None
         self.cached_window = None
+        self.resource_plot = None
         controls = ControlsState(
             window_size=self.window_size,
             mode=self.mode,
@@ -211,7 +223,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
         yield Static("", id="filter-row")
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
-        yield SparqlPane()
+        yield DetailSwitcher(
+            source=self.historic_resource_plot, refresh_interval=None
+        )
         yield Footer(show_command_palette=False)
 
     def on_mount(self) -> None:
@@ -290,12 +304,16 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Collapse a fast window scrub into one scan of where the user lands."""
         if self.rescan_timer is not None:
             self.rescan_timer.stop()
+        max_points = point_budget(self.query_one(ResourcePlotPane).size.width)
         self.rescan_timer = self.set_timer(
-            RESCAN_DEBOUNCE_S, lambda: self.refresh_data(rescan=True)
+            RESCAN_DEBOUNCE_S,
+            lambda: self.refresh_data(rescan=True, max_points=max_points),
         )
 
     @work(thread=True, exclusive=True, group="refresh_data")
-    def refresh_data(self, rescan: bool) -> None:
+    def refresh_data(
+        self, rescan: bool, max_points: int | None = None
+    ) -> None:
         """Scan and/or re-filter the window, push rows + metrics + status.
 
         On `rescan` the log is read into a fresh list of window queries
@@ -325,6 +343,17 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.query_details_cache = {}
             self.render_cache = {}
             self.cached_window = (self.window_start_ms, self.window_end_ms)
+            plot = read_resource_window(
+                self.app.resource_log,
+                self.app.resource_totals,
+                self.window_start_ms,
+                self.window_end_ms,
+                max_points,
+                should_cancel=lambda: worker.is_cancelled,
+            )
+            if worker.is_cancelled:
+                return
+            self.resource_plot = plot
         if self.mode in self.render_cache:
             selected, metrics = self.render_cache[self.mode]
         else:
@@ -366,6 +395,36 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.status_text(len(self.all_rows))
         )
         self.refresh_sort_indicator()
+        self.query_one(DetailSwitcher).replot_if_visible()
+
+    def historic_resource_plot(self, max_points: int) -> ResourcePlot:
+        """Return the current window's resource plot for the pane to draw.
+
+        The plot is read on the refresh_data worker when the window
+        changes and held in self.resource_plot, so this hands it back
+        directly. max_points is unused here: the worker read used the
+        pane width at scan time, and a resize or theme redraw reuses that
+        bucketing rather than re-reading the log. Before the first read,
+        an empty plot frames the current window.
+        """
+        if self.resource_plot is not None:
+            return self.resource_plot
+        return get_resource_plot(
+            [],
+            self.app.resource_totals,
+            self.window_start_ms,
+            self.window_end_ms,
+        )
+
+    def action_show_plot(self) -> None:
+        """Switch the detail pane to the resource plot and redraw it."""
+        switcher = self.query_one(DetailSwitcher)
+        switcher.show_plot()
+        switcher.replot_if_visible()
+
+    def action_show_sparql(self) -> None:
+        """Switch the detail pane to the SPARQL query."""
+        self.query_one(DetailSwitcher).show_sparql()
 
     def sort_rows(self) -> None:
         """Hint that a re-sort is underway, then rebuild the visible rows."""
@@ -613,7 +672,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def on_data_table_row_selected(
         self, message: HistoricQueryTable.RowSelected
     ) -> None:
-        """Show the selected finished query's SPARQL in the pane."""
+        """Show the selected finished query's SPARQL in the detail pane."""
         row = message.data_table.query_rows[message.cursor_row]
         # The row holds only the table snippet, so read the full query.
         with open_log_buffer(self.app.log_file) as buf:
@@ -622,10 +681,14 @@ class HistoricScreen(Screen, inherit_bindings=False):
                 if buf is None
                 else load_sparql_at(buf, row.start_line_offset)[2]
             )
-        self.query_one(SparqlPane).content = SparqlContent(
-            qid=row.qid,
-            started_at_ms=row.started_at_ms,
-            status=row.status,
-            sparql_text=sparql,
-            client_ip=row.client_ip,
+        detail = self.query_one(DetailSwitcher)
+        detail.set_sparql(
+            SparqlContent(
+                qid=row.qid,
+                started_at_ms=row.started_at_ms,
+                status=row.status,
+                sparql_text=sparql,
+                client_ip=row.client_ip,
+            )
         )
+        detail.show_sparql()

@@ -176,6 +176,8 @@ class ResourcePlot:
     the capacities the left and right axes scale against. start_s and
     end_s are the requested window edges the plot frames its x-axis to,
     which may be wider than the samples that fall inside it.
+    restart_times_s marks epoch seconds where the server restarted, seen
+    as its elapsed time dropping between samples.
     """
 
     times_s: tuple[float, ...]
@@ -185,3 +187,4 @@ class ResourcePlot:
     cpu_total: float
     start_s: float
     end_s: float
+    restart_times_s: tuple[float, ...]

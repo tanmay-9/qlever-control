@@ -6,6 +6,8 @@ read produces a fresh, immutable snapshot of it.
 """
 
 from collections import deque
+from collections.abc import Callable
+from pathlib import Path
 from typing import BinaryIO
 
 import psutil
@@ -186,14 +188,21 @@ def get_resource_plot(
     Keeps only samples inside [start_ms, end_ms] and converts each to
     display units: rss bytes to GB, cpu percent to cores. totals is
     (rss_total_gb, cpu_cores). The window edges frame the plot's x-axis
-    and may be wider than the samples that fall inside them.
+    and may be wider than the samples that fall inside them. A sample
+    whose elapsed time dropped below the previous one marks a server
+    restart, recorded in restart_times_s.
     """
     rss_total_gb, cpu_cores = totals
     times_s = []
     rss_gb = []
     cpu_cores_series = []
+    restart_times_s = []
+    last_elapsed = None
     for sample in samples:
         if start_ms <= sample.ts_ms <= end_ms:
+            if last_elapsed is not None and sample.elapsed_s < last_elapsed:
+                restart_times_s.append(sample.ts_ms / 1000)
+            last_elapsed = sample.elapsed_s
             times_s.append(sample.ts_ms / 1000)
             rss_gb.append(sample.rss / 1e9)
             cpu_cores_series.append(sample.cpu_percent / 100)
@@ -205,4 +214,139 @@ def get_resource_plot(
         cpu_total=cpu_cores,
         start_s=start_ms / 1000,
         end_s=end_ms / 1000,
+        restart_times_s=tuple(restart_times_s),
+    )
+
+
+# Backup before the bisect's landing offset, so the forward scan never
+# skips the boundary line when it lands exactly on a line start.
+SEEK_BACKUP_BYTES = 256
+
+
+def line_ts_ms(line: bytes) -> int | None:
+    """Read the timestamp (column 1) from a raw TSV line, or None.
+
+    The header row and a partial line fail the int parse and return
+    None, so the bisect treats them as before the window.
+    """
+    parts = line.split(b"\t")
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[1])
+    except ValueError:
+        return None
+
+
+def seek_to_window_start(
+    stream: BinaryIO, start_ms: int, file_size: int
+) -> int:
+    """Bisect for the first byte offset whose next full line is at or
+    after start_ms.
+
+    The log is time-ordered, so "the line after mid is at or after
+    start_ms" is monotonic in mid. Returns that boundary offset; the
+    caller backs up a little before reading so the boundary line is
+    never skipped.
+    """
+    lo, hi = 0, file_size
+    while lo < hi:
+        mid = (lo + hi) // 2
+        stream.seek(mid)
+        stream.readline()
+        ts = line_ts_ms(stream.readline())
+        if ts is not None and ts >= start_ms:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
+
+
+# Rows scanned between should_cancel polls, so a long read can abort
+# without the check itself costing anything on the common short read.
+CANCEL_CHECK_ROWS = 50_000
+
+
+def read_resource_window(
+    path: Path,
+    totals: tuple[float, float],
+    start_ms: int,
+    end_ms: int,
+    max_points: int,
+    should_cancel: Callable[[], bool] | None = None,
+) -> ResourcePlot:
+    """Read samples in [start_ms, end_ms] and bucket them for the plot.
+
+    Seeks near the window start, then streams forward, folding each row
+    into one of max_points equal time buckets and keeping the bucket's
+    peak rss and cpu so spikes survive. totals is (rss_total_gb,
+    cpu_cores) for the axes. A drop in elapsed time between rows marks a
+    server restart, recorded in restart_times_s. should_cancel is polled
+    while scanning so a long read can abort. Memory stays at O(max_points)
+    however large the log is.
+    """
+    rss_total_gb, cpu_cores = totals
+    max_points = max(1, max_points)
+    bucket_span_ms = (end_ms - start_ms) / max_points
+    if bucket_span_ms <= 0:
+        bucket_span_ms = 1
+    bucket_ts = [None] * max_points
+    bucket_rss = [0] * max_points
+    bucket_cpu = [0.0] * max_points
+    restart_times_s = []
+    last_elapsed = None
+    rows_since_check = 0
+
+    with open(path, "rb") as stream:
+        stream.seek(0, 2)
+        file_size = stream.tell()
+        boundary = seek_to_window_start(stream, start_ms, file_size)
+        read_from = max(0, boundary - SEEK_BACKUP_BYTES)
+        stream.seek(read_from)
+        if read_from > 0:
+            stream.readline()
+        for raw in stream:
+            rows_since_check += 1
+            if (
+                should_cancel is not None
+                and rows_since_check >= CANCEL_CHECK_ROWS
+            ):
+                if should_cancel():
+                    break
+                rows_since_check = 0
+            sample = parse_tsv_row(raw.decode())
+            if sample is None:
+                continue
+            if sample.ts_ms > end_ms:
+                break
+            if sample.ts_ms < start_ms:
+                continue
+            if last_elapsed is not None and sample.elapsed_s < last_elapsed:
+                restart_times_s.append(sample.ts_ms / 1000)
+            last_elapsed = sample.elapsed_s
+            index = int((sample.ts_ms - start_ms) / bucket_span_ms)
+            if index >= max_points:
+                index = max_points - 1
+            if bucket_ts[index] is None:
+                bucket_ts[index] = sample.ts_ms
+            bucket_rss[index] = max(bucket_rss[index], sample.rss)
+            bucket_cpu[index] = max(bucket_cpu[index], sample.cpu_percent)
+
+    times_s = []
+    rss_gb = []
+    cpu_cores_series = []
+    for index in range(max_points):
+        if bucket_ts[index] is not None:
+            times_s.append(bucket_ts[index] / 1000)
+            rss_gb.append(bucket_rss[index] / 1e9)
+            cpu_cores_series.append(bucket_cpu[index] / 100)
+    return ResourcePlot(
+        times_s=tuple(times_s),
+        rss_gb=tuple(rss_gb),
+        cpu_cores=tuple(cpu_cores_series),
+        rss_total=rss_total_gb,
+        cpu_total=cpu_cores,
+        start_s=start_ms / 1000,
+        end_s=end_ms / 1000,
+        restart_times_s=tuple(restart_times_s),
     )

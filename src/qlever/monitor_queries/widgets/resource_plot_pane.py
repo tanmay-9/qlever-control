@@ -9,10 +9,14 @@ from qlever.monitor_queries.models import ResourcePlot
 
 # Saturated line colors, one pair per theme background: deeper on a
 # light background, brighter on a dark one, so both stay legible.
-RSS_COLOR_LIGHT = (204, 0, 0)
-CPU_COLOR_LIGHT = (31, 119, 180)
-RSS_COLOR_DARK = (255, 95, 95)
-CPU_COLOR_DARK = (90, 175, 255)
+CPU_COLOR_LIGHT = (0, 150, 130)
+RSS_COLOR_LIGHT = (176, 25, 127)
+CPU_COLOR_DARK = (34, 211, 200)
+RSS_COLOR_DARK = (255, 105, 190)
+
+# Restart marker: neutral grey so it reads on either background and does
+# not compete with the two series colors.
+RESTART_COLOR = (150, 150, 150)
 
 
 def plot_colors(
@@ -22,6 +26,20 @@ def plot_colors(
     if dark:
         return RSS_COLOR_DARK, CPU_COLOR_DARK
     return RSS_COLOR_LIGHT, CPU_COLOR_LIGHT
+
+
+# A plot column holds 2 braille dots across, so 2 points per usable
+# column is the most the plot can resolve; more just overplots. Reserve
+# columns for the two y-axis label gutters.
+Y_AXIS_CHROME = 16
+MIN_PLOT_POINTS = 60
+
+
+def point_budget(width: int) -> int:
+    """Points worth plotting for a pane this wide (2 per braille column)."""
+    usable_cols = max(10, width - Y_AXIS_CHROME)
+    return max(MIN_PLOT_POINTS, usable_cols * 2)
+
 
 # Rows plotext spends on the frame and x-axis (top+bottom border, the
 # x-tick row and the x-label row), leaving the rest for the y ticks.
@@ -69,6 +87,32 @@ def clock_ticks(
     return positions, labels
 
 
+def break_at_restarts(
+    times: tuple[float, ...],
+    values: tuple[float, ...],
+    restart_times: tuple[float, ...],
+) -> tuple[list[float], list[float]]:
+    """Insert a gap at each restart so the line is not drawn across it.
+
+    Before the first point at or after a restart time, add a NaN point
+    at that time; plotext leaves a NaN unconnected. A restart before the
+    first point or after the last adds no gap, only its vline shows.
+    """
+    out_times = []
+    out_values = []
+    restarts = list(restart_times)
+    idx = 0
+    for time_s, value in zip(times, values):
+        while idx < len(restarts) and time_s >= restarts[idx]:
+            if out_times:
+                out_times.append(restarts[idx])
+                out_values.append(float("nan"))
+            idx += 1
+        out_times.append(time_s)
+        out_values.append(value)
+    return out_times, out_values
+
+
 class ResourcePlotPane(PlotextPlot):
     """Dual-axis RSS and CPU plot over a time window.
 
@@ -82,7 +126,7 @@ class ResourcePlotPane(PlotextPlot):
 
     def __init__(
         self,
-        source: Callable[[], ResourcePlot],
+        source: Callable[[int], ResourcePlot],
         refresh_interval: float | None = None,
         **kwargs,
     ) -> None:
@@ -108,16 +152,24 @@ class ResourcePlotPane(PlotextPlot):
 
         Frames the window and axes regardless of data, then either plots
         the two series or, when the window holds no samples, draws a
-        centered note in place of a blank box.
+        centered note in place of a blank box. A grey vertical line marks
+        each server restart, where the series is also broken.
         """
-        data = self.source()
+        max_points = point_budget(self.size.width)
+        data = self.source(max_points)
         rss_color, cpu_color = plot_colors(self.app.current_theme.dark)
+        has_restarts = bool(data.restart_times_s)
         plt = self.plt
         plt.clear_figure()
+        if has_restarts:
+            plt.title("grey line = server restart")
         plt.xlim(data.start_s, data.end_s)
         plt.ylim(0, data.rss_total, yside="left")
         plt.ylim(0, data.cpu_total, yside="right")
-        ticks = even_tick_count(self.size.height)
+        # The title eats one more row above the frame, so tell the tick
+        # math the plot is one row shorter.
+        title_rows = 1 if has_restarts else 0
+        ticks = even_tick_count(self.size.height - title_rows)
         plt.yfrequency(ticks, yside="left")
         plt.yfrequency(ticks, yside="right")
         positions, labels = clock_ticks(data.start_s, data.end_s)
@@ -144,16 +196,22 @@ class ResourcePlotPane(PlotextPlot):
             alignment="right",
         )
         if data.times_s:
+            rss_times, rss_values = break_at_restarts(
+                data.times_s, data.rss_gb, data.restart_times_s
+            )
+            cpu_times, cpu_values = break_at_restarts(
+                data.times_s, data.cpu_cores, data.restart_times_s
+            )
             plt.plot(
-                data.times_s,
-                data.rss_gb,
+                rss_times,
+                rss_values,
                 yside="left",
                 marker="braille",
                 color=rss_color,
             )
             plt.plot(
-                data.times_s,
-                data.cpu_cores,
+                cpu_times,
+                cpu_values,
                 yside="right",
                 marker="braille",
                 color=cpu_color,
@@ -172,4 +230,6 @@ class ResourcePlotPane(PlotextPlot):
                 background="default",
                 alignment="center",
             )
+        for restart_s in data.restart_times_s:
+            plt.vline(restart_s, color=RESTART_COLOR)
         self.refresh()
