@@ -417,14 +417,12 @@ class HistoricScreen(Screen, inherit_bindings=False):
         )
 
     def action_show_plot(self) -> None:
-        """Switch the detail pane to the resource plot and redraw it.
+        """Switch the detail pane to the resource plot.
 
-        The redraw is deferred so it runs after the newly shown pane is
-        laid out; drawing synchronously would catch it at zero size.
+        Showing the hidden pane resizes it from zero, so its on_resize
+        redraws with the current window's plot; no explicit replot here.
         """
-        switcher = self.query_one(DetailSwitcher)
-        switcher.show_plot()
-        self.call_after_refresh(switcher.replot_if_visible)
+        self.query_one(DetailSwitcher).show_plot()
 
     def action_show_sparql(self) -> None:
         """Switch the detail pane to the SPARQL query."""

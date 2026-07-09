@@ -41,28 +41,6 @@ def point_budget(width: int) -> int:
     return max(MIN_PLOT_POINTS, usable_cols * 2)
 
 
-# Rows plotext spends on the frame and x-axis (top+bottom border, the
-# x-tick row and the x-label row), leaving the rest for the y ticks.
-PLOT_CHROME_ROWS = 4
-
-
-def even_tick_count(height: int, preferred: tuple[int, ...] = (5, 4, 6, 3)):
-    """Pick a y-tick count that spaces evenly for the given plot height.
-
-    Ticks snap to character rows, so they space evenly only when the
-    rows between them divide by the number of gaps. Return the first
-    preferred count that divides; fall back to the first when none does
-    (a prime row count simply cannot be split evenly).
-    """
-    span = height - PLOT_CHROME_ROWS
-    if span < 2:
-        return 2
-    for count in preferred:
-        if span % (count - 1) == 0:
-            return count
-    return preferred[0]
-
-
 def clock_ticks(
     start_s: float, end_s: float, count: int = 5
 ) -> tuple[list[float], list[str]]:
@@ -155,12 +133,6 @@ class ResourcePlotPane(PlotextPlot):
         centered note in place of a blank box. A grey vertical line marks
         each server restart, where the series is also broken.
         """
-        # While hidden in the switcher the pane has zero size; drawing then
-        # would frame the plot for a 0-row area (2 collapsed y-ticks) and,
-        # with no roll timer, that stale render would stick. on_resize
-        # redraws once the pane is shown and laid out.
-        if self.size.width == 0 or self.size.height == 0:
-            return
         max_points = point_budget(self.size.width)
         data = self.source(max_points)
         rss_color, cpu_color = plot_colors(self.app.current_theme.dark)
@@ -170,9 +142,6 @@ class ResourcePlotPane(PlotextPlot):
         plt.xlim(data.start_s, data.end_s)
         plt.ylim(0, data.rss_total, yside="left")
         plt.ylim(0, data.cpu_total, yside="right")
-        ticks = even_tick_count(self.size.height)
-        plt.yfrequency(ticks, yside="left")
-        plt.yfrequency(ticks, yside="right")
         positions, labels = clock_ticks(data.start_s, data.end_s)
         plt.xticks(positions, labels)
         # Name each series in its own top corner, colored to match its
