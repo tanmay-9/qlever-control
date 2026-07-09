@@ -217,6 +217,14 @@ class RebuildIndexCommand(QleverCommand):
             help="When the rebuild is finished, stop the server with the old "
             "index and start it again with the new index",
         )
+        subparser.add_argument(
+            "--leave-new-index-in-temporary-directory",
+            action="store_true",
+            default=False,
+            help="Leave the successfully rebuilt (and validated) index in the "
+            "temporary directory instead of moving it into place (same logic "
+            "as when the index validation fails)",
+        )
 
     def execute(self, args) -> bool:
         # Either `--new-index-dir` or `--old-index-dir`.
@@ -336,12 +344,13 @@ class RebuildIndexCommand(QleverCommand):
 
         # Show the command lines.
         cmds_to_show = [mkdir_cmd, rebuild_index_cmd]
-        if move_old_index_when_done:
-            cmds_to_show.append(move_old_index_cmd)
-        if move_new_index_when_done:
-            cmds_to_show.append(move_new_index_cmd)
-        if args.restart_when_finished:
-            cmds_to_show.append(restart_server_cmd)
+        if not args.leave_new_index_in_temporary_directory:
+            if move_old_index_when_done:
+                cmds_to_show.append(move_old_index_cmd)
+            if move_new_index_when_done:
+                cmds_to_show.append(move_new_index_cmd)
+            if args.restart_when_finished:
+                cmds_to_show.append(restart_server_cmd)
         self.show("\n".join(cmds_to_show), only_show=args.show)
         if args.show:
             return True
@@ -399,6 +408,16 @@ class RebuildIndexCommand(QleverCommand):
                 f'Files are in "{new_index_dir_name}"'
             )
             return False
+
+        # If requested, leave the new index in the temporary directory
+        # instead of moving it into place (same as the validation-failure
+        # path above, except that the index is fine).
+        if args.leave_new_index_in_temporary_directory:
+            log.info(
+                "Leaving the new index in the temporary directory as "
+                f'requested; files are in "{new_index_dir_name}"'
+            )
+            return True
 
         # Move the old index to the specified directory, if needed.
         if move_old_index_when_done:
