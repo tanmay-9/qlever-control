@@ -22,6 +22,7 @@ from qlever.monitor_queries.log_reader import (
     open_log_buffer,
     read_first_timestamp,
 )
+from qlever.monitor_queries.resource_data import system_totals
 from qlever.monitor_queries.util import clipboard_install_hint, copy_text
 from qlever.monitor_queries.views.historic import HistoricScreen
 from qlever.monitor_queries.views.live import LiveScreen
@@ -84,6 +85,9 @@ class MonitorQueriesApp(App):
         self.slow_threshold = slow_threshold
         self.refresh_interval = refresh_interval
         self.resource_log = resource_log
+        # Host-wide RAM/core capacities for the resource plot axes; fixed
+        # for the machine's lifetime and shared by Live and Historic.
+        self.resource_totals = system_totals()
         self.system = system
         self.live_state = LiveState()
         self.log_start_ms = None

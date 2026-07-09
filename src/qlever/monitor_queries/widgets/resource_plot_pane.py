@@ -11,6 +11,27 @@ from qlever.monitor_queries.models import ResourcePlot
 RSS_COLOR = (204, 0, 0)
 CPU_COLOR = (31, 119, 180)
 
+# Rows plotext spends on the frame and x-axis (top+bottom border, the
+# x-tick row and the x-label row), leaving the rest for the y ticks.
+PLOT_CHROME_ROWS = 4
+
+
+def even_tick_count(height: int, preferred: tuple[int, ...] = (5, 4, 6, 3)):
+    """Pick a y-tick count that spaces evenly for the given plot height.
+
+    Ticks snap to character rows, so they space evenly only when the
+    rows between them divide by the number of gaps. Return the first
+    preferred count that divides; fall back to the first when none does
+    (a prime row count simply cannot be split evenly).
+    """
+    span = height - PLOT_CHROME_ROWS
+    if span < 2:
+        return 2
+    for count in preferred:
+        if span % (count - 1) == 0:
+            return count
+    return preferred[0]
+
 
 def clock_ticks(
     start_s: float, end_s: float, count: int = 5
@@ -63,6 +84,10 @@ class ResourcePlotPane(PlotextPlot):
         if self.refresh_interval is not None:
             self.set_interval(self.refresh_interval, self.replot)
 
+    def on_resize(self) -> None:
+        """Redraw so the y-tick count re-fits the new height."""
+        self.replot()
+
     def replot(self) -> None:
         """Draw the current window: RSS on the left axis, CPU on the right.
 
@@ -76,8 +101,11 @@ class ResourcePlotPane(PlotextPlot):
         plt.xlim(data.start_s, data.end_s)
         plt.ylim(0, data.rss_total, yside="left")
         plt.ylim(0, data.cpu_total, yside="right")
-        plt.ylabel("RSS (GB)", yside="left")
-        plt.ylabel("CPU (cores)", yside="right")
+        ticks = even_tick_count(self.size.height)
+        plt.yfrequency(ticks, yside="left")
+        plt.yfrequency(ticks, yside="right")
+        # Axis labels would render on the bottom row and collide with the
+        # footer; the top legend already names both series, so omit them.
         positions, labels = clock_ticks(data.start_s, data.end_s)
         plt.xticks(positions, labels)
         if data.times_s:
@@ -98,6 +126,11 @@ class ResourcePlotPane(PlotextPlot):
                 label="CPU (cores)",
             )
         else:
+            # plotext only draws a y-axis for a side that has data, so an
+            # empty window would show the RSS axis but not the CPU one.
+            # Anchor an invisible point on each side to keep both framed.
+            plt.plot([data.start_s], [0], yside="left", marker=" ")
+            plt.plot([data.start_s], [0], yside="right", marker=" ")
             plt.text(
                 "No samples in this window",
                 (data.start_s + data.end_s) / 2,
