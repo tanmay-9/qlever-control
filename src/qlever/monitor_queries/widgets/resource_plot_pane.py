@@ -104,10 +104,29 @@ class ResourcePlotPane(PlotextPlot):
         ticks = even_tick_count(self.size.height)
         plt.yfrequency(ticks, yside="left")
         plt.yfrequency(ticks, yside="right")
-        # Axis labels would render on the bottom row and collide with the
-        # footer; the top legend already names both series, so omit them.
         positions, labels = clock_ticks(data.start_s, data.end_s)
         plt.xticks(positions, labels)
+        # Name each series in its own top corner, colored to match its
+        # line, so the reader maps line to axis without a stacked legend.
+        # A bottom label row would sit under the footer keys.
+        plt.text(
+            "RSS (GB)",
+            data.start_s,
+            data.rss_total,
+            yside="left",
+            color=RSS_COLOR,
+            background="default",
+            alignment="left",
+        )
+        plt.text(
+            "CPU (cores)",
+            data.end_s,
+            data.cpu_total,
+            yside="right",
+            color=CPU_COLOR,
+            background="default",
+            alignment="right",
+        )
         if data.times_s:
             plt.plot(
                 data.times_s,
@@ -115,7 +134,6 @@ class ResourcePlotPane(PlotextPlot):
                 yside="left",
                 marker="fhd",
                 color=RSS_COLOR,
-                label="RSS (GB)",
             )
             plt.plot(
                 data.times_s,
@@ -123,7 +141,6 @@ class ResourcePlotPane(PlotextPlot):
                 yside="right",
                 marker="fhd",
                 color=CPU_COLOR,
-                label="CPU (cores)",
             )
         else:
             # plotext only draws a y-axis for a side that has data, so an
@@ -136,6 +153,7 @@ class ResourcePlotPane(PlotextPlot):
                 (data.start_s + data.end_s) / 2,
                 data.rss_total / 2,
                 yside="left",
+                background="default",
                 alignment="center",
             )
         self.refresh()
