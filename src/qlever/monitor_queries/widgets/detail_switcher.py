@@ -28,7 +28,7 @@ class DetailSwitcher(ContentSwitcher):
         source: Callable[[int], ResourcePlot],
         refresh_interval: float | None = None,
     ) -> None:
-        super().__init__(initial=SPARQL_ID)
+        super().__init__(initial=PLOT_ID)
         self.source = source
         self.refresh_interval = refresh_interval
 
