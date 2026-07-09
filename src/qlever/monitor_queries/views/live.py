@@ -35,6 +35,7 @@ from qlever.monitor_queries.resource_data import (
     is_resource_sample_fresh,
     system_totals,
 )
+from qlever.monitor_queries.views.resource_plot_modal import ResourcePlotModal
 from qlever.monitor_queries.widgets.header_row import HeaderRow
 from qlever.monitor_queries.widgets.metrics_row import MetricsRow
 from qlever.monitor_queries.widgets.nav_pill import NavPill
@@ -42,7 +43,6 @@ from qlever.monitor_queries.widgets.query_table import LiveQueryTable
 from qlever.monitor_queries.widgets.resource_row import ResourceRow
 from qlever.monitor_queries.widgets.resource_sparkline import ResourceSparkline
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
-from qlever.monitor_queries.views.resource_plot_modal import ResourcePlotModal
 from qlever.util import is_qlever_server_alive
 
 TITLE = "QLever monitor-queries: Live"
