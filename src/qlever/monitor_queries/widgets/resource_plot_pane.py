@@ -7,9 +7,21 @@ from textual_plotext import PlotextPlot
 
 from qlever.monitor_queries.models import ResourcePlot
 
-# Saturated line colors
-RSS_COLOR = (204, 0, 0)
-CPU_COLOR = (31, 119, 180)
+# Saturated line colors, one pair per theme background: deeper on a
+# light background, brighter on a dark one, so both stay legible.
+RSS_COLOR_LIGHT = (204, 0, 0)
+CPU_COLOR_LIGHT = (31, 119, 180)
+RSS_COLOR_DARK = (255, 95, 95)
+CPU_COLOR_DARK = (90, 175, 255)
+
+
+def plot_colors(
+    dark: bool,
+) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """Pick the (RSS, CPU) line colors for the active theme background."""
+    if dark:
+        return RSS_COLOR_DARK, CPU_COLOR_DARK
+    return RSS_COLOR_LIGHT, CPU_COLOR_LIGHT
 
 # Rows plotext spends on the frame and x-axis (top+bottom border, the
 # x-tick row and the x-label row), leaving the rest for the y ticks.
@@ -83,6 +95,9 @@ class ResourcePlotPane(PlotextPlot):
         self.replot()
         if self.refresh_interval is not None:
             self.set_interval(self.refresh_interval, self.replot)
+        self.app.theme_changed_signal.subscribe(
+            self, lambda theme: self.replot()
+        )
 
     def on_resize(self) -> None:
         """Redraw so the y-tick count re-fits the new height."""
@@ -96,6 +111,7 @@ class ResourcePlotPane(PlotextPlot):
         centered note in place of a blank box.
         """
         data = self.source()
+        rss_color, cpu_color = plot_colors(self.app.current_theme.dark)
         plt = self.plt
         plt.clear_figure()
         plt.xlim(data.start_s, data.end_s)
@@ -114,7 +130,7 @@ class ResourcePlotPane(PlotextPlot):
             data.start_s,
             data.rss_total,
             yside="left",
-            color=RSS_COLOR,
+            color=rss_color,
             background="default",
             alignment="left",
         )
@@ -123,7 +139,7 @@ class ResourcePlotPane(PlotextPlot):
             data.end_s,
             data.cpu_total,
             yside="right",
-            color=CPU_COLOR,
+            color=cpu_color,
             background="default",
             alignment="right",
         )
@@ -132,15 +148,15 @@ class ResourcePlotPane(PlotextPlot):
                 data.times_s,
                 data.rss_gb,
                 yside="left",
-                marker="fhd",
-                color=RSS_COLOR,
+                marker="braille",
+                color=rss_color,
             )
             plt.plot(
                 data.times_s,
                 data.cpu_cores,
                 yside="right",
-                marker="fhd",
-                color=CPU_COLOR,
+                marker="braille",
+                color=cpu_color,
             )
         else:
             # plotext only draws a y-axis for a side that has data, so an
