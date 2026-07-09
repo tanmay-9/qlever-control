@@ -131,13 +131,14 @@ class FilterState:
 
 @dataclass(frozen=True)
 class ResourceSample:
-    """One reading of server resource usage, kept in raw source units.
+    """One reading of server resource usage, in raw source units.
 
-    rss is bytes; cpu_percent is psutil's percent, summed across cores,
-    so it can exceed 100. Conversion to GB and cores happens at the read
-    seam, not here, so storage stays a literal record of what was sampled.
+    Kept literal (rss bytes, cpu_percent across cores) so conversion
+    lives at the read seam. elapsed_s is the server's run time; it
+    resets on restart, so a drop between samples marks a new process.
     """
 
+    elapsed_s: float
     ts_ms: int
     rss: int
     cpu_percent: float

@@ -59,12 +59,15 @@ def parse_tsv_row(line: str) -> ResourceSample | None:
     return None, so the caller never special-cases them.
     """
     fields = line.split("\t")
-    if len(fields) != 3:
+    if len(fields) != 4:
         return None
-    ts, rss, cpu = fields
+    elapsed, ts, rss, cpu = fields
     try:
         return ResourceSample(
-            ts_ms=int(ts), rss=int(rss), cpu_percent=float(cpu)
+            elapsed_s=float(elapsed),
+            ts_ms=int(ts),
+            rss=int(rss),
+            cpu_percent=float(cpu),
         )
     except ValueError:
         return None
