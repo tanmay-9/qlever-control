@@ -34,13 +34,17 @@ from qlever.monitor_queries.resource_data import (
     get_resource_usage,
     is_resource_sample_fresh,
 )
-from qlever.monitor_queries.widgets.detail_switcher import DetailSwitcher
+from qlever.monitor_queries.widgets.detail_switcher import (
+    PLOT_ID,
+    DetailSwitcher,
+)
 from qlever.monitor_queries.widgets.header_row import HeaderRow
 from qlever.monitor_queries.widgets.metrics_row import MetricsRow
 from qlever.monitor_queries.widgets.nav_pill import NavPill
 from qlever.monitor_queries.widgets.query_table import LiveQueryTable
 from qlever.monitor_queries.widgets.resource_row import ResourceRow
 from qlever.monitor_queries.widgets.resource_sparkline import ResourceSparkline
+from qlever.monitor_queries.widgets.sparql_pane import SELECT_ROW_HINT
 from qlever.util import is_qlever_server_alive
 
 TITLE = "QLever monitor-queries: Live"
@@ -115,6 +119,7 @@ class LiveScreen(Screen, inherit_bindings=False):
             self.start_pinging(initial=True)
         # Focus the table so the header theme dropdown can't take it.
         self.query_one(LiveQueryTable).focus()
+        self.refresh_table_status()
 
     def on_screen_suspend(self) -> None:
         """Pause periodic UI work while Live isn't the active screen."""
@@ -309,10 +314,12 @@ class LiveScreen(Screen, inherit_bindings=False):
     def action_show_plot(self) -> None:
         """Switch the detail pane to the resource plot."""
         self.query_one(DetailSwitcher).show_plot()
+        self.refresh_table_status()
 
     def action_show_sparql(self) -> None:
         """Switch the detail pane to the SPARQL query."""
         self.query_one(DetailSwitcher).show_sparql()
+        self.refresh_table_status()
 
     def on_resource_sparkline_clicked(
         self, message: ResourceSparkline.Clicked
@@ -320,10 +327,22 @@ class LiveScreen(Screen, inherit_bindings=False):
         """Show the plot when a resource gauge is clicked."""
         self.action_show_plot()
 
+    def refresh_table_status(self) -> None:
+        """Compose the table status line from the active hints.
+
+        The freeze hint when frozen, and the select-a-row hint whenever
+        the plot hides the SPARQL pane, so both can show at once.
+        """
+        hints = []
+        if self.frozen:
+            hints.append("Frozen - press f to resume")
+        if self.query_one(DetailSwitcher).current == PLOT_ID:
+            hints.append(SELECT_ROW_HINT)
+        self.query_one("#table-status", Static).update(" · ".join(hints))
+
     def watch_frozen(self, frozen: bool) -> None:
-        """Reflect the frozen state in the table status line."""
-        status = "Frozen - press f to resume" if frozen else ""
-        self.query_one("#table-status", Static).update(status)
+        """Refresh the status line to reflect the frozen state."""
+        self.refresh_table_status()
 
     def action_toggle_freeze(self) -> None:
         """Toggle the frozen state of the live view."""
@@ -361,3 +380,4 @@ class LiveScreen(Screen, inherit_bindings=False):
             )
         )
         detail.show_sparql()
+        self.refresh_table_status()
