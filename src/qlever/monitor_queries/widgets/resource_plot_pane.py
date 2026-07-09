@@ -155,21 +155,22 @@ class ResourcePlotPane(PlotextPlot):
         centered note in place of a blank box. A grey vertical line marks
         each server restart, where the series is also broken.
         """
+        # While hidden in the switcher the pane has zero size; drawing then
+        # would frame the plot for a 0-row area (2 collapsed y-ticks) and,
+        # with no roll timer, that stale render would stick. on_resize
+        # redraws once the pane is shown and laid out.
+        if self.size.width == 0 or self.size.height == 0:
+            return
         max_points = point_budget(self.size.width)
         data = self.source(max_points)
         rss_color, cpu_color = plot_colors(self.app.current_theme.dark)
         has_restarts = bool(data.restart_times_s)
         plt = self.plt
         plt.clear_figure()
-        if has_restarts:
-            plt.title("grey line = server restart")
         plt.xlim(data.start_s, data.end_s)
         plt.ylim(0, data.rss_total, yside="left")
         plt.ylim(0, data.cpu_total, yside="right")
-        # The title eats one more row above the frame, so tell the tick
-        # math the plot is one row shorter.
-        title_rows = 1 if has_restarts else 0
-        ticks = even_tick_count(self.size.height - title_rows)
+        ticks = even_tick_count(self.size.height)
         plt.yfrequency(ticks, yside="left")
         plt.yfrequency(ticks, yside="right")
         positions, labels = clock_ticks(data.start_s, data.end_s)
@@ -195,6 +196,18 @@ class ResourcePlotPane(PlotextPlot):
             background="default",
             alignment="right",
         )
+        # Legend for the restart marker, drawn in the marker's own grey
+        # with the same vertical-bar glyph so it reads as "this line".
+        if has_restarts:
+            plt.text(
+                "│ = server restart",
+                (data.start_s + data.end_s) / 2,
+                data.rss_total,
+                yside="left",
+                color=RESTART_COLOR,
+                background="default",
+                alignment="center",
+            )
         if data.times_s:
             rss_times, rss_values = break_at_restarts(
                 data.times_s, data.rss_gb, data.restart_times_s
