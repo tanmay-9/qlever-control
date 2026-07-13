@@ -10,8 +10,11 @@ from qlever.monitor_queries.widgets.resource_sparkline import ResourceSparkline
 
 
 def format_subtitle(subtitle: LiveSubtitle) -> str:
-    """Build the centered two-line subtitle: server status on top, a status
-    detail below (active query count, or a retry note when unreachable)."""
+    """Build the centered two-line subtitle for the resource row.
+
+    Server status on top, a detail below: the active query count, or a
+    retry note when the server is unreachable.
+    """
     if subtitle.state == "checking":
         status = f"[$warning]Checking[/] server at [b]{subtitle.endpoint}[/]…"
         return f"{status}\n"

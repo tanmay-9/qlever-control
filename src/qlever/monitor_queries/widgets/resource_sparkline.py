@@ -35,8 +35,8 @@ def bucket_max(values: tuple[float, ...], width: int) -> list[float]:
     """Group values into `width` columns, each the max of its slice."""
     step = len(values) / width
     columns = []
-    for i in range(width):
-        lo, hi = int(i * step), int((i + 1) * step)
+    for column in range(width):
+        lo, hi = int(column * step), int((column + 1) * step)
         chunk = values[lo:hi] or values[lo : lo + 1] or values[-1:]
         columns.append(max(chunk))
     return columns
@@ -49,15 +49,16 @@ def series_title(series: ResourceSeries, stale: bool) -> str:
     history. The value is shown as a dash and the window note says so,
     rather than claiming a live reading over the last 5 minutes.
     """
+    capacity = "-" if series.total is None else f"{series.total:.1f}"
     if stale:
         return (
             f"[b]{series.label}[/]: "
-            f"- / {series.total:.1f} {series.unit} (no recent samples)"
+            f"- / {capacity} {series.unit} (no recent samples)"
         )
     latest = series.values[-1] if series.values else 0
     return (
         f"[b]{series.label}[/]: "
-        f"{latest:.1f} / {series.total:.1f} {series.unit} (last 5m)"
+        f"{latest:.1f} / {capacity} {series.unit} (last 5m)"
     )
 
 

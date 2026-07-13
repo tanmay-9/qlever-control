@@ -276,6 +276,13 @@ class LiveScreen(Screen, inherit_bindings=False):
         freeze the screen.
         """
         worker = get_current_worker()
+        # The log may not exist yet: the server has not started, or
+        # resource logging is off. Wait for it instead of crashing the
+        # worker; the sparklines stay empty until it appears.
+        while not worker.is_cancelled and not self.app.resource_log.exists():
+            time.sleep(SAMPLE_INTERVAL_S)
+        if worker.is_cancelled:
+            return
         with self.app.resource_log.open("rb") as stream:
             seeded = self.resource_reader.seed(stream, current_ms())
             self.app.call_from_thread(self.apply_resource_samples, seeded)

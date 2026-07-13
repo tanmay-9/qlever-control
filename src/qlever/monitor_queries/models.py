@@ -149,13 +149,14 @@ class ResourceSeries:
     """One sparkline's data, already in display units.
 
     values is the recent series the sparkline draws, total the capacity
-    it scales against, both in unit. The widget renders this as-is and
-    does no math of its own.
+    it scales against, both in unit. total is None when the capacity is
+    unknown (e.g. the core count could not be read). The widget renders
+    this as-is and does no math of its own.
     """
 
     label: str
     values: tuple[float, ...]
-    total: float
+    total: float | None
     unit: str
 
 
@@ -173,7 +174,8 @@ class ResourcePlot:
 
     times_s is the shared x-axis in epoch seconds; rss_gb and cpu_cores
     are the two y-series in display units. rss_total and cpu_total are
-    the capacities the left and right axes scale against. start_s and
+    the capacities the left and right axes scale against; cpu_total is
+    None when the core count could not be read. start_s and
     end_s are the requested window edges the plot frames its x-axis to,
     which may be wider than the samples that fall inside it.
     restart_times_s marks epoch seconds where the server restarted, seen
@@ -184,7 +186,7 @@ class ResourcePlot:
     rss_gb: tuple[float, ...]
     cpu_cores: tuple[float, ...]
     rss_total: float
-    cpu_total: float
+    cpu_total: float | None
     start_s: float
     end_s: float
     restart_times_s: tuple[float, ...]

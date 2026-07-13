@@ -87,7 +87,7 @@ def recent(samples: list[ResourceSample], now_ms: int) -> list[ResourceSample]:
 
 
 class ResourceLogReader:
-    """Tail cursor for the ResourceMonitor TSV, like LiveLogReader.
+    """Tail cursor for the server's resource-usage TSV, like LiveLogReader.
 
     The worker owns the open stream and passes it to each read. read_new
     returns only the rows appended since the last cursor, so the steady
@@ -159,7 +159,7 @@ def zero_pad_left(values: tuple[float, ...]) -> tuple[float, ...]:
 
 
 def get_resource_usage(
-    history: ResourceHistory, totals: tuple[float, float]
+    history: ResourceHistory, totals: tuple[float, float | None]
 ) -> ResourceUsage:
     """Snapshot the buffer as two display-ready sparkline series.
 
@@ -167,9 +167,11 @@ def get_resource_usage(
     bytes to GB, cpu percent to cores. totals is (rss_total_gb, cpu_cores).
     """
     rss_total_gb, cpu_cores = totals
-    rss_values = zero_pad_left(tuple(s.rss / 1e9 for s in history.samples))
+    rss_values = zero_pad_left(
+        tuple(sample.rss / 1e9 for sample in history.samples)
+    )
     cpu_values = zero_pad_left(
-        tuple(s.cpu_percent / 100 for s in history.samples)
+        tuple(sample.cpu_percent / 100 for sample in history.samples)
     )
     return ResourceUsage(
         rss=ResourceSeries("RSS", rss_values, rss_total_gb, "GB"),
@@ -179,7 +181,7 @@ def get_resource_usage(
 
 def get_resource_plot(
     samples: list[ResourceSample],
-    totals: tuple[float, float],
+    totals: tuple[float, float | None],
     start_ms: int,
     end_ms: int,
 ) -> ResourcePlot:
@@ -241,8 +243,7 @@ def line_ts_ms(line: bytes) -> int | None:
 def seek_to_window_start(
     stream: BinaryIO, start_ms: int, file_size: int
 ) -> int:
-    """Bisect for the first byte offset whose next full line is at or
-    after start_ms.
+    """Bisect for the byte offset whose next full line is at or after start_ms.
 
     The log is time-ordered, so "the line after mid is at or after
     start_ms" is monotonic in mid. Returns that boundary offset; the
@@ -269,7 +270,7 @@ CANCEL_CHECK_ROWS = 50_000
 
 def read_resource_window(
     path: Path,
-    totals: tuple[float, float],
+    totals: tuple[float, float | None],
     start_ms: int,
     end_ms: int,
     max_points: int,
@@ -285,6 +286,10 @@ def read_resource_window(
     while scanning so a long read can abort. Memory stays at O(max_points)
     however large the log is.
     """
+    # No log yet: the server has not started, or resource logging is
+    # off. Frame the window empty rather than fail the read.
+    if not path.exists():
+        return get_resource_plot([], totals, start_ms, end_ms)
     rss_total_gb, cpu_cores = totals
     max_points = max(1, max_points)
     bucket_span_ms = (end_ms - start_ms) / max_points

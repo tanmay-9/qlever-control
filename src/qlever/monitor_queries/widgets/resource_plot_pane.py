@@ -156,10 +156,17 @@ class ResourcePlotPane(PlotextPlot):
             background="default",
             alignment="left",
         )
+        # The right axis auto-scales when the core count is unknown, so
+        # anchor its label at the tallest CPU point rather than a fixed top.
+        cpu_label_y = (
+            data.cpu_total
+            if data.cpu_total is not None
+            else max(data.cpu_cores, default=0)
+        )
         plt.text(
             "CPU (cores)",
             data.end_s,
-            data.cpu_total,
+            cpu_label_y,
             yside="right",
             color=cpu_color,
             background="default",

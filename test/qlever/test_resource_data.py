@@ -95,7 +95,9 @@ def test_seek_target_past_last_row_finds_nothing():
 def test_seek_never_skips_the_boundary_in_a_large_file():
     # Larger than SEEK_BACKUP_BYTES so the bisect actually has to land
     # near the boundary rather than the backup covering the whole file.
-    rows = [(2.0, 100000 + i * 1000, 5, 1.0) for i in range(4000)]
+    rows = [
+        (2.0, 100000 + row_index * 1000, 5, 1.0) for row_index in range(4000)
+    ]
     text = format_rows(rows)
     for target in (100000, 1_500_000, 3_000_000, 4_099_000):
         assert first_in_window(text, target) == target
@@ -107,7 +109,7 @@ def test_read_window_returns_rows_in_range(tmp_path):
     plot = read_resource_window(path, TOTALS, 1500, 2500, 500)
     assert plot.times_s[0] == pytest.approx(1.5)
     assert plot.times_s[-1] == pytest.approx(2.5)
-    assert all(1.5 <= t <= 2.5 for t in plot.times_s)
+    assert all(1.5 <= time_s <= 2.5 for time_s in plot.times_s)
 
 
 def test_read_window_carries_totals_and_edges(tmp_path):
@@ -133,7 +135,10 @@ def test_read_window_buckets_keep_peaks(tmp_path):
 
 
 def test_read_window_never_exceeds_max_points(tmp_path):
-    rows = [(2.0, 1000 + i, 1_000_000_000, 1.0) for i in range(1000)]
+    rows = [
+        (2.0, 1000 + row_index, 1_000_000_000, 1.0)
+        for row_index in range(1000)
+    ]
     path = write_log(tmp_path, rows)
     plot = read_resource_window(path, TOTALS, 1000, 2000, 50)
     assert len(plot.times_s) <= 50
@@ -159,6 +164,15 @@ def test_read_window_empty_log_yields_empty_plot(tmp_path):
     assert plot.restart_times_s == ()
 
 
+def test_read_window_missing_file_yields_empty_framed_plot(tmp_path):
+    plot = read_resource_window(
+        tmp_path / "does-not-exist.tsv", TOTALS, 0, 5000, 500
+    )
+    assert plot.times_s == ()
+    assert plot.start_s == pytest.approx(0.0)
+    assert plot.end_s == pytest.approx(5.0)
+
+
 def test_get_resource_plot_detects_a_restart():
     samples = [
         sample(2.0, 1000, 5_000_000_000, 50.0),
@@ -170,12 +184,18 @@ def test_get_resource_plot_detects_a_restart():
 
 
 def test_get_resource_plot_monotonic_has_no_restart():
-    samples = [sample(e, e * 1000, 1, 1.0) for e in (2.0, 4.0, 6.0, 8.0)]
+    samples = [
+        sample(elapsed, elapsed * 1000, 1, 1.0)
+        for elapsed in (2.0, 4.0, 6.0, 8.0)
+    ]
     plot = get_resource_plot(samples, TOTALS, 0, 100000)
     assert plot.restart_times_s == ()
 
 
 def test_get_resource_plot_keeps_only_windowed_samples():
-    samples = [sample(e, e * 1000, 1, 1.0) for e in (1.0, 2.0, 3.0, 4.0)]
+    samples = [
+        sample(elapsed, elapsed * 1000, 1, 1.0)
+        for elapsed in (1.0, 2.0, 3.0, 4.0)
+    ]
     plot = get_resource_plot(samples, TOTALS, 2000, 3000)
     assert plot.times_s == pytest.approx((2.0, 3.0))
