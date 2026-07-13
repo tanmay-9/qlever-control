@@ -10,6 +10,7 @@ from pathlib import Path
 from qlever import script_name
 from qlever.containerize import Containerize
 from qlever.log import log
+from qlever.util import positive_int
 
 
 class QleverfileException(Exception):
@@ -261,13 +262,13 @@ class Qleverfile:
         )
         index_args["resource_usage_interval"] = arg(
             "--resource-usage-interval",
-            type=int,
+            type=positive_int,
             default=1,
             help="Seconds between the samples in the resource-usage log",
         )
         index_args["resource_usage_plot_max_points"] = arg(
             "--resource-usage-plot-max-points",
-            type=int,
+            type=positive_int,
             default=500,
             help="Maximum number of points per line (RSS and CPU) in "
             "the resource-usage plot. Sampling is unaffected; samples "
@@ -377,7 +378,7 @@ class Qleverfile:
         )
         server_args["resource_usage_interval"] = arg(
             "--resource-usage-interval",
-            type=int,
+            type=positive_int,
             default=2,
             help="Seconds between the samples in the resource-usage log",
         )
