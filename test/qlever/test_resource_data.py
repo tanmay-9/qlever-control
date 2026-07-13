@@ -156,6 +156,20 @@ def test_read_window_detects_restarts(tmp_path):
     assert plot.restart_times_s == pytest.approx((3.0,))
 
 
+def test_read_window_detects_restart_across_window_start(tmp_path):
+    # The last pre-shutdown sample is before the window; the first
+    # post-restart sample is inside it. The drop must still be caught.
+    rows = [
+        (2.0, 1000, 5, 1.0),
+        (4.0, 2000, 5, 1.0),
+        (2.0, 3000, 5, 1.0),
+        (4.0, 4000, 5, 1.0),
+    ]
+    path = write_log(tmp_path, rows)
+    plot = read_resource_window(path, TOTALS, 2500, 5000, 500)
+    assert plot.restart_times_s == pytest.approx((3.0,))
+
+
 def test_read_window_empty_log_yields_empty_plot(tmp_path):
     path = tmp_path / "empty.tsv"
     path.write_text(HEADER)

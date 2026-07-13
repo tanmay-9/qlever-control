@@ -324,11 +324,16 @@ def read_resource_window(
                 continue
             if sample.ts_ms > end_ms:
                 break
+            # Compare against the previous row even when it precedes the
+            # window, so a restart at the window's left edge is caught.
+            restarted = (
+                last_elapsed is not None and sample.elapsed_s < last_elapsed
+            )
+            last_elapsed = sample.elapsed_s
             if sample.ts_ms < start_ms:
                 continue
-            if last_elapsed is not None and sample.elapsed_s < last_elapsed:
+            if restarted:
                 restart_times_s.append(sample.ts_ms / 1000)
-            last_elapsed = sample.elapsed_s
             index = int((sample.ts_ms - start_ms) / bucket_span_ms)
             if index >= max_points:
                 index = max_points - 1
