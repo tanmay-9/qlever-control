@@ -8,7 +8,7 @@ import qlever.util as util
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.memory_monitor import MemoryMonitor
+from qlever.resource_usage.resource_monitor import ResourceMonitor
 
 
 def wrap_cmd_in_container(args, cmd: str, ulimit: int | None = None) -> str:
@@ -30,6 +30,33 @@ def wrap_cmd_in_container(args, cmd: str, ulimit: int | None = None) -> str:
         working_directory="/opt",
         use_bash=False,
     )
+
+
+def render_usage_plot(args, plot_only: bool = False) -> Path | None:
+    """Render the resource-usage plot.
+
+    When the plotting libraries are missing, this is an error if the
+    user asked for the plot directly via `plot_only`, otherwise it notes
+    how to get the plot at info level since the index build succeeded.
+    """
+    try:
+        from qoxigraph.resource_usage.usage_plot import UsagePlot
+    except ImportError:
+        if plot_only:
+            log.error(
+                "Resource-usage plot needs matplotlib and numpy "
+                "(`pip install qlever[plot]`). Install them and rerun."
+            )
+        else:
+            log.info(
+                "To plot the resource-usage log, install matplotlib and "
+                "numpy (`pip install qlever[plot]`), then run "
+                "`qoxigraph index --resource-usage-plot-only`."
+            )
+        return None
+    return UsagePlot(
+        args.name, args, plot_max_points=args.resource_usage_plot_max_points
+    ).render()
 
 
 class IndexCommand(QleverCommand):
@@ -60,15 +87,34 @@ class IndexCommand(QleverCommand):
                 "index_binary",
                 "lenient",
                 "extra_args",
+                "resource_usage_interval",
+                "resource_usage_plot_max_points",
             ],
             "server": ["read_only"],
             "runtime": ["system", "image", "index_container"],
         }
 
-    def additional_arguments(self, subparser):
-        pass
+    def additional_arguments(self, subparser) -> None:
+        subparser.add_argument(
+            "--resource-usage-plot-only",
+            action="store_true",
+            default=False,
+            help="Only render the resource-usage plot from the existing "
+            "`<name>.index.resource-usage-log.tsv`; do not build the index. "
+            "Use after installing the plotting libraries, or to re-render "
+            "with a different `--resource-usage-plot-max-points`",
+        )
 
     def execute(self, args) -> bool:
+        # Render the resource-usage plot from the existing log without
+        # rebuilding the index.
+        if args.resource_usage_plot_only:
+            plot_path = render_usage_plot(args, plot_only=True)
+            if plot_path is None:
+                return False
+            log.info(f"Resource-usage plot saved to `{plot_path.name}`")
+            return True
+
         cmds_to_execute = []
         index_cmd = (
             f"load {'--lenient ' if args.lenient == 'yes' else ''}"
@@ -144,21 +190,17 @@ class IndexCommand(QleverCommand):
         # final summary line when loading multiple files), so we measure
         # the time externally.
         #
-        # The MemoryMonitor wraps both the load and optimize steps so
-        # that peak RSS is tracked across the entire indexing workflow.
         log_file_name = f"{args.name}.index-log.txt"
-        with MemoryMonitor(
-            engine="qoxigraph",
+        with ResourceMonitor(
             dataset=args.name,
-            cmdline_regex=args.index_binary,
+            binary=args.index_binary,
             container=args.index_container,
             system=args.system,
+            interval=args.resource_usage_interval,
         ):
             try:
                 load_start = time.time()
-                util.run_command(
-                    index_cmd, show_output=True, show_stderr=True
-                )
+                util.run_command(index_cmd, show_output=True, show_stderr=True)
                 load_s = time.time() - load_start
             except Exception as e:
                 log.error(f"Building the index failed: {e}")
@@ -186,8 +228,10 @@ class IndexCommand(QleverCommand):
             f.write(f"Load time: {load_s:.0f}s\n")
             if optimize_cmd:
                 f.write(f"Optimize time: {optimize_s:.0f}s\n")
-            f.write(
-                f"Total elapsed time: {load_s + optimize_s:.0f}s\n"
-            )
+            f.write(f"Total elapsed time: {load_s + optimize_s:.0f}s\n")
+
+        plot_path = render_usage_plot(args)
+        if plot_path is not None:
+            log.info(f"Resource-usage plot saved to `{plot_path.name}`")
 
         return True

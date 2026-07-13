@@ -103,7 +103,7 @@ class StartCommand(QleverCommand):
         # reachable from the host; natively, bind to the configured host.
         bind = (
             f"0.0.0.0:{args.port}"
-            if args.system in Containerize.supported_systems() 
+            if args.system in Containerize.supported_systems()
             else f"{args.host_name}:{args.port}"
         )
         process = "serve-read-only" if args.read_only == "yes" else "serve"
@@ -163,9 +163,7 @@ class StartCommand(QleverCommand):
         # Check if server already alive at endpoint url from a previous run
         if is_server_alive(url=endpoint_url):
             log.error(f"Oxigraph server already running on {endpoint_url}\n")
-            log.info(
-                f"To kill the existing server, use `{script_name} stop`"
-            )
+            log.info(f"To kill the existing server, use `{script_name} stop`")
             return False
 
         # Remove old log file so that tail starts clean.

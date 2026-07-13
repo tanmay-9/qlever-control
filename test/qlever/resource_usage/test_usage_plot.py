@@ -6,12 +6,12 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("matplotlib")
 
 from qlever.resource_usage.usage_plot import (  # noqa: E402
+    UsagePlot,
     build_plot_subtitle,
     compute_phase_boundaries,
     downsample_for_plot,
     pick_time_unit,
     read_usage_tsv,
-    render_usage_plot,
 )
 
 
@@ -210,7 +210,7 @@ def test_compute_phase_boundaries_skips_incomplete_phase(tmp_path):
 
 
 def test_render_usage_plot_missing_tsv(tmp_path):
-    assert render_usage_plot("missing", output_dir=tmp_path) is None
+    assert UsagePlot("missing", None, output_dir=tmp_path).render() is None
 
 
 def test_render_usage_plot_header_only_tsv_renders_nothing(tmp_path):
@@ -218,5 +218,5 @@ def test_render_usage_plot_header_only_tsv_renders_nothing(tmp_path):
     # or leave a PNG behind.
     tsv_path = tmp_path / "data.index.resource-usage-log.tsv"
     tsv_path.write_text("elapsed_s\trss\tcpu_percent\n")
-    assert render_usage_plot("data", output_dir=tmp_path) is None
+    assert UsagePlot("data", None, output_dir=tmp_path).render() is None
     assert not (tmp_path / "data.resource-usage-plot.png").exists()

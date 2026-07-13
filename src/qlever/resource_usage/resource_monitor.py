@@ -155,7 +155,7 @@ class ResourceMonitor:
     def __enter__(self):
         """Open the TSV log, write the header, start sampling thread."""
         self.log_path = (
-            self.output_dir / f"{self.dataset}.resource-usage-log.tsv"
+            self.output_dir / f"{self.dataset}.index.resource-usage-log.tsv"
         )
         self.log_file = open(self.log_path, "w")
         header = "\t".join(f.name for f in fields(Sample)) + "\n"
