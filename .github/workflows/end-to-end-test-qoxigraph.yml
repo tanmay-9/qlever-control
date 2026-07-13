@@ -55,16 +55,16 @@ jobs:
         run: |
           export QLEVER_ARGCOMPLETE_ENABLED=1
           mkdir -p qoxigraph-e2e && cd qoxigraph-e2e
-          qoxigraph setup-config imdb
+          qoxigraph setup-config imdb --system ${{matrix.system}} 
           qoxigraph get-data
-          qoxigraph index --system ${{matrix.system}}
+          qoxigraph index
 
           echo "Checking that the resource-usage log and plot were produced"
           test -s imdb.index.resource-usage-log.tsv
           test -f imdb.resource-usage-plot.png
 
           qoxigraph index-stats
-          qoxigraph start --system ${{matrix.system}}
+          qoxigraph start
           qoxigraph status
           qoxigraph query "SELECT * WHERE { ?s ?p ?o } LIMIT 1"
           qoxigraph stop
