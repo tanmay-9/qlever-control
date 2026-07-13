@@ -190,21 +190,28 @@ def get_resource_plot(
     Keeps only samples inside [start_ms, end_ms] and converts each to
     display units: rss bytes to GB, cpu percent to cores. totals is
     (rss_total_gb, cpu_cores). The window edges frame the plot's x-axis
-    and may be wider than the samples that fall inside them. A sample
-    whose elapsed time dropped below the previous one marks a server
-    restart, recorded in restart_times_s.
+    and may be wider than the samples that fall inside them. When elapsed
+    time drops between two adjacent samples the server restarted: the
+    earlier sample's time goes to stop_times_s, the later one's to
+    start_times_s, each only if it lands inside the window.
     """
     rss_total_gb, cpu_cores = totals
     times_s = []
     rss_gb = []
     cpu_cores_series = []
-    restart_times_s = []
+    stop_times_s = []
+    start_times_s = []
     last_elapsed = None
+    last_ts_ms = None
     for sample in samples:
+        if last_elapsed is not None and sample.elapsed_s < last_elapsed:
+            if start_ms <= last_ts_ms <= end_ms:
+                stop_times_s.append(last_ts_ms / 1000)
+            if start_ms <= sample.ts_ms <= end_ms:
+                start_times_s.append(sample.ts_ms / 1000)
+        last_elapsed = sample.elapsed_s
+        last_ts_ms = sample.ts_ms
         if start_ms <= sample.ts_ms <= end_ms:
-            if last_elapsed is not None and sample.elapsed_s < last_elapsed:
-                restart_times_s.append(sample.ts_ms / 1000)
-            last_elapsed = sample.elapsed_s
             times_s.append(sample.ts_ms / 1000)
             rss_gb.append(sample.rss / 1e9)
             cpu_cores_series.append(sample.cpu_percent / 100)
@@ -216,7 +223,8 @@ def get_resource_plot(
         cpu_total=cpu_cores,
         start_s=start_ms / 1000,
         end_s=end_ms / 1000,
-        restart_times_s=tuple(restart_times_s),
+        stop_times_s=tuple(stop_times_s),
+        start_times_s=tuple(start_times_s),
     )
 
 
@@ -281,10 +289,11 @@ def read_resource_window(
     Seeks near the window start, then streams forward, folding each row
     into one of max_points equal time buckets and keeping the bucket's
     peak rss and cpu so spikes survive. totals is (rss_total_gb,
-    cpu_cores) for the axes. A drop in elapsed time between rows marks a
-    server restart, recorded in restart_times_s. should_cancel is polled
-    while scanning so a long read can abort. Memory stays at O(max_points)
-    however large the log is.
+    cpu_cores) for the axes. A drop in elapsed time between two adjacent
+    rows marks a restart: the earlier row goes to stop_times_s, the later
+    to start_times_s, each kept only if it lands in the window.
+    should_cancel is polled while scanning so a long read can abort.
+    Memory stays at O(max_points) however large the log is.
     """
     # No log yet: the server has not started, or resource logging is
     # off. Frame the window empty rather than fail the read.
@@ -298,8 +307,10 @@ def read_resource_window(
     bucket_ts = [None] * max_points
     bucket_rss = [0] * max_points
     bucket_cpu = [0.0] * max_points
-    restart_times_s = []
+    stop_times_s = []
+    start_times_s = []
     last_elapsed = None
+    last_ts_ms = None
     rows_since_check = 0
 
     with open(path, "rb") as stream:
@@ -322,18 +333,23 @@ def read_resource_window(
             sample = parse_tsv_row(raw.decode())
             if sample is None:
                 continue
+            # Detect the drop against the previous row even when either
+            # side falls outside the window, so a restart at the left
+            # edge, or a stop at the right edge, is still caught. Each
+            # side is recorded only if it lands in the window.
+            if last_elapsed is not None and sample.elapsed_s < last_elapsed:
+                if start_ms <= last_ts_ms <= end_ms:
+                    stop_times_s.append(last_ts_ms / 1000)
+                if start_ms <= sample.ts_ms <= end_ms:
+                    start_times_s.append(sample.ts_ms / 1000)
+            last_elapsed = sample.elapsed_s
+            last_ts_ms = sample.ts_ms
+            # Break only after detection, so the first row past the
+            # window still pairs with an in-window stop.
             if sample.ts_ms > end_ms:
                 break
-            # Compare against the previous row even when it precedes the
-            # window, so a restart at the window's left edge is caught.
-            restarted = (
-                last_elapsed is not None and sample.elapsed_s < last_elapsed
-            )
-            last_elapsed = sample.elapsed_s
             if sample.ts_ms < start_ms:
                 continue
-            if restarted:
-                restart_times_s.append(sample.ts_ms / 1000)
             index = int((sample.ts_ms - start_ms) / bucket_span_ms)
             if index >= max_points:
                 index = max_points - 1
@@ -358,5 +374,6 @@ def read_resource_window(
         cpu_total=cpu_cores,
         start_s=start_ms / 1000,
         end_s=end_ms / 1000,
-        restart_times_s=tuple(restart_times_s),
+        stop_times_s=tuple(stop_times_s),
+        start_times_s=tuple(start_times_s),
     )

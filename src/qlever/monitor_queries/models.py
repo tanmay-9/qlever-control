@@ -178,8 +178,10 @@ class ResourcePlot:
     None when the core count could not be read. start_s and
     end_s are the requested window edges the plot frames its x-axis to,
     which may be wider than the samples that fall inside it.
-    restart_times_s marks epoch seconds where the server restarted, seen
-    as its elapsed time dropping between samples.
+    A restart shows as elapsed time dropping between two adjacent
+    samples. stop_times_s marks the earlier sample (server going down)
+    and start_times_s the later one (server coming back), both in epoch
+    seconds, so the downtime shows as the gap between the two.
     """
 
     times_s: tuple[float, ...]
@@ -189,4 +191,5 @@ class ResourcePlot:
     cpu_total: float | None
     start_s: float
     end_s: float
-    restart_times_s: tuple[float, ...]
+    stop_times_s: tuple[float, ...]
+    start_times_s: tuple[float, ...]

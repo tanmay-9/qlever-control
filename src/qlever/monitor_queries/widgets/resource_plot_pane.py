@@ -14,9 +14,13 @@ RSS_COLOR_LIGHT = (176, 25, 127)
 CPU_COLOR_DARK = (34, 211, 200)
 RSS_COLOR_DARK = (255, 105, 190)
 
-# Restart marker: neutral grey so it reads on either background and does
-# not compete with the two series colors.
-RESTART_COLOR = (150, 150, 150)
+# Restart markers, one pair per theme like the series colors: orange
+# marks the server going down, green it coming back. Kept clear of the
+# RSS and CPU line colors and legible on either background.
+STOP_COLOR_LIGHT = (200, 110, 20)
+START_COLOR_LIGHT = (30, 140, 70)
+STOP_COLOR_DARK = (240, 160, 60)
+START_COLOR_DARK = (90, 210, 130)
 
 
 def plot_colors(
@@ -26,6 +30,15 @@ def plot_colors(
     if dark:
         return RSS_COLOR_DARK, CPU_COLOR_DARK
     return RSS_COLOR_LIGHT, CPU_COLOR_LIGHT
+
+
+def marker_colors(
+    dark: bool,
+) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """Pick the (stop, start) marker colors for the active theme."""
+    if dark:
+        return STOP_COLOR_DARK, START_COLOR_DARK
+    return STOP_COLOR_LIGHT, START_COLOR_LIGHT
 
 
 # A plot column holds 2 braille dots across, so 2 points per usable
@@ -65,25 +78,26 @@ def clock_ticks(
     return positions, labels
 
 
-def break_at_restarts(
+def break_at_starts(
     times: tuple[float, ...],
     values: tuple[float, ...],
-    restart_times: tuple[float, ...],
+    start_times: tuple[float, ...],
 ) -> tuple[list[float], list[float]]:
     """Insert a gap at each restart so the line is not drawn across it.
 
-    Before the first point at or after a restart time, add a NaN point
-    at that time; plotext leaves a NaN unconnected. A restart before the
-    first point or after the last adds no gap, only its vline shows.
+    Breaking at the start time leaves the downtime, from the stop to the
+    start, empty: before the first point at or after a start time, add a
+    NaN point at that time; plotext leaves a NaN unconnected. A start
+    before the first point or after the last adds no gap.
     """
     out_times = []
     out_values = []
-    restarts = list(restart_times)
+    starts = list(start_times)
     idx = 0
     for time_s, value in zip(times, values):
-        while idx < len(restarts) and time_s >= restarts[idx]:
+        while idx < len(starts) and time_s >= starts[idx]:
             if out_times:
-                out_times.append(restarts[idx])
+                out_times.append(starts[idx])
                 out_values.append(float("nan"))
             idx += 1
         out_times.append(time_s)
@@ -130,13 +144,16 @@ class ResourcePlotPane(PlotextPlot):
 
         Frames the window and axes regardless of data, then either plots
         the two series or, when the window holds no samples, draws a
-        centered note in place of a blank box. A grey vertical line marks
-        each server restart, where the series is also broken.
+        centered note in place of a blank box. An orange line marks each
+        stop and a green one each start, with the series broken across
+        the downtime between them.
         """
         max_points = point_budget(self.size.width)
         data = self.source(max_points)
-        rss_color, cpu_color = plot_colors(self.app.current_theme.dark)
-        has_restarts = bool(data.restart_times_s)
+        dark = self.app.current_theme.dark
+        rss_color, cpu_color = plot_colors(dark)
+        stop_color, start_color = marker_colors(dark)
+        has_restarts = bool(data.stop_times_s or data.start_times_s)
         plt = self.plt
         plt.clear_figure()
         plt.xlim(data.start_s, data.end_s)
@@ -172,24 +189,35 @@ class ResourcePlotPane(PlotextPlot):
             background="default",
             alignment="right",
         )
-        # Legend for the restart marker, drawn in the marker's own grey
-        # with the same vertical-bar glyph so it reads as "this line".
+        # Legend for the restart markers, each drawn in its own color
+        # with the vertical-bar glyph so it reads as "this line".
         if has_restarts:
+            mid = (data.start_s + data.end_s) / 2
+            offset = (data.end_s - data.start_s) * 0.12
             plt.text(
-                "│ = server restart",
-                (data.start_s + data.end_s) / 2,
+                "│ Server stopped",
+                mid - offset,
                 data.rss_total,
                 yside="left",
-                color=RESTART_COLOR,
+                color=stop_color,
+                background="default",
+                alignment="center",
+            )
+            plt.text(
+                "│ Server started",
+                mid + offset,
+                data.rss_total,
+                yside="left",
+                color=start_color,
                 background="default",
                 alignment="center",
             )
         if data.times_s:
-            rss_times, rss_values = break_at_restarts(
-                data.times_s, data.rss_gb, data.restart_times_s
+            rss_times, rss_values = break_at_starts(
+                data.times_s, data.rss_gb, data.start_times_s
             )
-            cpu_times, cpu_values = break_at_restarts(
-                data.times_s, data.cpu_cores, data.restart_times_s
+            cpu_times, cpu_values = break_at_starts(
+                data.times_s, data.cpu_cores, data.start_times_s
             )
             plt.plot(
                 rss_times,
@@ -219,6 +247,8 @@ class ResourcePlotPane(PlotextPlot):
                 background="default",
                 alignment="center",
             )
-        for restart_s in data.restart_times_s:
-            plt.vline(restart_s, color=RESTART_COLOR)
+        for stop_s in data.stop_times_s:
+            plt.vline(stop_s, color=stop_color)
+        for start_s in data.start_times_s:
+            plt.vline(start_s, color=start_color)
         self.refresh()

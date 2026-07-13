@@ -144,30 +144,38 @@ def test_read_window_never_exceeds_max_points(tmp_path):
     assert len(plot.times_s) <= 50
 
 
-def test_read_window_detects_restarts(tmp_path):
-    rows = [
-        (2.0, 1000, 5, 1.0),
-        (4.0, 2000, 5, 1.0),
-        (2.0, 3000, 5, 1.0),
-        (4.0, 4000, 5, 1.0),
-    ]
-    path = write_log(tmp_path, rows)
+# A stop at ts 2000, then a restart at ts 3000 (elapsed drops 4 -> 2).
+RESTART_ROWS = [
+    (2.0, 1000, 5, 1.0),
+    (4.0, 2000, 5, 1.0),
+    (2.0, 3000, 5, 1.0),
+    (4.0, 4000, 5, 1.0),
+]
+
+
+def test_read_window_detects_restart_with_both_edges(tmp_path):
+    # Stop and start both in the window: both lines show.
+    path = write_log(tmp_path, RESTART_ROWS)
     plot = read_resource_window(path, TOTALS, 0, 5000, 500)
-    assert plot.restart_times_s == pytest.approx((3.0,))
+    assert plot.stop_times_s == pytest.approx((2.0,))
+    assert plot.start_times_s == pytest.approx((3.0,))
 
 
-def test_read_window_detects_restart_across_window_start(tmp_path):
-    # The last pre-shutdown sample is before the window; the first
-    # post-restart sample is inside it. The drop must still be caught.
-    rows = [
-        (2.0, 1000, 5, 1.0),
-        (4.0, 2000, 5, 1.0),
-        (2.0, 3000, 5, 1.0),
-        (4.0, 4000, 5, 1.0),
-    ]
-    path = write_log(tmp_path, rows)
+def test_read_window_start_across_window_start(tmp_path):
+    # Stop is before the window, start inside it: only the start shows.
+    path = write_log(tmp_path, RESTART_ROWS)
     plot = read_resource_window(path, TOTALS, 2500, 5000, 500)
-    assert plot.restart_times_s == pytest.approx((3.0,))
+    assert plot.stop_times_s == ()
+    assert plot.start_times_s == pytest.approx((3.0,))
+
+
+def test_read_window_stop_across_window_end(tmp_path):
+    # Stop inside the window, start just past its end: the peek past the
+    # window still records the stop; the start is off-screen.
+    path = write_log(tmp_path, RESTART_ROWS)
+    plot = read_resource_window(path, TOTALS, 0, 2500, 500)
+    assert plot.stop_times_s == pytest.approx((2.0,))
+    assert plot.start_times_s == ()
 
 
 def test_read_window_empty_log_yields_empty_plot(tmp_path):
@@ -175,7 +183,8 @@ def test_read_window_empty_log_yields_empty_plot(tmp_path):
     path.write_text(HEADER)
     plot = read_resource_window(path, TOTALS, 0, 5000, 500)
     assert plot.times_s == ()
-    assert plot.restart_times_s == ()
+    assert plot.stop_times_s == ()
+    assert plot.start_times_s == ()
 
 
 def test_read_window_missing_file_yields_empty_framed_plot(tmp_path):
@@ -194,7 +203,8 @@ def test_get_resource_plot_detects_a_restart():
         sample(2.0, 3000, 1_000_000_000, 10.0),
     ]
     plot = get_resource_plot(samples, TOTALS, 0, 5000)
-    assert plot.restart_times_s == pytest.approx((3.0,))
+    assert plot.stop_times_s == pytest.approx((2.0,))
+    assert plot.start_times_s == pytest.approx((3.0,))
 
 
 def test_get_resource_plot_monotonic_has_no_restart():
@@ -203,7 +213,8 @@ def test_get_resource_plot_monotonic_has_no_restart():
         for elapsed in (2.0, 4.0, 6.0, 8.0)
     ]
     plot = get_resource_plot(samples, TOTALS, 0, 100000)
-    assert plot.restart_times_s == ()
+    assert plot.stop_times_s == ()
+    assert plot.start_times_s == ()
 
 
 def test_get_resource_plot_keeps_only_windowed_samples():
