@@ -34,6 +34,9 @@ from qlever.monitor_queries.resource_data import (
     get_resource_usage,
     is_resource_sample_fresh,
 )
+from qlever.monitor_queries.views.resource_plot_modal import (
+    ResourcePlotModal,
+)
 from qlever.monitor_queries.widgets.detail_switcher import (
     PLOT_ID,
     DetailSwitcher,
@@ -56,7 +59,9 @@ class LiveScreen(Screen, inherit_bindings=False):
     BINDINGS = [
         Binding("tab", "app.swap_screen", "Historic>", priority=True),
         Binding("f", "toggle_freeze", "Freeze/Unfreeze"),
-        Binding("r", "show_plot", "Resource plot"),
+        # One footer entry for both: r shows the pane, R the modal.
+        Binding("r", "show_plot", "Resource plot", key_display="r/R"),
+        Binding("R", "maximize_plot", "Maximize plot", show=False),
         Binding("s", "show_sparql", "SPARQL"),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
@@ -323,6 +328,19 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.query_one(DetailSwitcher).show_plot()
         self.refresh_table_status()
 
+    def action_maximize_plot(self) -> None:
+        """Open the resource plot as a full-screen modal.
+
+        The modal draws from the same rolling source as the inline pane,
+        with the same refresh interval, so it rolls while open.
+        """
+        self.app.push_screen(
+            ResourcePlotModal(
+                source=self.live_resource_plot,
+                refresh_interval=SAMPLE_INTERVAL_S,
+            )
+        )
+
     def action_show_sparql(self) -> None:
         """Switch the detail pane to the SPARQL query."""
         self.query_one(DetailSwitcher).show_sparql()
@@ -331,8 +349,11 @@ class LiveScreen(Screen, inherit_bindings=False):
     def on_resource_sparkline_clicked(
         self, message: ResourceSparkline.Clicked
     ) -> None:
-        """Show the plot when a resource gauge is clicked."""
-        self.action_show_plot()
+        """Show the plot on click; maximize it if it is already shown."""
+        if self.query_one(DetailSwitcher).current == PLOT_ID:
+            self.action_maximize_plot()
+        else:
+            self.action_show_plot()
 
     def refresh_table_status(self) -> None:
         """Compose the table status line from the active hints.

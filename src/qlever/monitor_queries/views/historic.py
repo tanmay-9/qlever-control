@@ -46,6 +46,9 @@ from qlever.monitor_queries.views.filter_modal import (
     FILTER_STATUSES,
     FilterModal,
 )
+from qlever.monitor_queries.views.resource_plot_modal import (
+    ResourcePlotModal,
+)
 from qlever.monitor_queries.widgets.controls_row import HistoricControlsRow
 from qlever.monitor_queries.widgets.detail_switcher import DetailSwitcher
 from qlever.monitor_queries.widgets.header_row import HeaderRow
@@ -166,7 +169,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("i", "invert_sort", "Invert sort"),
         Binding("f", "edit_filter", "Filter"),
         Binding("F", "clear_filters", "Clear filters"),
-        Binding("r", "show_plot", "Resource plot"),
+        # One footer entry for both: r shows the pane, R the modal.
+        Binding("r", "show_plot", "Resource plot", key_display="r/R"),
+        Binding("R", "maximize_plot", "Maximize plot", show=False),
         Binding("s", "show_sparql", "SPARQL"),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
@@ -423,6 +428,17 @@ class HistoricScreen(Screen, inherit_bindings=False):
         redraws with the current window's plot; no explicit replot here.
         """
         self.query_one(DetailSwitcher).show_plot()
+
+    def action_maximize_plot(self) -> None:
+        """Open the resource plot as a full-screen modal.
+
+        No refresh interval: the window is fixed, so the modal draws
+        once. It reuses the plot read for the inline pane, bucketed for
+        that pane's width, rather than re-reading the log wider.
+        """
+        self.app.push_screen(
+            ResourcePlotModal(source=self.historic_resource_plot)
+        )
 
     def action_show_sparql(self) -> None:
         """Switch the detail pane to the SPARQL query."""

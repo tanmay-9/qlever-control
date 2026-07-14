@@ -14,7 +14,7 @@ from qlever.monitor_queries.widgets.resource_plot_pane import ResourcePlotPane
 
 
 class ResourcePlotModal(ModalScreen):
-    """Full-screen shell around a ResourcePlotView.
+    """Full-screen shell around a ResourcePlotPane.
 
     The pane owns the drawing and the roll timer; this modal only frames
     it and handles closing.
