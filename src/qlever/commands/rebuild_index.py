@@ -146,8 +146,6 @@ class RebuildIndexCommand(QleverCommand):
                 "use_patterns",
                 "use_text_index",
                 "metrics_log",
-                "resource_usage_log",
-                "resource_usage_interval",
                 "warmup_cmd",
             ],
             "runtime": [
