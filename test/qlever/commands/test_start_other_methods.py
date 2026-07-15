@@ -48,6 +48,7 @@ class TestStartCommand(unittest.TestCase):
                     "resource_usage_interval",
                     "preload_materialized_views",
                     "warmup_cmd",
+                    "enable_metrics",
                 ],
                 "runtime": [
                     "system",
