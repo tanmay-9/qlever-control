@@ -403,7 +403,10 @@ class IndexCommand(QleverCommand):
 
         # The index binary writes the resource-usage log itself; older
         # binaries without that feature write none, then skip the plot.
-        if Path(f"{args.name}.index.resource-usage-log.tsv").exists():
+        if (
+            Path(f"{args.name}.index.resource-usage-log.tsv").exists()
+            or Path(f"{args.name}.resource-usage-log.tsv").exists()
+        ):
             plot_path = render_usage_plot(
                 args.name,
                 stxxl_memory=args.stxxl_memory or "",
