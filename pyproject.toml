@@ -25,7 +25,7 @@ dependencies = [ "psutil", "termcolor", "argcomplete", "pyyaml", "rdflib", "requ
 
 [project.optional-dependencies]
 plot = [ "matplotlib", "numpy" ]
-dev = [ "ruff", "pre-commit" ]
+dev = [ "ruff", "pre-commit", "pytest" ]
 
 [project.urls]
 homepage = "https://github.com/ad-freiburg/qlever"

@@ -24,6 +24,7 @@ def test_construct_command_with_if():
     args.only_pso_and_pos_permutations = True
     args.use_patterns = "no"
     args.use_text_index = "yes"
+    args.enable_metrics = False
     args.resource_usage_log = "no"
     args.preload_materialized_views = ["view-1", "view-2"]
 
@@ -69,6 +70,7 @@ def test_construct_command_without_if():
     args.only_pso_and_pos_permutations = False
     args.use_patterns = True
     args.use_text_index = "no"
+    args.enable_metrics = False
     args.resource_usage_log = "yes"
     args.resource_usage_interval = 2
     args.preload_materialized_views = None
@@ -370,6 +372,7 @@ class TestStartCommand(unittest.TestCase):
         args.only_pso_and_pos_permutations = True
         args.use_patterns = "no"
         args.use_text_index = "yes"
+        args.enable_metrics = False
         args.resource_usage_log = "yes"
         args.resource_usage_interval = 2
         args.preload_materialized_views = None

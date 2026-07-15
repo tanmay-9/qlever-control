@@ -46,6 +46,8 @@ def construct_command(args) -> str:
         start_cmd += " --no-patterns"
     if args.use_text_index == "yes":
         start_cmd += " -t"
+    if args.enable_metrics:
+        start_cmd += " --enable-metrics"
     if args.metrics_log == "no":
         start_cmd += " --no-metrics-log"
     # The server samples its own RSS and CPU usage by default. Only
@@ -172,6 +174,7 @@ class StartCommand(QleverCommand):
                 "resource_usage_interval",
                 "preload_materialized_views",
                 "warmup_cmd",
+                "enable_metrics",
             ],
             "runtime": [
                 "system",
