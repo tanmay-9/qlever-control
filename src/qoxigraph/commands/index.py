@@ -228,7 +228,7 @@ class IndexCommand(QleverCommand):
             f.write(f"Load time: {load_s:.0f}s\n")
             if optimize_cmd:
                 f.write(f"Optimize time: {optimize_s:.0f}s\n")
-            f.write(f"Total elapsed time: {load_s + optimize_s:.0f}s\n")
+            f.write(f"TOTAL time: {load_s + optimize_s:.0f}s\n")
 
         plot_path = render_usage_plot(args)
         if plot_path is not None:

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 import qlever.util as util
 from qlever.commands.index_stats import (
     IndexStatsCommand as QleverIndexStatsCommand,
@@ -13,13 +11,14 @@ from qlever.commands.index_stats import (
     get_time_unit_factor,
 )
 from qlever.log import log
+from qoxigraph.resource_usage.usage_plot import parse_logged_seconds
 
 
 class IndexStatsCommand(QleverIndexStatsCommand):
     """
     Show index build time and disk space usage for an Oxigraph dataset.
-    Time is read from the "Total elapsed time" line appended to the
-    index log by the index command; space is the sum of all .sst files.
+    Time is read from the "TOTAL time" line appended to the index log
+    by the index command; space is the sum of all .sst files.
     """
 
     def execute_time(
@@ -36,23 +35,13 @@ class IndexStatsCommand(QleverIndexStatsCommand):
             log.error(f"Problem reading index log file {log_file_name}: {e}")
             return {}
 
-        patterns = {
-            "Load time": re.compile(r"Load time: ([\d,]+)s$"),
-            "Optimize time": re.compile(r"Optimize time: ([\d,]+)s$"),
-            "TOTAL time": re.compile(r"Total elapsed time: ([\d,]+)s$"),
-        }
+        phases = ["Load time", "Optimize time", "TOTAL time"]
 
         raw_seconds = {}
-        for line in log_text.splitlines():
-            for name, pattern in patterns.items():
-                match = pattern.search(line)
-                if match:
-                    try:
-                        raw_seconds[name] = float(
-                            match.group(1).replace(",", "")
-                        )
-                    except (ValueError, TypeError):
-                        pass
+        for name in phases:
+            seconds = parse_logged_seconds(log_text, f"{name}:")
+            if seconds is not None:
+                raw_seconds[name] = seconds
 
         if not raw_seconds:
             return {}
@@ -63,7 +52,7 @@ class IndexStatsCommand(QleverIndexStatsCommand):
         unit_factor = get_time_unit_factor(time_unit)
 
         stats = {}
-        for name in ["Load time", "Optimize time", "TOTAL time"]:
+        for name in phases:
             if name in raw_seconds:
                 stats[name] = (raw_seconds[name] / unit_factor, time_unit)
 
