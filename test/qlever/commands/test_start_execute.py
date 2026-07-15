@@ -90,6 +90,18 @@ def test_construct_command_without_if():
     assert result == start_command
 
 
+# Tests that a non-default sampling interval is passed to the binary
+def test_construct_command_non_default_resource_usage_interval():
+    args = MagicMock()
+    args.resource_usage_log = "yes"
+    args.resource_usage_interval = 5
+
+    result = qlever.commands.start.construct_command(args)
+
+    assert " --resource-usage-interval-s 5" in result
+    assert "--no-resource-usage-log" not in result
+
+
 # Tests `wrap_command_in_container`.
 @patch("qlever.commands.start.Containerize.containerize_command")
 def test_wrap_command_in_container(mock_containerize_command):
