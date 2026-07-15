@@ -24,6 +24,7 @@ def test_construct_command_with_if():
     args.only_pso_and_pos_permutations = True
     args.use_patterns = "no"
     args.use_text_index = "yes"
+    args.resource_usage_log = "no"
     args.preload_materialized_views = ["view-1", "view-2"]
 
     # Execute the function
@@ -43,6 +44,7 @@ def test_construct_command_with_if():
         " --only-pso-and-pos-permutations"
         " --no-patterns"
         " -t"
+        " --no-resource-usage-log"
         " --preload-materialized-views view-1 view-2"
         f" > {args.name}.server-log.txt 2>&1"
     )
@@ -67,6 +69,8 @@ def test_construct_command_without_if():
     args.only_pso_and_pos_permutations = False
     args.use_patterns = True
     args.use_text_index = "no"
+    args.resource_usage_log = "yes"
+    args.resource_usage_interval = 2
     args.preload_materialized_views = None
 
     # Execute the function
@@ -84,6 +88,18 @@ def test_construct_command_without_if():
         f" > {args.name}.server-log.txt 2>&1"
     )
     assert result == start_command
+
+
+# Tests that a non-default sampling interval is passed to the binary
+def test_construct_command_non_default_resource_usage_interval():
+    args = MagicMock()
+    args.resource_usage_log = "yes"
+    args.resource_usage_interval = 5
+
+    result = qlever.commands.start.construct_command(args)
+
+    assert " --resource-usage-interval-s 5" in result
+    assert "--no-resource-usage-log" not in result
 
 
 # Tests `wrap_command_in_container`.
@@ -354,6 +370,8 @@ class TestStartCommand(unittest.TestCase):
         args.only_pso_and_pos_permutations = True
         args.use_patterns = "no"
         args.use_text_index = "yes"
+        args.resource_usage_log = "yes"
+        args.resource_usage_interval = 2
         args.preload_materialized_views = None
 
         # Configure Path mock so the log file wait loop is skipped
