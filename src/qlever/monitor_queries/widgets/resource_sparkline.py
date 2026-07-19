@@ -8,6 +8,8 @@ near-capacity load reads tall and red.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from rich.text import Text
 from textual.color import Color
 from textual.message import Message
@@ -31,15 +33,13 @@ def load_color(ratio: float) -> str:
     return AMBER.blend(RED, (ratio - 0.5) * 2).hex
 
 
-def bucket_max(values: tuple[float, ...], width: int) -> list[float]:
+def bucket_max(values: tuple[float, ...], width: int) -> Iterator[float]:
     """Group values into `width` columns, each the max of its slice."""
     step = len(values) / width
-    columns = []
     for column in range(width):
         lo, hi = int(column * step), int((column + 1) * step)
         chunk = values[lo:hi] or values[lo : lo + 1] or values[-1:]
-        columns.append(max(chunk))
-    return columns
+        yield max(chunk)
 
 
 def series_title(series: ResourceSeries, stale: bool) -> str:
@@ -85,13 +85,9 @@ class ResourceSparkline(Static):
 
     def watch_series(self, series: ResourceSeries) -> None:
         self.border_title = series_title(series, self.stale)
-        self.refresh()
 
     def watch_stale(self, stale: bool) -> None:
         self.border_title = series_title(self.series, stale)
-
-    def on_resize(self) -> None:
-        self.refresh()
 
     def on_click(self) -> None:
         self.post_message(self.Clicked())

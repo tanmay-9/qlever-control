@@ -75,17 +75,6 @@ def parse_tsv_row(line: str) -> ResourceSample | None:
         return None
 
 
-def recent(samples: list[ResourceSample], now_ms: int) -> list[ResourceSample]:
-    """Keep only samples from the last LIVE_WINDOW_S seconds.
-
-    The log is opened in append mode, so it can carry rows from an
-    earlier session. Dropping them when seeding the buffer makes it
-    start with a true 5-minute window rather than stale history.
-    """
-    cutoff = now_ms - LIVE_WINDOW_S * 1000
-    return [sample for sample in samples if sample.ts_ms >= cutoff]
-
-
 class ResourceLogReader:
     """Tail cursor for the server's resource-usage TSV, like LiveLogReader.
 
@@ -106,7 +95,9 @@ class ResourceLogReader:
         Seeks near the end rather than scanning from the start, so a log
         grown large over past sessions costs a fixed read. Skips the
         partial line the seek lands in, then reads forward like a normal
-        poll. recent() drops rows left from an earlier session.
+        poll. The log is opened in append mode, so the tail can carry
+        rows from an earlier session; the cutoff drops them so the buffer
+        starts as a true LIVE_WINDOW_S window rather than stale history.
         """
         stream.seek(0, 2)
         start = max(0, stream.tell() - SEED_TAIL_BYTES)
@@ -114,7 +105,12 @@ class ResourceLogReader:
         if start > 0:
             stream.readline()
         self.cursor = stream.tell()
-        return recent(self.read_new(stream), now_ms)
+        cutoff = now_ms - LIVE_WINDOW_S * 1000
+        return [
+            sample
+            for sample in self.read_new(stream)
+            if sample.ts_ms >= cutoff
+        ]
 
     def read_new(self, stream: BinaryIO) -> list[ResourceSample]:
         """Parse and return samples appended since the previous read.

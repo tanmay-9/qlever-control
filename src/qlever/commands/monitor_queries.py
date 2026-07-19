@@ -9,7 +9,7 @@ from qlever.monitor_queries.app import MonitorQueriesApp
 # `LiveLogReader` ingests new log lines every 0.2s, so a faster screen
 # refresh would only re-render the ticking duration; 0.2s is the floor.
 REFRESH_MIN_S = 0.2
-REFRESH_MAX_S = 2.0
+REFRESH_MAX_S = 5.0
 
 
 class MonitorQueriesCommand(QleverCommand):
