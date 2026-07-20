@@ -25,16 +25,20 @@ class DetailSwitcher(ContentSwitcher):
 
     def __init__(
         self,
-        source: Callable[[int], ResourcePlot],
+        source: Callable[[], ResourcePlot],
         refresh_interval: float | None = None,
+        reload: Callable[[int], None] | None = None,
     ) -> None:
         super().__init__(initial=PLOT_ID)
         self.source = source
         self.refresh_interval = refresh_interval
+        self.reload = reload
 
     def compose(self) -> ComposeResult:
         yield SparqlPane(id=SPARQL_ID)
-        yield ResourcePlotPane(self.source, self.refresh_interval, id=PLOT_ID)
+        yield ResourcePlotPane(
+            self.source, self.refresh_interval, self.reload, id=PLOT_ID
+        )
 
     def show_plot(self) -> None:
         """Switch to the resource plot pane."""

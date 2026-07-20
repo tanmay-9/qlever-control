@@ -118,13 +118,16 @@ class ResourcePlotPane(PlotextPlot):
 
     def __init__(
         self,
-        source: Callable[[int], ResourcePlot],
+        source: Callable[[], ResourcePlot],
         refresh_interval: float | None = None,
+        reload: Callable[[int], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.source = source
         self.refresh_interval = refresh_interval
+        self.reload = reload
+        self.last_budget = None
 
     def on_mount(self) -> None:
         """Draw once; with an interval, also replot on a timer to roll."""
@@ -136,8 +139,18 @@ class ResourcePlotPane(PlotextPlot):
         )
 
     def on_resize(self) -> None:
-        """Redraw so the y-tick count re-fits the new height."""
+        """Redraw at the new size, and re-read if the pane got wider.
+
+        A visible pane whose point budget changed asks the owner to
+        re-read, so a wider pane shows more detail. A hidden pane has
+        width 0 and is skipped.
+        """
         self.replot()
+        if self.reload is not None and self.size.width > 0:
+            budget = point_budget(self.size.width)
+            if budget != self.last_budget:
+                self.last_budget = budget
+                self.reload(budget)
 
     def replot(self) -> None:
         """Draw the current window: RSS on the left axis, CPU on the right.
@@ -148,8 +161,7 @@ class ResourcePlotPane(PlotextPlot):
         stop and a green one each start, with the series broken across
         the downtime between them.
         """
-        max_points = point_budget(self.size.width)
-        data = self.source(max_points)
+        data = self.source()
         dark = self.app.current_theme.dark
         rss_color, cpu_color = plot_colors(dark)
         stop_color, start_color = marker_colors(dark)

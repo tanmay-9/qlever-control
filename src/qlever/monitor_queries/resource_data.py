@@ -37,7 +37,7 @@ def system_totals() -> tuple[float, int | None]:
 
     Read once at screen setup; both stay fixed for the machine's lifetime.
     """
-    return (psutil.virtual_memory().total / 1e9, psutil.cpu_count())
+    return psutil.virtual_memory().total / 1e9, psutil.cpu_count()
 
 
 class ResourceHistory:

@@ -176,23 +176,17 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
 
-    def compose(self) -> ComposeResult:
-        self.log_start_ms = self.app.log_start_ms
-        self.log_end_ms = self.read_log_end()
-        # Presets longer than the log span are pointless; `all` covers it.
-        self.available_presets = available_presets(
-            self.log_end_ms - self.log_start_ms
-        )
-        self.window_size = self.available_presets[0]
+    def __init__(self) -> None:
+        """Set the screen's blank default state.
+
+        The app-derived window fields are read in compose, where the app
+        and the log span are available.
+        """
+        super().__init__()
         self.mode = "ACTIVE"
         self.filters = FilterState()
         self.sort_column = "Duration"
         self.sort_reverse = True
-        width = preset_ms(self.window_size)
-        self.window_start_ms = (
-            self.log_start_ms if width is None else self.log_end_ms - width
-        )
-        self.window_end_ms = self.log_end_ms
         self.window_queries = None
         self.all_rows = []
         self.window_total = 0
@@ -202,6 +196,20 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.rescan_timer = None
         self.cached_window = None
         self.resource_plot = None
+
+    def compose(self) -> ComposeResult:
+        self.log_start_ms = self.app.log_start_ms
+        self.log_end_ms = self.read_log_end()
+        # Presets longer than the log span are pointless; `all` covers it.
+        self.available_presets = available_presets(
+            self.log_end_ms - self.log_start_ms
+        )
+        self.window_size = self.available_presets[0]
+        width = preset_ms(self.window_size)
+        self.window_start_ms = (
+            self.log_start_ms if width is None else self.log_end_ms - width
+        )
+        self.window_end_ms = self.log_end_ms
         controls = ControlsState(
             window_size=self.window_size,
             mode=self.mode,
@@ -229,7 +237,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
         yield DetailSwitcher(
-            source=self.historic_resource_plot, refresh_interval=None
+            source=self.historic_resource_plot,
+            refresh_interval=None,
+            reload=self.reload_plot,
         )
         yield Footer(show_command_palette=False)
 
@@ -402,15 +412,14 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.refresh_sort_indicator()
         self.query_one(DetailSwitcher).replot_if_visible()
 
-    def historic_resource_plot(self, max_points: int) -> ResourcePlot:
+    def historic_resource_plot(self) -> ResourcePlot:
         """Return the current window's resource plot for the pane to draw.
 
         The plot is read on the refresh_data worker when the window
         changes and held in self.resource_plot, so this hands it back
-        directly. max_points is unused here: the worker read used the
-        pane width at scan time, and a resize or theme redraw reuses that
-        bucketing rather than re-reading the log. Before the first read,
-        an empty plot frames the current window.
+        directly. A resize or theme redraw reuses that plot rather than
+        re-reading the log. Before the first read, an empty plot frames
+        the current window.
         """
         if self.resource_plot is not None:
             return self.resource_plot
@@ -420,6 +429,33 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.window_start_ms,
             self.window_end_ms,
         )
+
+    @work(thread=True, exclusive=True, group="reload_plot")
+    def reload_plot(self, max_points: int) -> None:
+        """Re-read the current window's plot at a new width, off the UI thread.
+
+        The inline pane calls this when a resize changes its point budget.
+        An exclusive worker means a fast drag cancels superseded reads, so
+        only the final width lands. Reads the resource plot alone, not the
+        query table, which a resize has no reason to redo.
+        """
+        worker = get_current_worker()
+        plot = read_resource_window(
+            self.app.resource_log,
+            self.app.resource_totals,
+            self.window_start_ms,
+            self.window_end_ms,
+            max_points,
+            should_cancel=lambda: worker.is_cancelled,
+        )
+        if worker.is_cancelled:
+            return
+        self.app.call_from_thread(self.apply_reload_plot, plot)
+
+    def apply_reload_plot(self, plot: ResourcePlot) -> None:
+        """Store the re-read plot and redraw the inline pane if shown."""
+        self.resource_plot = plot
+        self.query_one(DetailSwitcher).replot_if_visible()
 
     def action_show_plot(self) -> None:
         """Switch the detail pane to the resource plot.
@@ -432,12 +468,26 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def action_maximize_plot(self) -> None:
         """Open the resource plot as a full-screen modal.
 
-        No refresh interval: the window is fixed, so the modal draws
-        once. It reuses the plot read for the inline pane, bucketed for
-        that pane's width, rather than re-reading the log wider.
+        The modal first shows the inline plot, then re-reads the window at
+        its own wider width so maximizing shows more detail. read_window
+        carries the window and log the modal does not know; the modal
+        supplies the point budget for its width.
         """
+
+        def read_window(max_points, should_cancel):
+            return read_resource_window(
+                self.app.resource_log,
+                self.app.resource_totals,
+                self.window_start_ms,
+                self.window_end_ms,
+                max_points,
+                should_cancel=should_cancel,
+            )
+
         self.app.push_screen(
-            ResourcePlotModal(source=self.historic_resource_plot)
+            ResourcePlotModal(
+                source=self.historic_resource_plot, reader=read_window
+            )
         )
 
     def action_show_sparql(self) -> None:

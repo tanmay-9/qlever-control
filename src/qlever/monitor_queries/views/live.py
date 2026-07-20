@@ -68,6 +68,18 @@ class LiveScreen(Screen, inherit_bindings=False):
 
     frozen = reactive(False, init=False)
 
+    def __init__(self) -> None:
+        """Set the screen's blank default state.
+
+        The app-derived fields (liveness, resource totals) are read in
+        compose, where the app is available.
+        """
+        super().__init__()
+        self.consecutive_ping_fails = 0
+        self.ping_timer = None
+        self.resource_history = ResourceHistory()
+        self.resource_reader = ResourceLogReader()
+
     def compose(self) -> ComposeResult:
         yield HeaderRow(
             left=NavPill("Historic >", target="historic"),
@@ -84,12 +96,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.liveness = (
             "reachable" if is_log_fresh(state, current_ms()) else "checking"
         )
-        self.consecutive_ping_fails = 0
-        self.ping_timer = None
-
         self.resource_totals = self.app.resource_totals
-        self.resource_history = ResourceHistory()
-        self.resource_reader = ResourceLogReader()
 
         yield ResourceRow(
             LiveSubtitle(
@@ -307,13 +314,11 @@ class LiveScreen(Screen, inherit_bindings=False):
             self.resource_history, self.resource_totals
         )
 
-    def live_resource_plot(self, max_points: int) -> ResourcePlot:
+    def live_resource_plot(self) -> ResourcePlot:
         """Snapshot the buffer as the rolling 5-minute plot window.
 
         Recomputes the window end on each call, so the plot's timer rolls
-        the view forward the same way the sparklines roll. max_points is
-        unused: the buffer never exceeds the plot's point budget, so the
-        live window is drawn without bucketing.
+        the view forward the same way the sparklines roll.
         """
         now = current_ms()
         return get_resource_plot(
