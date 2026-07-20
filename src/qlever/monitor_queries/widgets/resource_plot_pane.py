@@ -204,20 +204,27 @@ class ResourcePlotPane(PlotextPlot):
     def replot(self) -> None:
         """Draw the current window: RSS on the left axis, CPU on the right.
 
-        Frames the window and axes regardless of data, then either plots
-        the two series or, when the window holds no samples, draws a
-        centered note in place of a blank box. An orange line marks each
-        stop and a green one each start, with the series broken across
-        the downtime between them.
+        Frames the window and axes, then plots the two series or, when the
+        window holds no samples, a centered note. Restarts show as an
+        orange stop line and a green start line, with the series broken
+        across the downtime between them.
         """
         data = self.source()
-        dark = self.app.current_theme.dark
-        rss_color, cpu_color = series_colors(dark)
-        stop_color, start_color = restart_colors(dark)
-        has_restarts = bool(data.stop_times_s or data.start_times_s)
+        self.plt.clear_figure()
+        self.plt.xlim(data.start_s, data.end_s)
+        rss_max, cpu_max = self.draw_axes(data)
+        self.draw_labels(data, rss_max, cpu_max)
+        self.draw_series(data, rss_max)
+        self.refresh()
+
+    def draw_axes(self, data: ResourcePlot) -> tuple[float, float | None]:
+        """Scale and label both y-axes and the x-axis for this window.
+
+        Returns (rss_max, cpu_max), the axis tops the labels anchor to;
+        cpu_max is None when the core count is unknown, so the right axis
+        gets no ticks.
+        """
         plt = self.plt
-        plt.clear_figure()
-        plt.xlim(data.start_s, data.end_s)
         # Base the right axis on the tallest CPU point when the core count
         # is unknown.
         cpu_top = (
@@ -236,6 +243,7 @@ class ResourcePlotPane(PlotextPlot):
         )
         plt.ylim(0, rss_max, yside="left")
         plt.yticks(rss_positions, rss_labels, yside="left")
+        cpu_max = None
         if cpu_top > 0:
             cpu_max, cpu_positions, cpu_labels = axis_ticks(
                 cpu_top, count, gaps
@@ -246,9 +254,21 @@ class ResourcePlotPane(PlotextPlot):
             plt.ylim(0, data.cpu_total, yside="right")
         positions, labels = clock_ticks(data.start_s, data.end_s)
         plt.xticks(positions, labels)
-        # Name each series in its own top corner, colored to match its
-        # line, so the reader maps line to axis without a stacked legend.
-        # A bottom label row would sit under the footer keys.
+        return rss_max, cpu_max
+
+    def draw_labels(
+        self, data: ResourcePlot, rss_max: float, cpu_max: float | None
+    ) -> None:
+        """Name each series in its axis corner, and legend any restarts.
+
+        The series names sit in the top corners, colored to match their
+        lines, so the reader maps line to axis without a stacked legend.
+        A bottom label row would sit under the footer keys.
+        """
+        dark = self.app.current_theme.dark
+        rss_color, cpu_color = series_colors(dark)
+        stop_color, start_color = restart_colors(dark)
+        plt = self.plt
         plt.text(
             "RSS (GB)",
             data.start_s,
@@ -258,7 +278,7 @@ class ResourcePlotPane(PlotextPlot):
             background="default",
             alignment="left",
         )
-        if cpu_top > 0:
+        if cpu_max is not None:
             plt.text(
                 "CPU (cores)",
                 data.end_s,
@@ -268,9 +288,9 @@ class ResourcePlotPane(PlotextPlot):
                 background="default",
                 alignment="right",
             )
-        # Legend for the restart markers, each drawn in its own color
-        # with the vertical-bar glyph so it reads as "this line".
-        if has_restarts:
+        # Legend for the restart markers, each drawn in its own color with
+        # the vertical-bar glyph so it reads as "this line".
+        if data.stop_times_s or data.start_times_s:
             mid = (data.start_s + data.end_s) / 2
             offset = (data.end_s - data.start_s) * 0.12
             plt.text(
@@ -291,6 +311,17 @@ class ResourcePlotPane(PlotextPlot):
                 background="default",
                 alignment="center",
             )
+
+    def draw_series(self, data: ResourcePlot, rss_max: float) -> None:
+        """Plot the RSS and CPU lines, or a note when the window is empty.
+
+        The lines are broken across each restart's downtime. An orange
+        vline marks each stop and a green one each start.
+        """
+        dark = self.app.current_theme.dark
+        rss_color, cpu_color = series_colors(dark)
+        stop_color, start_color = restart_colors(dark)
+        plt = self.plt
         if data.times_s:
             rss_times, rss_values = break_at_starts(
                 data.times_s, data.rss_gb, data.start_times_s
@@ -330,4 +361,3 @@ class ResourcePlotPane(PlotextPlot):
             plt.vline(stop_s, color=stop_color)
         for start_s in data.start_times_s:
             plt.vline(start_s, color=start_color)
-        self.refresh()
