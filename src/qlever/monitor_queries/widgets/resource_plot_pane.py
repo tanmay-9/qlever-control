@@ -23,7 +23,7 @@ STOP_COLOR_DARK = (240, 160, 60)
 START_COLOR_DARK = (90, 210, 130)
 
 
-def plot_colors(
+def series_colors(
     dark: bool,
 ) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
     """Pick the (RSS, CPU) line colors for the active theme background."""
@@ -32,10 +32,10 @@ def plot_colors(
     return RSS_COLOR_LIGHT, CPU_COLOR_LIGHT
 
 
-def marker_colors(
+def restart_colors(
     dark: bool,
 ) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
-    """Pick the (stop, start) marker colors for the active theme."""
+    """Pick the (stop, start) restart marker colors for the active theme."""
     if dark:
         return STOP_COLOR_DARK, START_COLOR_DARK
     return STOP_COLOR_LIGHT, START_COLOR_LIGHT
@@ -52,6 +52,55 @@ def point_budget(width: int) -> int:
     """Points worth plotting for a pane this wide (2 per braille column)."""
     usable_cols = max(10, width - Y_AXIS_CHROME)
     return max(MIN_PLOT_POINTS, usable_cols * 2)
+
+
+# Interior rows = pane height minus the two borders and the x-axis label
+# row. Aim for a tick every MIN_ROWS_PER_TICK rows, clamped.
+Y_PLOT_CHROME = 3
+MIN_ROWS_PER_TICK = 2
+MIN_Y_TICKS = 2
+MAX_Y_TICKS = 8
+
+
+def tick_layout(height: int, max_ticks: int) -> tuple[int, int]:
+    """Pick the y-tick count and interior row gaps for a pane this tall.
+
+    Returns (count, gaps), shared by both axes so ticks line up. Picks the
+    most ticks whose leftover rows stay below one gap, so the space above
+    the top tick never exceeds a tick interval. max_ticks caps the count
+    so the smaller axis keeps distinct labels.
+    """
+    gaps = max(1, height - Y_PLOT_CHROME - 1)
+    cap = min(MAX_Y_TICKS, max_ticks)
+    count = MIN_Y_TICKS
+    for candidate in range(MIN_Y_TICKS, cap + 1):
+        step = gaps // (candidate - 1)
+        if step < MIN_ROWS_PER_TICK:
+            break
+        if gaps - step * (candidate - 1) < step:
+            count = candidate
+    return count, gaps
+
+
+def axis_ticks(
+    top: float, count: int, gaps: int
+) -> tuple[float, list[int], list[str]]:
+    """Ticks by a constant integer step, ending near top.
+
+    Labels rise by one whole-number step (0, s, 2s, ...) so the numbers
+    are as evenly spaced as the rows. The step is round(top / gaps
+    between ticks), so the last label is the closest step multiple to the
+    capacity. The axis maximum maps one label step onto the whole-row
+    step, keeping every gap equal. Returns (axis_max, positions, labels).
+    """
+    if top <= 0:
+        return 1.0, [0], ["0"]
+    count = max(2, count)
+    row_step = gaps // (count - 1)
+    value_step = max(1, round(top / (count - 1)))
+    axis_max = value_step * gaps / row_step
+    positions = [value_step * index for index in range(count)]
+    return axis_max, positions, [str(pos) for pos in positions]
 
 
 def clock_ticks(
@@ -163,14 +212,38 @@ class ResourcePlotPane(PlotextPlot):
         """
         data = self.source()
         dark = self.app.current_theme.dark
-        rss_color, cpu_color = plot_colors(dark)
-        stop_color, start_color = marker_colors(dark)
+        rss_color, cpu_color = series_colors(dark)
+        stop_color, start_color = restart_colors(dark)
         has_restarts = bool(data.stop_times_s or data.start_times_s)
         plt = self.plt
         plt.clear_figure()
         plt.xlim(data.start_s, data.end_s)
-        plt.ylim(0, data.rss_total, yside="left")
-        plt.ylim(0, data.cpu_total, yside="right")
+        # Base the right axis on the tallest CPU point when the core count
+        # is unknown.
+        cpu_top = (
+            data.cpu_total
+            if data.cpu_total is not None
+            else max(data.cpu_cores, default=0)
+        )
+        # Cap the shared tick count by the smaller axis so its labels stay
+        # distinct.
+        smaller_top = (
+            min(data.rss_total, cpu_top) if cpu_top > 0 else data.rss_total
+        )
+        count, gaps = tick_layout(self.size.height, round(smaller_top) + 1)
+        rss_max, rss_positions, rss_labels = axis_ticks(
+            data.rss_total, count, gaps
+        )
+        plt.ylim(0, rss_max, yside="left")
+        plt.yticks(rss_positions, rss_labels, yside="left")
+        if cpu_top > 0:
+            cpu_max, cpu_positions, cpu_labels = axis_ticks(
+                cpu_top, count, gaps
+            )
+            plt.ylim(0, cpu_max, yside="right")
+            plt.yticks(cpu_positions, cpu_labels, yside="right")
+        else:
+            plt.ylim(0, data.cpu_total, yside="right")
         positions, labels = clock_ticks(data.start_s, data.end_s)
         plt.xticks(positions, labels)
         # Name each series in its own top corner, colored to match its
@@ -179,28 +252,22 @@ class ResourcePlotPane(PlotextPlot):
         plt.text(
             "RSS (GB)",
             data.start_s,
-            data.rss_total,
+            rss_max,
             yside="left",
             color=rss_color,
             background="default",
             alignment="left",
         )
-        # The right axis auto-scales when the core count is unknown, so
-        # anchor its label at the tallest CPU point rather than a fixed top.
-        cpu_label_y = (
-            data.cpu_total
-            if data.cpu_total is not None
-            else max(data.cpu_cores, default=0)
-        )
-        plt.text(
-            "CPU (cores)",
-            data.end_s,
-            cpu_label_y,
-            yside="right",
-            color=cpu_color,
-            background="default",
-            alignment="right",
-        )
+        if cpu_top > 0:
+            plt.text(
+                "CPU (cores)",
+                data.end_s,
+                cpu_max,
+                yside="right",
+                color=cpu_color,
+                background="default",
+                alignment="right",
+            )
         # Legend for the restart markers, each drawn in its own color
         # with the vertical-bar glyph so it reads as "this line".
         if has_restarts:
@@ -209,7 +276,7 @@ class ResourcePlotPane(PlotextPlot):
             plt.text(
                 "│ Server stopped",
                 mid - offset,
-                data.rss_total,
+                rss_max,
                 yside="left",
                 color=stop_color,
                 background="default",
@@ -218,7 +285,7 @@ class ResourcePlotPane(PlotextPlot):
             plt.text(
                 "│ Server started",
                 mid + offset,
-                data.rss_total,
+                rss_max,
                 yside="left",
                 color=start_color,
                 background="default",
@@ -254,7 +321,7 @@ class ResourcePlotPane(PlotextPlot):
             plt.text(
                 "No samples in this window",
                 (data.start_s + data.end_s) / 2,
-                data.rss_total / 2,
+                rss_max / 2,
                 yside="left",
                 background="default",
                 alignment="center",
