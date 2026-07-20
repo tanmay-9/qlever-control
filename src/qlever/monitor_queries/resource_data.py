@@ -32,7 +32,7 @@ RESOURCE_FRESH_S = SAMPLE_INTERVAL_S * 3
 SEED_TAIL_BYTES = BUFFER_SIZE * 64
 
 
-def system_totals() -> tuple[float, int | None]:
+def system_totals() -> tuple[float, float | None]:
     """The sparkline scale denominators: (total RAM in GB, logical cores).
 
     Read once at screen setup; both stay fixed for the machine's lifetime.
@@ -204,6 +204,30 @@ class RestartTracker:
         self.last_ts_ms = ts_ms
 
 
+def build_plot(
+    times_s: list[float],
+    rss_gb: list[float],
+    cpu_cores: list[float],
+    totals: tuple[float, float | None],
+    start_ms: int,
+    end_ms: int,
+    restarts: RestartTracker,
+) -> ResourcePlot:
+    """Assemble a ResourcePlot from gathered series, window, and restarts."""
+    rss_total, cpu_total = totals
+    return ResourcePlot(
+        times_s=tuple(times_s),
+        rss_gb=tuple(rss_gb),
+        cpu_cores=tuple(cpu_cores),
+        rss_total=rss_total,
+        cpu_total=cpu_total,
+        start_s=start_ms / 1000,
+        end_s=end_ms / 1000,
+        stop_times_s=tuple(restarts.stop_times_s),
+        start_times_s=tuple(restarts.start_times_s),
+    )
+
+
 def get_resource_plot(
     samples: list[ResourceSample],
     totals: tuple[float, float | None],
@@ -218,7 +242,6 @@ def get_resource_plot(
     and may be wider than the samples that fall inside them. Restarts are
     detected by RestartTracker.
     """
-    rss_total_gb, cpu_cores = totals
     times_s = []
     rss_gb = []
     cpu_cores_series = []
@@ -229,16 +252,8 @@ def get_resource_plot(
             times_s.append(sample.ts_ms / 1000)
             rss_gb.append(sample.rss / 1e9)
             cpu_cores_series.append(sample.cpu_percent / 100)
-    return ResourcePlot(
-        times_s=tuple(times_s),
-        rss_gb=tuple(rss_gb),
-        cpu_cores=tuple(cpu_cores_series),
-        rss_total=rss_total_gb,
-        cpu_total=cpu_cores,
-        start_s=start_ms / 1000,
-        end_s=end_ms / 1000,
-        stop_times_s=tuple(restarts.stop_times_s),
-        start_times_s=tuple(restarts.start_times_s),
+    return build_plot(
+        times_s, rss_gb, cpu_cores_series, totals, start_ms, end_ms, restarts
     )
 
 
@@ -311,7 +326,6 @@ def read_resource_window(
     # off. Frame the window empty rather than fail the read.
     if not path.exists():
         return get_resource_plot([], totals, start_ms, end_ms)
-    rss_total_gb, cpu_cores = totals
     max_points = max(1, max_points)
     bucket_span_ms = (end_ms - start_ms) / max_points
     if bucket_span_ms <= 0:
@@ -365,14 +379,6 @@ def read_resource_window(
             times_s.append(bucket_ts[index] / 1000)
             rss_gb.append(bucket_rss[index] / 1e9)
             cpu_cores_series.append(bucket_cpu[index] / 100)
-    return ResourcePlot(
-        times_s=tuple(times_s),
-        rss_gb=tuple(rss_gb),
-        cpu_cores=tuple(cpu_cores_series),
-        rss_total=rss_total_gb,
-        cpu_total=cpu_cores,
-        start_s=start_ms / 1000,
-        end_s=end_ms / 1000,
-        stop_times_s=tuple(restarts.stop_times_s),
-        start_times_s=tuple(restarts.start_times_s),
+    return build_plot(
+        times_s, rss_gb, cpu_cores_series, totals, start_ms, end_ms, restarts
     )
