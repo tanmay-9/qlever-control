@@ -175,6 +175,35 @@ def get_resource_usage(
     )
 
 
+class RestartTracker:
+    """Finds server restarts from drops in the log's elapsed-time column.
+
+    Fed samples in timestamp order. The elapsed-time counter resets when
+    the server restarts, so a drop between two samples means a restart
+    happened between them. The earlier sample is the stop, the later one
+    the start, and each is kept only if it falls in the window, so a
+    restart straddling a window edge still records the half that shows.
+    """
+
+    def __init__(self, start_ms: int, end_ms: int) -> None:
+        self.start_ms = start_ms
+        self.end_ms = end_ms
+        self.stop_times_s = []
+        self.start_times_s = []
+        self.last_elapsed_s = None
+        self.last_ts_ms = None
+
+    def track(self, elapsed_s: float, ts_ms: int) -> None:
+        """Note one sample; record a restart if elapsed time dropped."""
+        if self.last_elapsed_s is not None and elapsed_s < self.last_elapsed_s:
+            if self.start_ms <= self.last_ts_ms <= self.end_ms:
+                self.stop_times_s.append(self.last_ts_ms / 1000)
+            if self.start_ms <= ts_ms <= self.end_ms:
+                self.start_times_s.append(ts_ms / 1000)
+        self.last_elapsed_s = elapsed_s
+        self.last_ts_ms = ts_ms
+
+
 def get_resource_plot(
     samples: list[ResourceSample],
     totals: tuple[float, float | None],
@@ -186,27 +215,16 @@ def get_resource_plot(
     Keeps only samples inside [start_ms, end_ms] and converts each to
     display units: rss bytes to GB, cpu percent to cores. totals is
     (rss_total_gb, cpu_cores). The window edges frame the plot's x-axis
-    and may be wider than the samples that fall inside them. When elapsed
-    time drops between two adjacent samples the server restarted: the
-    earlier sample's time goes to stop_times_s, the later one's to
-    start_times_s, each only if it lands inside the window.
+    and may be wider than the samples that fall inside them. Restarts are
+    detected by RestartTracker.
     """
     rss_total_gb, cpu_cores = totals
     times_s = []
     rss_gb = []
     cpu_cores_series = []
-    stop_times_s = []
-    start_times_s = []
-    last_elapsed = None
-    last_ts_ms = None
+    restarts = RestartTracker(start_ms, end_ms)
     for sample in samples:
-        if last_elapsed is not None and sample.elapsed_s < last_elapsed:
-            if start_ms <= last_ts_ms <= end_ms:
-                stop_times_s.append(last_ts_ms / 1000)
-            if start_ms <= sample.ts_ms <= end_ms:
-                start_times_s.append(sample.ts_ms / 1000)
-        last_elapsed = sample.elapsed_s
-        last_ts_ms = sample.ts_ms
+        restarts.track(sample.elapsed_s, sample.ts_ms)
         if start_ms <= sample.ts_ms <= end_ms:
             times_s.append(sample.ts_ms / 1000)
             rss_gb.append(sample.rss / 1e9)
@@ -219,8 +237,8 @@ def get_resource_plot(
         cpu_total=cpu_cores,
         start_s=start_ms / 1000,
         end_s=end_ms / 1000,
-        stop_times_s=tuple(stop_times_s),
-        start_times_s=tuple(start_times_s),
+        stop_times_s=tuple(restarts.stop_times_s),
+        start_times_s=tuple(restarts.start_times_s),
     )
 
 
@@ -285,9 +303,7 @@ def read_resource_window(
     Seeks near the window start, then streams forward, folding each row
     into one of max_points equal time buckets and keeping the bucket's
     peak rss and cpu so spikes survive. totals is (rss_total_gb,
-    cpu_cores) for the axes. A drop in elapsed time between two adjacent
-    rows marks a restart: the earlier row goes to stop_times_s, the later
-    to start_times_s, each kept only if it lands in the window.
+    cpu_cores) for the axes. Restarts are detected by RestartTracker.
     should_cancel is polled while scanning so a long read can abort.
     Memory stays at O(max_points) however large the log is.
     """
@@ -303,10 +319,7 @@ def read_resource_window(
     bucket_ts = [None] * max_points
     bucket_rss = [0] * max_points
     bucket_cpu = [0.0] * max_points
-    stop_times_s = []
-    start_times_s = []
-    last_elapsed = None
-    last_ts_ms = None
+    restarts = RestartTracker(start_ms, end_ms)
     rows_since_check = 0
 
     with open(path, "rb") as stream:
@@ -329,19 +342,9 @@ def read_resource_window(
             sample = parse_tsv_row(raw.decode())
             if sample is None:
                 continue
-            # Detect the drop against the previous row even when either
-            # side falls outside the window, so a restart at the left
-            # edge, or a stop at the right edge, is still caught. Each
-            # side is recorded only if it lands in the window.
-            if last_elapsed is not None and sample.elapsed_s < last_elapsed:
-                if start_ms <= last_ts_ms <= end_ms:
-                    stop_times_s.append(last_ts_ms / 1000)
-                if start_ms <= sample.ts_ms <= end_ms:
-                    start_times_s.append(sample.ts_ms / 1000)
-            last_elapsed = sample.elapsed_s
-            last_ts_ms = sample.ts_ms
-            # Break only after detection, so the first row past the
-            # window still pairs with an in-window stop.
+            restarts.track(sample.elapsed_s, sample.ts_ms)
+            # Break only after tracking, so the first row past the window
+            # still pairs with an in-window stop.
             if sample.ts_ms > end_ms:
                 break
             if sample.ts_ms < start_ms:
@@ -370,6 +373,6 @@ def read_resource_window(
         cpu_total=cpu_cores,
         start_s=start_ms / 1000,
         end_s=end_ms / 1000,
-        stop_times_s=tuple(stop_times_s),
-        start_times_s=tuple(start_times_s),
+        stop_times_s=tuple(restarts.stop_times_s),
+        start_times_s=tuple(restarts.start_times_s),
     )
