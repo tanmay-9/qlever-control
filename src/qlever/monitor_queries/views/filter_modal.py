@@ -52,7 +52,7 @@ class FilterModal(ModalScreen[FilterState | None]):
             for status in FILTER_STATUSES
         ]
         with Vertical(id="filter-modal"):
-            yield Label("Filter", id="filter-title")
+            yield Label("Filter (selected window only)", id="filter-title")
             yield Label("Status (space to toggle)", classes="filter-section")
             yield SelectionList(*selections, id="filter-statuses")
             min_duration = self.filters.min_duration_s
