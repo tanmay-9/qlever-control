@@ -5,14 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "qlever"
 description = "Command-line tool for using the QLever graph database"
-version = "0.5.50"
+version = "0.5.23"
 authors = [
     { name = "Hannah Bast", email = "bast@cs.uni-freiburg.de" }
 ]
 readme = "README.md"
-license = "Apache-2.0"
-license-files = ["LICENSE"]
-requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.8"
 
 keywords = ["Graph database", "Triplestore", "Knowledge graphs", "SPARQL", "RDF"]
 
@@ -21,24 +20,20 @@ classifiers = [
  "Topic :: Database :: Front-Ends"
 ]
 
-dependencies = [ "psutil", "termcolor", "argcomplete", "pyyaml", "rdflib", "requests-sse", "tqdm>=4.60.0", "textual>=8.0", "rich" ]
-
-[project.optional-dependencies]
-plot = [ "matplotlib", "numpy" ]
-dev = [ "ruff", "pre-commit", "pytest" ]
+dependencies = [ "psutil", "termcolor", "argcomplete", "pyyaml" ]
 
 [project.urls]
-homepage = "https://github.com/ad-freiburg/qlever"
-documentation = "https://docs.qlever.dev"
-repository = "https://github.com/ad-freiburg/qlever.git"
-bugtracker = "https://github.com/ad-freiburg/qlever/issues"
+Github = "https://github.com/ad-freiburg/qlever"
 
 [project.scripts]
 "qlever" = "qlever.qlever_main:main"
+"qmdb" = "qlever.qlever_main:main"
 "qoxigraph" = "qlever.qlever_main:main"
+"qlever-old" = "qlever.qlever_old:main"
 
 [tool.setuptools]
-package-data = { "qlever" = ["Qleverfiles/*", "evaluation/www/*", "monitor_queries/*.tcss"] }
+license-files = ["LICENSE"]
+package-data = { "qlever" = ["Qleverfiles/*"] }
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

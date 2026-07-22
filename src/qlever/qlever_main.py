@@ -40,7 +40,8 @@ def main():
         if not command_successful:
             exit(1)
     except KeyboardInterrupt:
-        log.warn("\rCtrl-C pressed, exiting ...")
+        log.info("")
+        log.info("Ctrl-C pressed, exiting ...")
         log.info("")
         exit(1)
     except Exception as e:

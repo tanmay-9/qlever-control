@@ -37,7 +37,7 @@ class QueryCommand(QleverCommand):
     def should_have_qleverfile(self) -> bool:
         return False
 
-    def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
+    def relevant_qleverfile_arguments(self) -> dict[str : list[str]]:
         return {"server": ["host_name", "port", "access_token"]}
 
     def additional_arguments(self, subparser) -> None:
@@ -72,7 +72,6 @@ class QueryCommand(QleverCommand):
                 "application/sparql-results+json",
                 "application/sparql-results+xml",
                 "application/qlever-results+json",
-                "application/octet-stream",
             ],
             default="text/tab-separated-values",
             help="Accept header for the SPARQL query",
@@ -95,7 +94,7 @@ class QueryCommand(QleverCommand):
         if args.pin_to_cache:
             args.accept = "application/qlever-results+json"
             curl_cmd_additions = (
-                f" --data pin-result=true --data send=0"
+                f" --data pinresult=true --data send=0"
                 f" --data access-token="
                 f"{shlex.quote(args.access_token)}"
                 f" | jq .resultsize | numfmt --grouping"
@@ -130,7 +129,8 @@ class QueryCommand(QleverCommand):
             if not args.no_time and args.log_level != "NO_LOG":
                 log.info("")
                 log.info(
-                    f"Query processing time (end-to-end): {time_msecs:,d} ms"
+                    f"Query processing time (end-to-end):"
+                    f" {time_msecs:,d} ms"
                 )
         except Exception as e:
             if args.log_level == "DEBUG":

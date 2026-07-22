@@ -22,11 +22,8 @@ def test_construct_command_with_if():
     args.persist_updates = False
     args.access_token = True
     args.only_pso_and_pos_permutations = True
-    args.use_patterns = "no"
+    args.use_patterns = False
     args.use_text_index = "yes"
-    args.enable_metrics = False
-    args.resource_usage_log = "no"
-    args.preload_materialized_views = ["view-1", "view-2"]
 
     # Execute the function
     result = qlever.commands.start.construct_command(args)
@@ -45,8 +42,6 @@ def test_construct_command_with_if():
         " --only-pso-and-pos-permutations"
         " --no-patterns"
         " -t"
-        " --no-resource-usage-log"
-        " --preload-materialized-views view-1 view-2"
         f" > {args.name}.server-log.txt 2>&1"
     )
     assert result == start_command
@@ -70,10 +65,6 @@ def test_construct_command_without_if():
     args.only_pso_and_pos_permutations = False
     args.use_patterns = True
     args.use_text_index = "no"
-    args.enable_metrics = False
-    args.resource_usage_log = "yes"
-    args.resource_usage_interval = 2
-    args.preload_materialized_views = None
 
     # Execute the function
     result = qlever.commands.start.construct_command(args)
@@ -92,18 +83,6 @@ def test_construct_command_without_if():
     assert result == start_command
 
 
-# Tests that a non-default sampling interval is passed to the binary
-def test_construct_command_non_default_resource_usage_interval():
-    args = MagicMock()
-    args.resource_usage_log = "yes"
-    args.resource_usage_interval = 5
-
-    result = qlever.commands.start.construct_command(args)
-
-    assert " --resource-usage-interval-s 5" in result
-    assert "--no-resource-usage-log" not in result
-
-
 # Tests `wrap_command_in_container`.
 @patch("qlever.commands.start.Containerize.containerize_command")
 def test_wrap_command_in_container(mock_containerize_command):
@@ -114,8 +93,6 @@ def test_wrap_command_in_container(mock_containerize_command):
     args.port = 1234
     args.system = "native"
     args.image = None
-    args.run_in_foreground = False
-    args.restart_policy = "unless-stopped"
 
     # Mock wrap_command_in_container
     mock_containerize_command.return_value = "Test_Container_Command"
@@ -129,7 +106,7 @@ def test_wrap_command_in_container(mock_containerize_command):
     mock_containerize_command.assert_called_once_with(
         start_cmd,
         args.system,
-        "run --restart=unless-stopped -d",
+        "run -d --restart=unless-stopped",
         args.image,
         args.server_container,
         volumes=[("$(pwd)", "/index")],
@@ -148,14 +125,11 @@ def test_check_binary_success(mock_run_cmd):
     # Setup args
     args = MagicMock()
     args.server_binary = "/test/path/server_binary"
-    args.system = "native"
     # mock run_cmd as successful
     mock_run_cmd.return_value = "Command works"
 
     # Execute the function
-    result = qlever.util.binary_exists(
-        args.server_binary, "server-binary", args
-    )
+    result = qlever.util.binary_exists(args.server_binary, "server-binary")
     # check if run_cmd was called once with
     mock_run_cmd.assert_called_once_with(f"{args.server_binary} --help")
     assert result
@@ -169,15 +143,12 @@ def test_check_binary_exception(mock_log, mock_run_cmd):
     # Setup args
     args = MagicMock()
     args.server_binary = "false_binary"
-    args.system = "native"
 
     # Simulate an exception when run_command is called
     mock_run_cmd.side_effect = Exception("Mocked command failure")
 
     # Execute the function
-    result = qlever.util.binary_exists(
-        args.server_binary, "server-binary", args
-    )
+    result = qlever.util.binary_exists(args.server_binary, "server-binary")
 
     # check if run_cmd was called once with
     mock_run_cmd.assert_called_once_with(f"{args.server_binary} --help")
@@ -322,14 +293,6 @@ def test_set_text_description_exception(mock_log, mock_run_cmd):
 
 
 class TestStartCommand(unittest.TestCase):
-    @staticmethod
-    def _mock_log_file(mock_path_cls, name):
-        mock_log_file = mock_path_cls.return_value
-        mock_log_file.exists.return_value = True
-        mock_log_file.__str__ = MagicMock(
-            return_value=f"{name}.server-log.txt"
-        )
-
     @patch("qlever.commands.start.CacheStatsCommand.execute")
     @patch("qlever.commands.stop.StopCommand.execute", return_value=True)
     @patch("qlever.util.run_command")
@@ -337,12 +300,10 @@ class TestStartCommand(unittest.TestCase):
     @patch("qlever.commands.start.is_qlever_server_alive")
     @patch("subprocess.Popen")
     @patch("qlever.commands.start.Containerize")
-    @patch("qlever.commands.start.Path")
     # Tests if killing existing server and restarting a new one works.
     # Also checks the start_command for all the extra options enabled.
     def test_execute_kills_existing_server_on_same_port(
         self,
-        mock_path_cls,
         mock_containerize,
         mock_popen,
         mock_is_qlever_server_alive,
@@ -370,15 +331,8 @@ class TestStartCommand(unittest.TestCase):
         args.persist_updates = False
         args.access_token = True
         args.only_pso_and_pos_permutations = True
-        args.use_patterns = "no"
+        args.use_patterns = False
         args.use_text_index = "yes"
-        args.enable_metrics = False
-        args.resource_usage_log = "yes"
-        args.resource_usage_interval = 2
-        args.preload_materialized_views = None
-
-        # Configure Path mock so the log file wait loop is skipped
-        self._mock_log_file(mock_path_cls, args.name)
 
         # Mock CacheStatsCommand
         mock_cache_stats_command.return_value = None
@@ -443,7 +397,7 @@ class TestStartCommand(unittest.TestCase):
         args.kill_existing_with_same_port = False
         args.port = "localhorst"
         args.port = 1234
-        args.cmdline_regex = f"^qlever-server.* -p {args.port}"
+        args.cmdline_regex = f"^ServerMain.* -p {args.port}"
         args.no_containers = True
         args.server_binary = "/test/path/server_binary"
         args.name = "TestName"
@@ -486,10 +440,8 @@ class TestStartCommand(unittest.TestCase):
     @patch("subprocess.Popen")
     @patch("qlever.commands.start.Containerize")
     @patch("time.sleep")
-    @patch("qlever.commands.start.Path")
     def test_execute_successful_server_start(
         self,
-        mock_path_cls,
         mock_sleep,
         mock_containerize,
         mock_popen,
@@ -512,9 +464,6 @@ class TestStartCommand(unittest.TestCase):
         args.system = "native"
         args.show = False
         args.no_warmup = True
-
-        # Configure Path mock so the log file wait loop is skipped
-        self._mock_log_file(mock_path_cls, args.name)
 
         # Mock server is not alive initially, then alive after starting
         mock_is_qlever_server_alive.side_effect = [False, True]
@@ -553,10 +502,8 @@ class TestStartCommand(unittest.TestCase):
     @patch("subprocess.Popen")
     @patch("subprocess.run")
     @patch("qlever.commands.start.Containerize")
-    @patch("qlever.commands.start.Path")
     def test_execute_server_with_warmup(
         self,
-        mock_path_cls,
         mock_containerize,
         mock_run,
         mock_popen,
@@ -581,9 +528,6 @@ class TestStartCommand(unittest.TestCase):
         args.warmup_cmd = "test_warmup_command"
         args.no_warmup = False
 
-        # Configure Path mock so the log file wait loop is skipped
-        self._mock_log_file(mock_path_cls, args.name)
-
         # Mock Popen
         mock_popen.return_value = MagicMock()
 
@@ -604,11 +548,13 @@ class TestStartCommand(unittest.TestCase):
 
         # Check that Popen was called
         mock_popen.assert_called_once_with(
-            f"exec tail -n +1 -f {args.name}.server-log.txt", shell=True
+            f"exec tail -f {args.name}.server-log.txt", shell=True
         )
 
         # Check warmup was called
-        mock_run.assert_any_call(args.warmup_cmd, shell=True, check=True)
+        mock_run.assert_called_once_with(
+            args.warmup_cmd, shell=True, check=True
+        )
 
         # Assertions
         # Ensure the server status was checked
@@ -627,12 +573,8 @@ class TestStartCommand(unittest.TestCase):
     @patch("qlever.commands.start.Containerize.supported_systems")
     @patch("qlever.commands.start.wrap_command_in_container")
     @patch("qlever.commands.start.construct_command")
-    @patch("qlever.commands.start.binary_exists")
-    @patch("qlever.commands.start.Path")
     def test_execute_containerize_and_description(
         self,
-        mock_path_cls,
-        mock_binary_exists,
         mock_construct_cl,
         mock_run_containerize,
         mock_containerize,
@@ -680,8 +622,6 @@ class TestStartCommand(unittest.TestCase):
 
         # Mock Containerize
         mock_containerize.return_value = ["test1", "test2"]
-
-        mock_binary_exists.return_value = True
 
         # Instantiate the StartCommand
         sc = StartCommand()

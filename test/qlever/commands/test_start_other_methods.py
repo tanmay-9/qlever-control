@@ -2,7 +2,6 @@ import argparse
 import unittest
 
 from qlever.commands.start import StartCommand
-from qlever.qleverfile import Qleverfile
 
 
 class TestStartCommand(unittest.TestCase):
@@ -43,19 +42,9 @@ class TestStartCommand(unittest.TestCase):
                     "only_pso_and_pos_permutations",
                     "use_patterns",
                     "use_text_index",
-                    "metrics_log",
-                    "resource_usage_log",
-                    "resource_usage_interval",
-                    "preload_materialized_views",
                     "warmup_cmd",
-                    "enable_metrics",
                 ],
-                "runtime": [
-                    "system",
-                    "image",
-                    "server_container",
-                    "restart_policy",
-                ],
+                "runtime": ["system", "image", "server_container"],
             },
         )
 
@@ -76,7 +65,7 @@ class TestStartCommand(unittest.TestCase):
 
         # Test that the help text for
         # --kill-existing-with-same-port is correctly set
-        argument_help = subparser._group_actions[-4].help
+        argument_help = subparser._group_actions[-3].help
         self.assertEqual(
             argument_help,
             "If a QLever server is already running "
@@ -88,14 +77,5 @@ class TestStartCommand(unittest.TestCase):
         self.assertEqual(args.no_warmup, False)
 
         # Test that the help text for --no-warmup is correctly set
-        argument_help = subparser._group_actions[-3].help
+        argument_help = subparser._group_actions[-2].help
         self.assertEqual(argument_help, "Do not execute the warmup command")
-
-    def test_preload_materialized_views_qleverfile_argument(self):
-        args, kwargs = Qleverfile.all_arguments()["server"][
-            "preload_materialized_views"
-        ]
-
-        self.assertEqual(args, ("-l", "--preload-materialized-views"))
-        self.assertEqual(kwargs["nargs"], "+")
-        self.assertEqual(kwargs["default"], None)
