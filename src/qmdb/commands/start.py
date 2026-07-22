@@ -1,18 +1,53 @@
 from __future__ import annotations
 
-import subprocess
 import time
 from pathlib import Path
 
+import qlever.util as util
+from qlever import script_name
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.util import binary_exists, is_server_alive, run_command
+from qmdb.commands.stop import StopCommand
+
+MDB_SPECIFIC_SERVER_ARGS = [
+    "strings_dynamic",
+    "strings_static",
+    "tensors_dynamic",
+    "tensors_static",
+    "private_buffer",
+    "versioned_buffer",
+    "unversioned_buffer",
+]
+
+
+def wrap_cmd_in_container(args, cmd: str) -> str:
+    """Wrap the server start command in a container with restart policy."""
+    run_subcommand = "run --restart=unless-stopped"
+    if not args.run_in_foreground:
+        run_subcommand += " -d"
+    return Containerize().containerize_command(
+        cmd=cmd,
+        container_system=args.system,
+        run_subcommand=run_subcommand,
+        image_name=args.image,
+        container_name=args.server_container,
+        volumes=[("$(pwd)", "/data")],
+        working_directory="/data",
+        ports=[(args.port, args.port)],
+    )
 
 
 class StartCommand(QleverCommand):
+    """
+    Start the MillenniumDB SPARQL server for an already-indexed dataset.
+    Supports both native and containerized execution, with an option
+    to run in the foreground. Appends optional memory buffer arguments
+    (strings, tensors, versioned/unversioned) when configured.
+    """
+
     def __init__(self):
-        self.script_name = "qmdb"
+        pass
 
     def description(self) -> str:
         return (
@@ -23,10 +58,18 @@ class StartCommand(QleverCommand):
     def should_have_qleverfile(self) -> bool:
         return True
 
-    def relevant_qleverfile_arguments(self) -> dict[str : list[str]]:
+    def relevant_qleverfile_arguments(self) -> dict[str, list[str]]:
         return {
             "data": ["name"],
-            "server": ["host_name", "port"],
+            "server": [
+                "host_name",
+                "server_binary",
+                "timeout",
+                "port",
+                "threads",
+                "extra_args",
+                *MDB_SPECIFIC_SERVER_ARGS,
+            ],
             "runtime": ["system", "image", "server_container"],
         }
 
@@ -40,45 +83,34 @@ class StartCommand(QleverCommand):
                 "(default: run in the background)"
             ),
         )
-        subparser.add_argument(
-            "--server-binary",
-            type=str,
-            default="mdb-server",
-            help=(
-                "The binary for starting the server (default: mdb-server) "
-                "(this requires that you have Millennium DB built from source "
-                "on your machine)"
-            ),
-        )
-
-    @staticmethod
-    def wrap_cmd_in_container(args, cmd: str) -> str:
-        run_subcommand = "run --restart=unless-stopped"
-        if not args.run_in_foreground:
-            run_subcommand += " -d"
-        if not args.run_in_foreground:
-            cmd = f"{cmd} > {args.name}.server-log.txt 2>&1"
-        return Containerize().containerize_command(
-            cmd=cmd,
-            container_system=args.system,
-            run_subcommand=run_subcommand,
-            image_name=args.image,
-            container_name=args.server_container,
-            volumes=[("$(pwd)", "/data")],
-            working_directory="/data",
-            ports=[(args.port, args.port)],
-        )
 
     def execute(self, args) -> bool:
-        start_cmd = f"{args.server_binary} --port {args.port} index"
+        try:
+            timeout = int(args.timeout[:-1])
+        except ValueError as e:
+            log.error(f"Invalid timeout value {args.timeout}. Error: {e}")
+            return False
 
-        if args.system == "native":
-            if not args.run_in_foreground:
-                start_cmd = (
-                    f"nohup {start_cmd} > {args.name}.server-log.txt 2>&1 &"
-                )
+        start_cmd = (
+            f"{args.server_binary} server {args.name}_index "
+            f"--port {args.port} --timeout {timeout} "
+        )
+        if args.threads is not None:
+            start_cmd += f"--threads {args.threads} "
+        # Append optional MillenniumDB-specific buffer arguments when set.
+        for arg in MDB_SPECIFIC_SERVER_ARGS:
+            if (arg_value := getattr(args, arg)) is not None and arg_value:
+                start_cmd += f"--{arg.replace('_', '-')} {arg_value}B "
+
+        if args.extra_args:
+            start_cmd += args.extra_args
+
+        start_cmd = f"{start_cmd} > {args.name}.server-log.txt 2>&1"
+        if args.system in Containerize.supported_systems():
+            start_cmd = wrap_cmd_in_container(args, start_cmd)
         else:
-            start_cmd = self.wrap_cmd_in_container(args, start_cmd)
+            if not args.run_in_foreground:
+                start_cmd = f"nohup {start_cmd} &"
 
         # Show the command line.
         self.show(start_cmd, only_show=args.show)
@@ -86,40 +118,37 @@ class StartCommand(QleverCommand):
             return True
 
         # When running natively, check if the binary exists and works.
-        if args.system == "native":
-            if not binary_exists(args.server_binary, "server-binary"):
-                return False
-        else:
-            if Containerize().is_running(args.system, args.server_container):
-                log.error(
-                    f"Server container {args.server_container} already exists!\n"
-                )
-                log.info(
-                    f"To kill the existing server, use `{self.script_name} stop`"
-                )
+        if args.system not in Containerize.supported_systems():
+            if not util.binary_exists(args.server_binary, "server-binary", args):
                 return False
 
-        index_dir = Path("index")
+        # Check if index files are present in the index directory.
+        index_dir = Path(f"{args.name}_index")
         if not index_dir.exists() or not any(index_dir.iterdir()):
-            log.info(f"No MillenniumDB index files for {args.name} found! ")
+            log.error(f"No MillenniumDB index files for {args.name} found!\n")
             log.info(
-                f"Did you call `{self.script_name} index`? If you did, check "
-                "if index files are present in the index directory"
+                f"Did you call `{script_name} index`? If you did, check "
+                "if index files are present in the index directory."
             )
             return False
 
-        endpoint_url = f"http://{args.host_name}:{args.port}/sparql"
-        if is_server_alive(url=endpoint_url):
+        # Check if server already alive at endpoint url from a previous run.
+        endpoint_url = f"http://{args.host_name}:{args.port}"
+        if util.is_server_alive(url=endpoint_url):
             log.error(
-                f"MillenniumDB server already running on {endpoint_url}\n"
+                f"MillenniumDB server already running on {endpoint_url}/sparql\n"
             )
             log.info(
-                f"To kill the existing server, use `{self.script_name} stop`"
+                f"To kill the existing server, use `{script_name} stop`"
             )
             return False
+
+        # Remove old log file so that tail starts clean.
+        log_file = Path(f"{args.name}.server-log.txt")
+        log_file.unlink(missing_ok=True)
 
         try:
-            process = run_command(
+            process = util.run_command(
                 start_cmd,
                 use_popen=args.run_in_foreground,
             )
@@ -141,13 +170,15 @@ class StartCommand(QleverCommand):
                 " (Ctrl-C stops following the log, but NOT the server)"
             )
         log.info("")
-        log_cmd = f"exec tail -f {args.name}.server-log.txt"
-        log_proc = subprocess.Popen(log_cmd, shell=True)
-        while not is_server_alive(endpoint_url):
+        log_proc = util.tail_log_file(log_file)
+        if log_proc is None:
+            return False
+        while not util.is_server_alive(endpoint_url):
             time.sleep(1)
 
         log.info(
-            f"MillenniumDB server sparql endpoint for queries is {endpoint_url}"
+            "MillenniumDB server sparql endpoint for queries is "
+            f"{endpoint_url}/sparql"
         )
 
         # Kill the log process
@@ -155,11 +186,16 @@ class StartCommand(QleverCommand):
             log_proc.terminate()
 
         # With `--run-in-foreground`, wait until the server is stopped.
+        # On Ctrl-C, terminate the process and clean up the container.
         if args.run_in_foreground:
             try:
                 process.wait()
             except KeyboardInterrupt:
                 process.terminate()
+                # Remove the container if the user stops the server process
+                if args.system in Containerize.supported_systems():
+                    args.cmdline_regex = StopCommand.DEFAULT_REGEX
+                    StopCommand().execute(args)
             log_proc.terminate()
 
         return True
