@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shlex
-import time
 from pathlib import Path
 
 from qlever.command import QleverCommand
@@ -17,7 +16,11 @@ from qlever.util import (
     binary_exists,
     is_qlever_server_alive,
     run_command,
+    server_liveness_check,
+    show_log_follow_info,
     tail_log_file,
+    wait_for_foreground_server,
+    wait_until_server_ready,
 )
 
 
@@ -324,36 +327,16 @@ class StartCommand(QleverCommand):
         # Tail the server log until the server is ready (note that the `exec`
         # is important to make sure that the tail process is killed and not
         # just the bash process).
-        if args.run_in_foreground:
-            log.info(
-                f"Follow {args.name}.server-log.txt as long as the server is"
-                f" running (Ctrl-C stops the server)"
-            )
-        else:
-            log.info(
-                f"Follow {args.name}.server-log.txt until the server is ready"
-                f" (Ctrl-C stops following the log, but NOT the server)"
-            )
-        log.info("")
+        show_log_follow_info(str(log_file), args.run_in_foreground)
         tail_proc = tail_log_file(log_file)
         if tail_proc is None:
             return False
-        while not is_qlever_server_alive(args.endpoint_url):
-            # Check if the server process/container is still running.
-            # If it exited (e.g. due to a corrupt index), stop waiting.
-            if args.system in Containerize.supported_systems():
-                still_running = Containerize.is_running(
-                    args.system, args.server_container
-                )
-            elif args.run_in_foreground:
-                still_running = process.poll() is None
-            else:
-                still_running = True  # nohup: can't easily check
-            if not still_running:
-                log.error("Server process exited before becoming ready")
-                tail_proc.terminate()
-                return False
-            time.sleep(1)
+        if not wait_until_server_ready(
+            lambda: is_qlever_server_alive(args.endpoint_url),
+            server_liveness_check(args, process),
+        ):
+            tail_proc.terminate()
+            return False
 
         # Set the description for the index and text.
         access_arg = f'--data-urlencode "access-token={args.access_token}"'
@@ -395,17 +378,13 @@ class StartCommand(QleverCommand):
 
         # With `--run-in-foreground`, wait until the server is stopped.
         if args.run_in_foreground:
-            try:
-                process.wait()
-            except KeyboardInterrupt:
-                log.warn("\rCtrl-C pressed, stopping the server ...")
-                log.info("")
-                process.terminate()
-                # Stop the container process manually
+
+            def stop_container() -> None:
                 if args.system in Containerize.supported_systems():
                     args.cmdline_regex = "qlever-server.* -i [^ ]*%%NAME%%"
                     args.no_containers = False
                     StopCommand().execute(args)
-            tail_proc.terminate()
+
+            wait_for_foreground_server(process, tail_proc, stop_container)
 
         return True

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +11,14 @@ from qlever.util import (
     iter_permutation_phases,
     parse_phase_markers,
 )
+
+
+def heading_width(headings: Iterable[str], min_width: int = 25) -> int:
+    """
+    Width of the heading column, so that the colons still line up for
+    engines with headings longer than `min_width`.
+    """
+    return max([min_width, *(len(heading) for heading in headings)])
 
 
 def compute_durations(
@@ -78,19 +87,20 @@ def compute_durations(
 
     # Compute durations for each indexing phase. Each entry maps a
     # phase name to (duration_in_time_unit, time_unit).
-    durations = {}
-    durations["Parse input"] = (
-        duration([(overall_begin, merge_begin)]),
-        resolved_time_unit,
-    )
-    durations["Build vocabularies"] = (
-        duration([(merge_begin, convert_begin)]),
-        resolved_time_unit,
-    )
-    durations["Convert to global IDs"] = (
-        duration([(convert_begin, convert_end)]),
-        resolved_time_unit,
-    )
+    durations = {
+        "Parse input": (
+            duration([(overall_begin, merge_begin)]),
+            resolved_time_unit,
+        ),
+        "Build vocabularies": (
+            duration([(merge_begin, convert_begin)]),
+            resolved_time_unit,
+        ),
+        "Convert to global IDs": (
+            duration([(convert_begin, convert_end)]),
+            resolved_time_unit,
+        ),
+    }
     for name, perm_begin, perm_end in iter_permutation_phases(
         permutations, normal_end
     ):
@@ -151,9 +161,10 @@ def compute_sizes(
     unit_factor = get_size_unit_factor(size_unit)
     sizes = {k: v / unit_factor for k, v in raw_sizes.items()}
 
-    sizes_to_show = {}
-    sizes_to_show["Files index.*"] = (sizes["index"], size_unit)
-    sizes_to_show["Files vocabulary.*"] = (sizes["vocabulary"], size_unit)
+    sizes_to_show = {
+        "Files index.*": (sizes["index"], size_unit),
+        "Files vocabulary.*": (sizes["vocabulary"], size_unit),
+    }
     if sizes["text"] > 0:
         sizes_to_show["Files text.*"] = (sizes["text"], size_unit)
     sizes_to_show["TOTAL size"] = (sizes["total"], size_unit)
@@ -284,10 +295,21 @@ class IndexStatsCommand(QleverCommand):
 
     def execute(self, args) -> bool:
         return_value = True
+        log_file_name = f"{args.name}.index-log.txt"
+
+        # Compute both breakdowns up front, so that the time and the space
+        # part pad their headings to a common width.
+        durations = {}
+        sizes = {}
+        if not args.show:
+            if not args.only_space:
+                durations = self.execute_time(args, log_file_name)
+            if not args.only_time:
+                sizes = self.execute_space(args)
+        width = heading_width([*durations, *sizes])
 
         # The "time" part of the command.
         if not args.only_space:
-            log_file_name = f"{args.name}.index-log.txt"
             self.show(
                 f"Breakdown of the time used for "
                 f"building the index, based on the timestamps for key "
@@ -295,7 +317,6 @@ class IndexStatsCommand(QleverCommand):
                 only_show=args.show,
             )
             if not args.show:
-                durations = self.execute_time(args, log_file_name)
                 # Display each phase duration, skipping phases with
                 # missing timestamps (duration is None).
                 for heading, (duration, time_unit) in durations.items():
@@ -303,7 +324,8 @@ class IndexStatsCommand(QleverCommand):
                         if heading == "TOTAL time" and len(durations) != 1:
                             log.info("")
                         log.info(
-                            f"{heading:<25} : {duration:>6.1f} {time_unit}"
+                            f"{heading:<{width}} : {duration:>6.1f} "
+                            f"{time_unit}"
                         )
                 return_value &= len(durations) != 0
             if not args.only_time:
@@ -316,15 +338,16 @@ class IndexStatsCommand(QleverCommand):
                 only_show=args.show,
             )
             if not args.show:
-                sizes = self.execute_space(args)
                 # Display the disk space used by each group of index files.
                 for heading, (size, size_unit) in sizes.items():
                     if heading == "TOTAL size" and len(sizes) != 1:
                         log.info("")
                     if size_unit == "B":
-                        log.info(f"{heading:<25} :  {size:,} {size_unit}")
+                        log.info(f"{heading:<{width}} :  {size:,} {size_unit}")
                     else:
-                        log.info(f"{heading:<25} : {size:>6.1f} {size_unit}")
+                        log.info(
+                            f"{heading:<{width}} : {size:>6.1f} {size_unit}"
+                        )
                 return_value &= len(sizes) != 0
 
         return return_value

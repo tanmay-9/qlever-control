@@ -11,14 +11,36 @@ import socket
 import string
 import subprocess
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 import psutil
+import yaml
 
 from qlever.log import log
+
+
+def dict_to_yaml(dictionary: dict) -> str:
+    """
+    Dump a dict to YAML, using the `|` block style for multiline strings.
+    """
+
+    class MultiLineDumper(yaml.SafeDumper):
+        def represent_scalar(self, tag, value, style=None):
+            # The `|` style does not work as expected with `\r\n`.
+            value = value.replace("\r\n", "\n")
+            if isinstance(value, str) and "\n" in value:
+                style = "|"
+            return super().represent_scalar(tag, value, style)
+
+    return yaml.dump(
+        dictionary,
+        sort_keys=False,
+        allow_unicode=True,
+        Dumper=MultiLineDumper,
+    )
 
 
 def get_total_file_size(
@@ -507,18 +529,123 @@ def get_container_image_id(system: str, image: str) -> str:
     return image_id
 
 
-def get_ini_sed_cmd(
-    section: str, option: str, new_value: str, is_suffix: bool = False
+def edit_option_line(
+    line: str, new_value: str, is_suffix: bool, comment_prefix: str | None
 ) -> str:
     """
-    Generates a cross-platform sed command to update the value of a
-    key = value pair or append to one (by using is_suffix = True) in an INI file.
+    Return `line` with its value replaced by `new_value`, or with
+    `new_value` appended to it if `is_suffix` is true. An inline comment
+    after the value is kept.
     """
+    # Split off an inline comment (whitespace followed by the comment
+    # prefix) so that only the value part is edited.
+    value_part = line
+    comment_part = ""
+    if comment_prefix is not None:
+        comment_match = re.search(rf"\s{re.escape(comment_prefix)}", line)
+        if comment_match:
+            value_part = line[: comment_match.start()]
+            comment_part = "\t" + line[comment_match.start() :].strip()
+
     if is_suffix:
-        pattern = f"s/(^{option}.*)/\\1{new_value}/"
+        new_line = value_part.rstrip() + new_value
     else:
-        pattern = f"s/(^{option}[[:space:]]*=[[:space:]]*).*/\\1{new_value}/"
-    return f"sed -E '/^\\[{section}\\]/,/^\\[/ {pattern}'"
+        # Keep everything up to and including the `=` and the spacing
+        # after it, replace the old value.
+        prefix_end = re.match(r"^\s*\S+\s*=\s*", value_part).end()
+        new_line = value_part[:prefix_end] + new_value
+    return new_line + comment_part
+
+
+def update_ini_values(
+    lines: list[str],
+    updates: dict[str, dict[str, tuple[str, bool]]],
+    comment_prefix: str | None = None,
+) -> list[str]:
+    """
+    Update values in INI-style file content given as `lines` and return
+    the modified lines, preserving comments and unrelated lines.
+
+    `updates` maps `{section: {option: (new_value, is_suffix)}}`. An
+    existing option gets its value replaced, or `new_value` appended to
+    it if `is_suffix` is true. A missing option is added at the end of
+    its section, a missing section at the end of the file (suffix
+    entries are skipped there, they have no value to append to).
+
+    `comment_prefix` is the inline comment character of the format
+    (`;` for `virtuoso.ini`). If None, the format has no inline
+    comments and the whole line is treated as the value.
+    """
+    options_applied = {section: set() for section in updates}
+    sections_seen = set()
+    result_lines = []
+    current_section = None
+
+    def missing_option_lines(section: str) -> list[str]:
+        """
+        Lines for options of `section` that were not found in the file.
+        """
+        return [
+            f"{option} = {value}"
+            for option, (value, is_suffix) in updates[section].items()
+            if option not in options_applied[section] and not is_suffix
+        ]
+
+    def flush_missing_options(section: str):
+        """
+        Insert options of `section` that were not found in the file,
+        before any blank lines that separate it from the next section.
+        """
+        insert_at = len(result_lines)
+        while insert_at > 0 and result_lines[insert_at - 1].strip() == "":
+            insert_at -= 1
+        result_lines[insert_at:insert_at] = missing_option_lines(section)
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Section headers like `[Parameters]`. Commented-out headers
+        # like `;[Striping]` do not match because of the `^` anchor.
+        header_match = re.match(r"^\[([^\]]+)\]", stripped)
+        if header_match:
+            # Add options that were missing from the section we leave.
+            if current_section in updates:
+                flush_missing_options(current_section)
+            current_section = header_match.group(1)
+            sections_seen.add(current_section)
+            result_lines.append(line)
+            continue
+
+        if current_section not in updates:
+            result_lines.append(line)
+            continue
+
+        option_match = re.match(r"^(\S+)\s*=\s*", stripped)
+        if (
+            option_match is None
+            or option_match.group(1) not in updates[current_section]
+        ):
+            result_lines.append(line)
+            continue
+
+        option_name = option_match.group(1)
+        new_value, is_suffix = updates[current_section][option_name]
+        result_lines.append(
+            edit_option_line(line, new_value, is_suffix, comment_prefix)
+        )
+        options_applied[current_section].add(option_name)
+
+    # Add options missing from the last section in the file.
+    if current_section in updates:
+        flush_missing_options(current_section)
+
+    # Add sections that were not in the file at all.
+    for section in updates:
+        if section not in sections_seen:
+            result_lines.append(f"\n[{section}]")
+            result_lines.extend(missing_option_lines(section))
+
+    return result_lines
 
 
 def parse_memory(value: str) -> str:
@@ -531,6 +658,17 @@ def parse_memory(value: str) -> str:
             f"Invalid memory size '{value}'. Use format like 4G, 32G."
         )
     return value.upper()
+
+
+def parse_timeout(value: str) -> str:
+    """
+    Validate a timeout string like `180s` and return it in lower case.
+    """
+    if not re.match(r"^\d+s$", value, re.IGNORECASE):
+        raise argparse.ArgumentTypeError(
+            f"Invalid timeout '{value}'. Use format like 30s, 180s."
+        )
+    return value.lower()
 
 
 def container_memory_to_bytes(memory_string: str) -> int:
@@ -626,6 +764,82 @@ def tail_log_file(
         waited += 0.1
     tail_cmd = f"exec tail -n +1 -f {log_file}"
     return subprocess.Popen(tail_cmd, shell=True)
+
+
+def show_log_follow_info(log_name: str, run_in_foreground: bool) -> None:
+    """
+    Tell the user which log is being followed, until when, and what
+    Ctrl-C does. The two cases differ in whether Ctrl-C stops the
+    server, so engines should not word this themselves.
+    """
+    if run_in_foreground:
+        log.info(
+            f"Follow {log_name} as long as the server is running "
+            "(Ctrl-C stops the server)"
+        )
+    else:
+        log.info(
+            f"Follow {log_name} until the server is ready "
+            "(Ctrl-C stops following the log, but NOT the server)"
+        )
+    log.info("")
+
+
+def server_liveness_check(
+    args, process: subprocess.Popen | None
+) -> Callable[[], bool]:
+    """
+    Build a check that tells whether the server started by `process` is
+    still running. With `nohup`, we have no handle on the server
+    process, so the check always says yes.
+    """
+    # Imported here because `containerize` imports from this module.
+    from qlever.containerize import Containerize
+
+    if args.system in Containerize.supported_systems():
+        return lambda: Containerize.is_running(
+            args.system, args.server_container
+        )
+    if args.run_in_foreground:
+        return lambda: process.poll() is None
+    return lambda: True
+
+
+def wait_until_server_ready(
+    is_alive: Callable[[], bool],
+    is_still_running: Callable[[], bool],
+    poll_interval_s: float = 1.0,
+) -> bool:
+    """
+    Poll until the server answers. Returns False if the server process
+    exited before it became ready (e.g. because of a corrupt index).
+    """
+    while not is_alive():
+        if not is_still_running():
+            log.error("Server process exited before becoming ready")
+            return False
+        time.sleep(poll_interval_s)
+    return True
+
+
+def wait_for_foreground_server(
+    process: subprocess.Popen,
+    log_proc: subprocess.Popen,
+    on_interrupt: Callable[[], None],
+) -> None:
+    """
+    Wait until the server started in the foreground is stopped. On
+    Ctrl-C, terminate it and call `on_interrupt` for engine-specific
+    cleanup (such as removing the server container).
+    """
+    try:
+        process.wait()
+    except KeyboardInterrupt:
+        log.warning("\rCtrl-C pressed, stopping the server ...")
+        log.info("")
+        process.terminate()
+        on_interrupt()
+    log_proc.terminate()
 
 
 def parse_git_hash(log_path: Path) -> str | None:
