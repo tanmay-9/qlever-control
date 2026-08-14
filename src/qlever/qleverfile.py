@@ -355,8 +355,8 @@ class Qleverfile:
             type=parse_timeout,
             default="30s",
             help="The maximal time a query is allowed to run, for example "
-            "`30s` (can be increased per query with the URL parameters "
-            "`timeout` and `access_token`)",
+            "`30s` or `5min` (can be increased per query with the URL "
+            "parameters `timeout` and `access_token`)",
         )
         server_args["num_threads"] = arg(
             "--num-threads",

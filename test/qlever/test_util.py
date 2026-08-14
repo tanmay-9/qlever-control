@@ -6,7 +6,9 @@ from qlever.util import (
     container_memory_to_bytes,
     get_random_string,
     parse_git_hash,
+    parse_timeout,
     positive_int,
+    timeout_seconds,
 )
 
 
@@ -77,6 +79,40 @@ def test_positive_int_rejects_non_integer(value):
     # argparse also treats a plain `ValueError` as invalid input
     with pytest.raises(ValueError):
         positive_int(value)
+
+
+@pytest.mark.parametrize(
+    "value", ["30s", "5min", "1h", "500ms", "10us", "1ns", "600s"]
+)
+def test_parse_timeout_accepts(value):
+    assert parse_timeout(value) == value
+
+
+# The units and their spelling have to stay in step with the server, which
+# takes `ns|us|ms|s|min|h` and matches them case sensitively.
+@pytest.mark.parametrize(
+    "value", ["300", "5m", "30S", "1MIN", "s", "1.5s", "-5s", "", "30 s"]
+)
+def test_parse_timeout_rejects(value):
+    with pytest.raises(argparse.ArgumentTypeError):
+        parse_timeout(value)
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("30s", 30),
+        ("600s", 600),
+        ("5min", 300),
+        ("1h", 3600),
+        ("2h", 7200),
+        # Anything below a second still has to count as a timeout.
+        ("500ms", 1),
+        ("1ns", 1),
+    ],
+)
+def test_timeout_seconds(value, expected):
+    assert timeout_seconds(value) == expected
 
 
 def test_parse_git_hash_missing_file(tmp_path):
