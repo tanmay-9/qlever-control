@@ -686,7 +686,8 @@ def parse_timeout(value: str) -> str:
 def timeout_seconds(value: str) -> int:
     """
     A timeout like `5min` as whole seconds, for engines that take a bare
-    number. Never 0, so a sub-second timeout stays a timeout.
+    number. Never 0, so a sub-second timeout stays a timeout. Expects a
+    value that `parse_timeout` has accepted.
     """
     number, unit = re.fullmatch(r"(\d+)(\D+)", value).groups()
     return max(1, round(int(number) * TIMEOUT_UNIT_SECONDS[unit]))

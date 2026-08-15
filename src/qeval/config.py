@@ -84,19 +84,20 @@ def parse_command_line() -> argparse.Namespace:
     # single invocation never imports another engine's code.
     engine_subparsers = parser.add_subparsers(dest="engine", required=True)
     qleverfile_config, qleverfile_exists = None, False
-    for engine, (package, display_name) in ENGINES.items():
+    for engine, engine_info in ENGINES.items():
         command_prefix = f"{SCRIPT_NAME} {engine}"
         engine_parser = engine_subparsers.add_parser(
             engine,
-            help=display_name,
+            help=engine_info.display_name,
             description=colored(
-                f"Set up, index, query, and benchmark {display_name}",
+                "Set up, index, query, and benchmark "
+                f"{engine_info.display_name}",
                 attrs=["bold"],
             ),
         )
         # `args.engine` is already set by the subparsers action above.
         engine_parser.set_defaults(
-            engine_display=display_name,
+            engine_display=engine_info.display_name,
             command_prefix=command_prefix,
         )
         subparsers = engine_parser.add_subparsers(
@@ -110,7 +111,9 @@ def parse_command_line() -> argparse.Namespace:
             )
             all_args = Qleverfile.all_arguments(command_prefix)
             add_engine_qleverfile_args(engine, all_args)
-            for command_name, command_object in load_commands(package).items():
+            for command_name, command_object in load_commands(
+                engine_info.package
+            ).items():
                 add_subparser_for_command(
                     subparsers,
                     command_name,

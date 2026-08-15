@@ -274,8 +274,8 @@ def parse_command_line() -> argparse.Namespace:
 
     # Now the regular parser with commands and a subparser for each
     # command. We have a dedicated class for each command. These classes
-    # are defined in the modules in `qlever/commands`. In `__init__.py`
-    # an object of each class is created and stored in `command_objects`.
+    # are defined in the modules in `qlever/commands`, from where
+    # `load_commands` creates one object of each.
     parser = argparse.ArgumentParser(
         description=colored(
             f"This is the {command_prefix} command line tool, "
@@ -298,8 +298,7 @@ def parse_command_line() -> argparse.Namespace:
     add_qleverfile_option(parser)
     subparsers = parser.add_subparsers(dest="command", required=True)
     all_args = Qleverfile.all_arguments(command_prefix)
-    command_objects = load_commands("qlever")
-    for command_name, command_object in command_objects.items():
+    for command_name, command_object in load_commands("qlever").items():
         add_subparser_for_command(
             subparsers,
             command_name,

@@ -296,7 +296,7 @@ def restart_server(command_prefix: str, start_only: bool = False) -> bool:
             run_command(stop_cmd)
             time.sleep(2)
         except Exception as e:
-            log.warning(f"`{stop_cmd}` failed, server not stopped!: {e}")
+            log.warning(f"`{stop_cmd}` failed, server not stopped: {e}")
     try:
         run_command(start_cmd)
         time.sleep(5)
@@ -305,7 +305,7 @@ def restart_server(command_prefix: str, start_only: bool = False) -> bool:
     except Exception as e:
         log.warning(
             f"`{start_cmd}` failed, server not restarted. This might "
-            f"affect the benchmark process!: {e}"
+            f"affect the benchmark process: {e}"
         )
         return False
 
@@ -929,7 +929,7 @@ class BenchmarkQueriesCommand(QleverCommand):
                 with mute_log():
                     clear_cache_successful = ClearCacheCommand().execute(args)
                 if not clear_cache_successful:
-                    log.warn("Failed to clear the cache")
+                    log.warning("Failed to clear the cache")
 
             # Remove OFFSET and LIMIT (after the last closing bracket).
             if args.remove_offset_and_limit or args.limit:
