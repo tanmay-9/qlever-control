@@ -145,6 +145,19 @@ class ResourceSeries:
 
 
 @dataclass(frozen=True)
+class ResourceEvent:
+    """A moment the plot marks with a vertical line.
+
+    `kind` is one of `server_down`, `server_up`, `rebuild_start` or
+    `rebuild_end`, and the widget looks up the line's colour and label
+    from it.
+    """
+
+    kind: str
+    time_s: float
+
+
+@dataclass(frozen=True)
 class ResourceUsage:
     """The two resource sparklines shown in the Live header, as one unit."""
 

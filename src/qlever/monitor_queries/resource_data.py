@@ -10,8 +10,10 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from qlever.monitor_queries.models import (
+    ResourceEvent,
     ResourceSeries,
     ResourceUsage,
     ResourceWindow,
@@ -35,6 +37,72 @@ class Capacity:
 
     ram_gb: float
     cores: float | None
+
+
+class Column(NamedTuple):
+    """One column of the resource log, and how to present it.
+
+    `key` is the field on `Sample` and the key the series is stored
+    under, so the log's own column name is the only name in play.
+    `scale` divides a raw reading into display units. `reduce` says how
+    several readings in one time bucket collapse into a point.
+    `capacity` names the `Capacity` attribute that gives an axis its
+    full height, and is None for a column with no ceiling.
+    """
+
+    key: str
+    label: str
+    unit: str
+    scale: float
+    reduce: str
+    capacity: str | None
+
+
+# One row per column, in the log's order. Everything that turns
+# samples into a plot reads this table, so adding a column to the log
+# means adding a row here and nothing else.
+COLUMNS = (
+    Column(
+        key="rss",
+        label="RSS",
+        unit="GB",
+        scale=1e9,
+        reduce="peak",
+        capacity="ram_gb",
+    ),
+    Column(
+        key="cpu_percent",
+        label="CPU",
+        unit="cores",
+        scale=100,
+        reduce="peak",
+        capacity="cores",
+    ),
+    Column(
+        key="read_bytes_per_s",
+        label="read",
+        unit="MB/s",
+        scale=1e6,
+        reduce="mean",
+        capacity=None,
+    ),
+    Column(
+        key="write_bytes_per_s",
+        label="write",
+        unit="MB/s",
+        scale=1e6,
+        reduce="mean",
+        capacity=None,
+    ),
+    Column(
+        key="io_stall_percent",
+        label="io stall",
+        unit="%",
+        scale=1,
+        reduce="mean",
+        capacity=None,
+    ),
+)
 
 
 def buffer_size(sample_interval_s: int) -> int:
@@ -103,6 +171,50 @@ def get_resource_usage(
         rss=ResourceSeries("RSS", rss_values, capacity.ram_gb, "GB"),
         cpu=ResourceSeries("CPU", cpu_values, capacity.cores, "cores"),
     )
+
+
+class EventTracker:
+    """Finds server restarts and index rebuilds while walking samples.
+
+    Both show up as a change between one sample and the next, so one
+    pass in timestamp order finds them all. A restart is a drop in
+    `elapsed_s`, which resets when the server starts. A rebuild
+    boundary is a change in `rebuild_id`, which is empty when no
+    rebuild is running.
+
+    An event is kept only if its own time falls in the window, so a
+    restart that straddles an edge still records the half that shows.
+    """
+
+    def __init__(self, start_ms: int, end_ms: int) -> None:
+        self.start_ms = start_ms
+        self.end_ms = end_ms
+        self.events = []
+        self.last = None
+
+    def track(self, sample: Sample) -> None:
+        """Compare one sample against the one before and note any event."""
+        previous = self.last
+        self.last = sample
+        if previous is None:
+            return
+        restarted = sample.elapsed_s < previous.elapsed_s
+        rebuild_changed = sample.rebuild_id != previous.rebuild_id
+        # Events at the earlier sample come first, so the list stays in
+        # time order without sorting it.
+        if restarted:
+            self.add("server_down", previous.ts_ms)
+        if rebuild_changed and previous.rebuild_id is not None:
+            self.add("rebuild_end", previous.ts_ms)
+        if restarted:
+            self.add("server_up", sample.ts_ms)
+        if rebuild_changed and sample.rebuild_id is not None:
+            self.add("rebuild_start", sample.ts_ms)
+
+    def add(self, kind: str, ts_ms: int) -> None:
+        """Record an event, unless it falls outside the window."""
+        if self.start_ms <= ts_ms <= self.end_ms:
+            self.events.append(ResourceEvent(kind=kind, time_s=ts_ms / 1000))
 
 
 class RestartTracker:

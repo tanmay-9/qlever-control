@@ -7,6 +7,7 @@ import pytest
 
 from qlever.monitor_queries.resource_data import (
     Capacity,
+    EventTracker,
     get_resource_plot,
     read_resource_window,
 )
@@ -357,6 +358,85 @@ def test_read_window_missing_file_yields_empty_framed_plot(tmp_path):
     assert plot.times_s == ()
     assert plot.start_s == pytest.approx(0.0)
     assert plot.end_s == pytest.approx(5.0)
+
+
+def tracked(samples, start_ms=0, end_ms=100_000):
+    """Feed samples to an EventTracker and return (kind, time_s) pairs."""
+    tracker = EventTracker(start_ms, end_ms)
+    for one in samples:
+        tracker.track(one)
+    return [(event.kind, event.time_s) for event in tracker.events]
+
+
+def test_event_tracker_no_events_for_a_quiet_log():
+    samples = [sample(elapsed_s=index, ts_ms=index * 1000) for index in (1, 2)]
+    assert tracked(samples) == []
+
+
+def test_event_tracker_elapsed_drop_is_a_restart():
+    samples = [
+        sample(elapsed_s=2.0, ts_ms=1000),
+        sample(elapsed_s=4.0, ts_ms=2000),
+        sample(elapsed_s=2.0, ts_ms=3000),
+    ]
+    assert tracked(samples) == [("server_down", 2.0), ("server_up", 3.0)]
+
+
+def test_event_tracker_rebuild_appearing_has_no_end():
+    samples = [sample(ts_ms=1000), sample(ts_ms=2000, rebuild_id=3)]
+    assert tracked(samples) == [("rebuild_start", 2.0)]
+
+
+def test_event_tracker_rebuild_vanishing_has_no_start():
+    samples = [sample(ts_ms=1000, rebuild_id=3), sample(ts_ms=2000)]
+    assert tracked(samples) == [("rebuild_end", 1.0)]
+
+
+def test_event_tracker_new_rebuild_id_ends_the_previous_one():
+    samples = [
+        sample(ts_ms=1000, rebuild_id=3),
+        sample(ts_ms=2000, rebuild_id=4),
+    ]
+    assert tracked(samples) == [
+        ("rebuild_end", 1.0),
+        ("rebuild_start", 2.0),
+    ]
+
+
+def test_event_tracker_restart_and_rebuild_end_stay_in_time_order():
+    samples = [
+        sample(elapsed_s=10.0, ts_ms=3000, rebuild_id=3),
+        sample(elapsed_s=1.0, ts_ms=4000),
+    ]
+    # Both events at 3.0 come before the one at 4.0, unsorted.
+    assert tracked(samples) == [
+        ("server_down", 3.0),
+        ("rebuild_end", 3.0),
+        ("server_up", 4.0),
+    ]
+
+
+def test_event_tracker_keeps_the_half_of_a_restart_inside_the_window():
+    samples = [
+        sample(elapsed_s=10.0, ts_ms=1000),
+        sample(elapsed_s=1.0, ts_ms=3000),
+    ]
+    # The server went down before the window opened, so only the
+    # coming back up is visible.
+    assert tracked(samples, start_ms=2000, end_ms=5000) == [("server_up", 3.0)]
+
+
+def test_event_tracker_drops_events_outside_the_window():
+    samples = [
+        sample(elapsed_s=10.0, ts_ms=1000),
+        sample(elapsed_s=1.0, ts_ms=2000),
+    ]
+    assert tracked(samples, start_ms=5000, end_ms=9000) == []
+
+
+def test_event_tracker_old_format_samples_have_no_rebuilds():
+    samples = [sample(ts_ms=ts, rebuild_id=None) for ts in (1000, 2000)]
+    assert tracked(samples) == []
 
 
 def test_get_resource_plot_detects_a_restart():
