@@ -5,12 +5,13 @@ from dataclasses import replace
 
 import pytest
 
-from qlever.monitor_queries.models import ResourceSample, ResourceTotals
 from qlever.monitor_queries.resource_data import (
     LOG_COLUMNS,
     OPTIONAL_COLUMNS,
     REQUIRED_COLUMNS,
     SEEK_BACKUP_BYTES,
+    Capacity,
+    Sample,
     get_resource_plot,
     line_ts_ms,
     log_has_new_columns,
@@ -21,7 +22,7 @@ from qlever.monitor_queries.resource_data import (
 
 HEADER = "\t".join(LOG_COLUMNS) + "\n"
 OLD_HEADER = "\t".join(REQUIRED_COLUMNS) + "\n"
-TOTALS = ResourceTotals(ram_gb=134.0, cores=64.0)
+TOTALS = Capacity(ram_gb=134.0, cores=64.0)
 
 # One full new-format row. Tests override only the cells they are about
 # and leave the rest at these values.
@@ -38,7 +39,7 @@ ROW = {
 
 # The same row as a parsed sample, with the new columns unset, as an
 # old-format row or a server without I/O accounting writes it.
-BASE_SAMPLE = ResourceSample(elapsed_s=2.0, ts_ms=1000, rss=5, cpu_percent=1.0)
+BASE_SAMPLE = Sample(elapsed_s=2.0, ts_ms=1000, rss=5, cpu_percent=1.0)
 
 
 def row_line(columns=LOG_COLUMNS, **overrides):
@@ -61,7 +62,7 @@ def write_log(tmp_path, rows, columns=LOG_COLUMNS):
 
 
 def sample(**overrides):
-    """Build a ResourceSample, with the named fields replaced."""
+    """Build a Sample, with the named fields replaced."""
     return replace(BASE_SAMPLE, **overrides)
 
 

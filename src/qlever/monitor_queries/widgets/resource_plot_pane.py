@@ -12,7 +12,7 @@ from datetime import datetime
 
 from textual_plotext import PlotextPlot
 
-from qlever.monitor_queries.models import ResourcePlot
+from qlever.monitor_queries.models import ResourceWindow
 
 RgbColor = tuple[int, int, int]
 
@@ -176,7 +176,7 @@ def color_markup(color: RgbColor) -> str:
     return "rgb({}, {}, {})".format(*color)
 
 
-def marker_legend(data: ResourcePlot, dark: bool) -> str:
+def marker_legend(data: ResourceWindow, dark: bool) -> str:
     """One line per marker kind in the window, colored to match its bars."""
     stop_color, start_color = restart_colors(dark)
     rebuild_start_color, rebuild_end_color = rebuild_colors(dark)
@@ -214,7 +214,7 @@ class ResourcePlotPane(PlotextPlot):
 
     def __init__(
         self,
-        source: Callable[[], ResourcePlot],
+        source: Callable[[], ResourceWindow],
         refresh_interval: float | None = None,
         reload: Callable[[int], None] | None = None,
         **kwargs,
@@ -265,7 +265,7 @@ class ResourcePlotPane(PlotextPlot):
         self.draw_series(data, rss_max)
         self.refresh()
 
-    def draw_axes(self, data: ResourcePlot) -> tuple[float, float | None]:
+    def draw_axes(self, data: ResourceWindow) -> tuple[float, float | None]:
         """Scale and label both y-axes and the x-axis for this window.
 
         Returns (rss_max, cpu_max), the axis tops the labels anchor to;
@@ -305,7 +305,7 @@ class ResourcePlotPane(PlotextPlot):
         return rss_max, cpu_max
 
     def draw_labels(
-        self, data: ResourcePlot, rss_max: float, cpu_max: float | None
+        self, data: ResourceWindow, rss_max: float, cpu_max: float | None
     ) -> None:
         """Name each series in its axis corner and the plot between them.
 
@@ -351,7 +351,7 @@ class ResourcePlotPane(PlotextPlot):
                 alignment="center",
             )
 
-    def draw_series(self, data: ResourcePlot, rss_max: float) -> None:
+    def draw_series(self, data: ResourceWindow, rss_max: float) -> None:
         """Plot the RSS and CPU lines, or a note when the window is empty.
 
         The lines are broken across each restart's downtime. Vlines mark

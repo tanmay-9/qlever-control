@@ -21,17 +21,17 @@ from qlever.monitor_queries.live_data import (
 )
 from qlever.monitor_queries.models import (
     LiveSubtitle,
-    ResourcePlot,
-    ResourceSample,
+    ResourceWindow,
     SparqlContent,
 )
 from qlever.monitor_queries.resource_data import (
-    LIVE_WINDOW_S,
-    ResourceHistory,
-    ResourceLogReader,
+    LIVE_RESOURCE_WINDOW_MS,
+    Sample,
+    SampleBuffer,
+    SampleTail,
     get_resource_plot,
     get_resource_usage,
-    is_resource_sample_fresh,
+    is_sample_fresh,
 )
 from qlever.monitor_queries.views.resource_plot_modal import (
     ResourcePlotModal,
@@ -95,9 +95,9 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.liveness = (
             "reachable" if is_log_fresh(state, current_ms()) else "checking"
         )
-        self.resource_totals = self.app.resource_totals
-        self.resource_history = ResourceHistory(self.app.sample_interval_s)
-        self.resource_reader = ResourceLogReader(self.resource_history.size)
+        self.capacity = self.app.capacity
+        self.resource_history = SampleBuffer(self.app.sample_interval_s)
+        self.resource_reader = SampleTail(self.resource_history.size)
 
         yield ResourceRow(
             LiveSubtitle(
@@ -105,7 +105,7 @@ class LiveScreen(Screen, inherit_bindings=False):
                 state=self.liveness,
                 n_active=len(rows),
             ),
-            get_resource_usage(self.resource_history, self.resource_totals),
+            get_resource_usage(self.resource_history, self.capacity),
         )
         yield MetricsRow(
             get_live_metrics(state, slow_ms, current_ms()),
@@ -232,7 +232,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         marks the resource row stale.
         """
         now = current_ms()
-        samples_fresh = is_resource_sample_fresh(
+        samples_fresh = is_sample_fresh(
             self.resource_reader.last_ts_ms, now, self.app.sample_interval_s
         )
         self.query_one(ResourceRow).stale = not samples_fresh
@@ -308,15 +308,15 @@ class LiveScreen(Screen, inherit_bindings=False):
                     )
                 time.sleep(interval_s)
 
-    def apply_resource_samples(self, samples: list[ResourceSample]) -> None:
+    def apply_resource_samples(self, samples: list[Sample]) -> None:
         """Add new samples to the buffer and repaint; runs on the UI thread."""
         for sample in samples:
             self.resource_history.add(sample)
         self.query_one(ResourceRow).usage = get_resource_usage(
-            self.resource_history, self.resource_totals
+            self.resource_history, self.capacity
         )
 
-    def live_resource_plot(self) -> ResourcePlot:
+    def live_resource_plot(self) -> ResourceWindow:
         """Snapshot the buffer as the rolling 5-minute plot window.
 
         Recomputes the window end on each call, so the plot's timer rolls
@@ -325,8 +325,8 @@ class LiveScreen(Screen, inherit_bindings=False):
         now = current_ms()
         return get_resource_plot(
             list(self.resource_history.samples),
-            self.resource_totals,
-            now - LIVE_WINDOW_S * 1000,
+            self.capacity,
+            now - LIVE_RESOURCE_WINDOW_MS,
             now,
         )
 

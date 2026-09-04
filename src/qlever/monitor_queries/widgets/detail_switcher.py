@@ -11,7 +11,7 @@ from collections.abc import Callable
 from textual.app import ComposeResult
 from textual.widgets import ContentSwitcher
 
-from qlever.monitor_queries.models import ResourcePlot, SparqlContent
+from qlever.monitor_queries.models import ResourceWindow, SparqlContent
 from qlever.monitor_queries.widgets.resource_plot_pane import ResourcePlotPane
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
 
@@ -31,7 +31,7 @@ class DetailSwitcher(ContentSwitcher):
 
     def __init__(
         self,
-        source: Callable[[], ResourcePlot],
+        source: Callable[[], ResourceWindow],
         refresh_interval: float | None = None,
         reload: Callable[[int], None] | None = None,
     ) -> None:

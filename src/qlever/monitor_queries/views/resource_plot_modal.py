@@ -16,7 +16,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.worker import get_current_worker
 
-from qlever.monitor_queries.models import ResourcePlot
+from qlever.monitor_queries.models import ResourceWindow
 from qlever.monitor_queries.widgets.footer import Footer
 from qlever.monitor_queries.widgets.resource_plot_pane import ResourcePlotPane
 
@@ -33,9 +33,9 @@ class ResourcePlotModal(ModalScreen):
 
     def __init__(
         self,
-        source: Callable[[], ResourcePlot],
+        source: Callable[[], ResourceWindow],
         refresh_interval: float | None = None,
-        reader: Callable[[int, Callable[[], bool]], ResourcePlot]
+        reader: Callable[[int, Callable[[], bool]], ResourceWindow]
         | None = None,
     ) -> None:
         super().__init__()
@@ -52,7 +52,7 @@ class ResourcePlotModal(ModalScreen):
             )
         yield Footer(show_command_palette=False)
 
-    def pane_source(self) -> ResourcePlot:
+    def pane_source(self) -> ResourceWindow:
         """Draw the re-read plot once we have it, else the initial one."""
         if self.plot is not None:
             return self.plot
@@ -72,7 +72,7 @@ class ResourcePlotModal(ModalScreen):
             return
         self.app.call_from_thread(self.apply_plot, plot)
 
-    def apply_plot(self, plot: ResourcePlot) -> None:
+    def apply_plot(self, plot: ResourceWindow) -> None:
         """Store the re-read plot and redraw the pane."""
         self.plot = plot
         self.query_one(ResourcePlotPane).replot()

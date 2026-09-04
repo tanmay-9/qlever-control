@@ -33,7 +33,7 @@ from qlever.monitor_queries.models import (
     FilterState,
     HistoricQueryRow,
     MetricsCounts,
-    ResourcePlot,
+    ResourceWindow,
     SparqlContent,
     TimelineBounds,
 )
@@ -362,7 +362,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.cached_window = (self.window_start_ms, self.window_end_ms)
             plot = read_resource_window(
                 self.app.resource_log,
-                self.app.resource_totals,
+                self.app.capacity,
                 self.window_start_ms,
                 self.window_end_ms,
                 max_points,
@@ -414,7 +414,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.refresh_sort_indicator()
         self.query_one(DetailSwitcher).replot()
 
-    def historic_resource_plot(self) -> ResourcePlot:
+    def historic_resource_plot(self) -> ResourceWindow:
         """Return the current window's resource plot for the pane to draw.
 
         The plot is read on the refresh_data worker when the window
@@ -427,7 +427,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             return self.resource_plot
         return get_resource_plot(
             [],
-            self.app.resource_totals,
+            self.app.capacity,
             self.window_start_ms,
             self.window_end_ms,
         )
@@ -444,7 +444,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         worker = get_current_worker()
         plot = read_resource_window(
             self.app.resource_log,
-            self.app.resource_totals,
+            self.app.capacity,
             self.window_start_ms,
             self.window_end_ms,
             max_points,
@@ -454,7 +454,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             return
         self.app.call_from_thread(self.apply_reload_plot, plot)
 
-    def apply_reload_plot(self, plot: ResourcePlot) -> None:
+    def apply_reload_plot(self, plot: ResourceWindow) -> None:
         """Store the re-read plot and redraw the inline pane if shown."""
         self.resource_plot = plot
         self.query_one(DetailSwitcher).replot()
@@ -479,7 +479,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         def read_window(max_points, should_cancel):
             return read_resource_window(
                 self.app.resource_log,
-                self.app.resource_totals,
+                self.app.capacity,
                 self.window_start_ms,
                 self.window_end_ms,
                 max_points,

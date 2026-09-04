@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import psutil
 from textual import work
 from textual.app import App
 from textual.binding import Binding
@@ -22,7 +23,7 @@ from qlever.monitor_queries.log_reader import (
     open_log_buffer,
     read_first_timestamp,
 )
-from qlever.monitor_queries.resource_data import system_totals
+from qlever.monitor_queries.resource_data import Capacity
 from qlever.monitor_queries.util import clipboard_install_hint, copy_text
 from qlever.monitor_queries.views.historic import HistoricScreen
 from qlever.monitor_queries.views.live import LiveScreen
@@ -89,9 +90,12 @@ class MonitorQueriesApp(App):
         # Seconds between the log's samples, as the server was started.
         # Sizes the live buffer and how long a sample counts as fresh.
         self.sample_interval_s = sample_interval_s
-        # Host-wide RAM/core capacities for the resource plot axes; fixed
-        # for the machine's lifetime and shared by Live and Historic.
-        self.resource_totals = system_totals()
+        # What the machine has, read once because it cannot change while
+        # we run. Shared by Live and Historic.
+        self.capacity = Capacity(
+            ram_gb=psutil.virtual_memory().total / 1e9,
+            cores=psutil.cpu_count(),
+        )
         self.system = system
         self.live_state = LiveState()
         self.log_start_ms = None
