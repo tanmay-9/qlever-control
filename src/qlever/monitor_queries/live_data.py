@@ -31,7 +31,17 @@ from qlever.monitor_queries.metrics import (
     MetricsSnapshot,
     metrics_for_ranges,
 )
-from qlever.monitor_queries.models import LiveQueryRow, MetricsCounts
+from qlever.monitor_queries.models import (
+    LiveQueryRow,
+    MetricsCounts,
+    ResourceWindow,
+)
+from qlever.monitor_queries.resource_data import (
+    LIVE_RESOURCE_WINDOW_MS,
+    Capacity,
+    SampleBuffer,
+    window_for_samples,
+)
 
 LIVE_METRIC_WINDOWS_MS = [1 * 60_000, 5 * 60_000, 60 * 60_000]
 LIVE_HORIZON_MS = LIVE_METRIC_WINDOWS_MS[2]
@@ -379,6 +389,26 @@ def format_eta(ms: int) -> str:
     if ms < 60_000:
         return "<1m"
     return f"{ms // 60_000}m"
+
+
+def get_live_resource_window(
+    buffer: SampleBuffer,
+    capacity: Capacity,
+    now_ms: int,
+    buckets: int,
+) -> ResourceWindow:
+    """Snapshot the buffer as the window ending now.
+
+    The end is recomputed on every call, so the sparklines and the plot
+    roll forward together instead of drifting apart.
+    """
+    return window_for_samples(
+        buffer.samples,
+        capacity,
+        now_ms - LIVE_RESOURCE_WINDOW_MS,
+        now_ms,
+        buckets,
+    )
 
 
 def get_live_metrics(

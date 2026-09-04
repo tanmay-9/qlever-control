@@ -7,9 +7,11 @@ import pytest
 
 from qlever.monitor_queries.resource_data import (
     Capacity,
+    Column,
     EventTracker,
-    get_resource_plot,
+    bucket_value,
     read_resource_window,
+    window_for_samples,
 )
 from qlever.monitor_queries.resource_reader import (
     LOG_COLUMNS,
@@ -270,22 +272,27 @@ def test_iter_samples_empty_log_yields_nothing():
     assert sample_times_ms(log_text([]), 0, 9999) == []
 
 
+def events_of(window):
+    """The window's events as (kind, time_s) pairs."""
+    return [(event.kind, event.time_s) for event in window.events]
+
+
 def test_read_window_returns_rows_in_range(tmp_path):
     rows = [{"timestamp_ms": ts} for ts in range(1000, 3100, 100)]
     path = write_log(tmp_path, rows)
-    plot = read_resource_window(path, TOTALS, 1500, 2500, 500)
-    assert plot.times_s[0] == pytest.approx(1.5)
-    assert plot.times_s[-1] == pytest.approx(2.5)
-    assert all(1.5 <= time_s <= 2.5 for time_s in plot.times_s)
+    window = read_resource_window(path, TOTALS, 1500, 2500, 500)
+    assert window.times_s[0] == pytest.approx(1.5)
+    assert window.times_s[-1] == pytest.approx(2.5)
+    assert all(1.5 <= time_s <= 2.5 for time_s in window.times_s)
 
 
-def test_read_window_carries_totals_and_edges(tmp_path):
+def test_read_window_carries_capacity_and_edges(tmp_path):
     path = write_log(tmp_path, [{}])
-    plot = read_resource_window(path, TOTALS, 500, 1500, 500)
-    assert plot.rss_total == 134.0
-    assert plot.cpu_total == 64.0
-    assert plot.start_s == pytest.approx(0.5)
-    assert plot.end_s == pytest.approx(1.5)
+    window = read_resource_window(path, TOTALS, 500, 1500, 500)
+    assert window.series["rss"].total == 134.0
+    assert window.series["cpu_percent"].total == 64.0
+    assert window.start_s == pytest.approx(0.5)
+    assert window.end_s == pytest.approx(1.5)
 
 
 def test_read_window_buckets_keep_peaks(tmp_path):
@@ -296,16 +303,16 @@ def test_read_window_buckets_keep_peaks(tmp_path):
         {"timestamp_ms": 1950, "rss": 9_000_000_000},
     ]
     path = write_log(tmp_path, rows)
-    plot = read_resource_window(path, TOTALS, 1000, 2000, 5)
-    assert plot.times_s == pytest.approx((1.05, 1.3, 1.95))
-    assert plot.rss_gb == pytest.approx((5.0, 4.0, 9.0))
+    window = read_resource_window(path, TOTALS, 1000, 2000, 5)
+    assert window.times_s == pytest.approx((1.05, 1.3, 1.95))
+    assert window.series["rss"].values == pytest.approx((5.0, 4.0, 9.0))
 
 
-def test_read_window_never_exceeds_max_points(tmp_path):
+def test_read_window_never_exceeds_the_bucket_count(tmp_path):
     rows = [{"timestamp_ms": 1000 + row_index} for row_index in range(1000)]
     path = write_log(tmp_path, rows)
-    plot = read_resource_window(path, TOTALS, 1000, 2000, 50)
-    assert len(plot.times_s) <= 50
+    window = read_resource_window(path, TOTALS, 1000, 2000, 50)
+    assert len(window.times_s) <= 50
 
 
 # A stop at ts 2000, then a restart at ts 3000 (elapsed drops 4 -> 2).
@@ -320,44 +327,40 @@ RESTART_ROWS = [
 def test_read_window_detects_restart_with_both_edges(tmp_path):
     # Stop and start both in the window: both lines show.
     path = write_log(tmp_path, RESTART_ROWS)
-    plot = read_resource_window(path, TOTALS, 0, 5000, 500)
-    assert plot.stop_times_s == pytest.approx((2.0,))
-    assert plot.start_times_s == pytest.approx((3.0,))
+    window = read_resource_window(path, TOTALS, 0, 5000, 500)
+    assert events_of(window) == [("server_down", 2.0), ("server_up", 3.0)]
 
 
 def test_read_window_start_across_window_start(tmp_path):
     # Stop is before the window, start inside it: only the start shows.
     path = write_log(tmp_path, RESTART_ROWS)
-    plot = read_resource_window(path, TOTALS, 2500, 5000, 500)
-    assert plot.stop_times_s == ()
-    assert plot.start_times_s == pytest.approx((3.0,))
+    window = read_resource_window(path, TOTALS, 2500, 5000, 500)
+    assert events_of(window) == [("server_up", 3.0)]
 
 
 def test_read_window_stop_across_window_end(tmp_path):
-    # Stop inside the window, start just past its end: the peek past the
-    # window still records the stop; the start is off-screen.
+    # Stop inside the window, start just past its end: the row read past
+    # the window still records the stop; the start is off-screen.
     path = write_log(tmp_path, RESTART_ROWS)
-    plot = read_resource_window(path, TOTALS, 0, 2500, 500)
-    assert plot.stop_times_s == pytest.approx((2.0,))
-    assert plot.start_times_s == ()
+    window = read_resource_window(path, TOTALS, 0, 2500, 500)
+    assert events_of(window) == [("server_down", 2.0)]
 
 
-def test_read_window_empty_log_yields_empty_plot(tmp_path):
+def test_read_window_empty_log_yields_an_empty_window(tmp_path):
     path = tmp_path / "empty.tsv"
     path.write_text(HEADER)
-    plot = read_resource_window(path, TOTALS, 0, 5000, 500)
-    assert plot.times_s == ()
-    assert plot.stop_times_s == ()
-    assert plot.start_times_s == ()
+    window = read_resource_window(path, TOTALS, 0, 5000, 500)
+    assert window.times_s == ()
+    assert window.events == ()
 
 
-def test_read_window_missing_file_yields_empty_framed_plot(tmp_path):
-    plot = read_resource_window(
+def test_read_window_missing_file_frames_the_time_range(tmp_path):
+    window = read_resource_window(
         tmp_path / "does-not-exist.tsv", TOTALS, 0, 5000, 500
     )
-    assert plot.times_s == ()
-    assert plot.start_s == pytest.approx(0.0)
-    assert plot.end_s == pytest.approx(5.0)
+    assert window.times_s == ()
+    assert window.start_s == pytest.approx(0.0)
+    assert window.end_s == pytest.approx(5.0)
 
 
 def tracked(samples, start_ms=0, end_ms=100_000):
@@ -439,36 +442,6 @@ def test_event_tracker_old_format_samples_have_no_rebuilds():
     assert tracked(samples) == []
 
 
-def test_get_resource_plot_detects_a_restart():
-    samples = [
-        sample(elapsed_s=2.0, ts_ms=1000),
-        sample(elapsed_s=4.0, ts_ms=2000),
-        sample(elapsed_s=2.0, ts_ms=3000),
-    ]
-    plot = get_resource_plot(samples, TOTALS, 0, 5000)
-    assert plot.stop_times_s == pytest.approx((2.0,))
-    assert plot.start_times_s == pytest.approx((3.0,))
-
-
-def test_get_resource_plot_monotonic_has_no_restart():
-    samples = [
-        sample(elapsed_s=elapsed, ts_ms=int(elapsed * 1000))
-        for elapsed in (2.0, 4.0, 6.0, 8.0)
-    ]
-    plot = get_resource_plot(samples, TOTALS, 0, 100000)
-    assert plot.stop_times_s == ()
-    assert plot.start_times_s == ()
-
-
-def test_get_resource_plot_keeps_only_windowed_samples():
-    samples = [
-        sample(elapsed_s=elapsed, ts_ms=int(elapsed * 1000))
-        for elapsed in (1.0, 2.0, 3.0, 4.0)
-    ]
-    plot = get_resource_plot(samples, TOTALS, 2000, 3000)
-    assert plot.times_s == pytest.approx((2.0, 3.0))
-
-
 # Rebuild 3 runs at ts 2000 and 3000, with no rebuild either side of it.
 REBUILD_SAMPLES = [
     sample(ts_ms=1000),
@@ -478,64 +451,22 @@ REBUILD_SAMPLES = [
 ]
 
 
-def test_get_resource_plot_rebuild_brackets_the_samples_that_had_it():
-    # The start is the first sample carrying the id, the end the last.
-    plot = get_resource_plot(REBUILD_SAMPLES, TOTALS, 0, 5000)
-    assert plot.rebuild_start_times_s == pytest.approx((2.0,))
-    assert plot.rebuild_end_times_s == pytest.approx((3.0,))
-
-
-def test_get_resource_plot_rebuild_already_running_has_no_start():
-    # The window opens mid-rebuild, so its start is not in the data. The
-    # end still shows.
-    samples = [
-        sample(ts_ms=1000, rebuild_id=3),
-        sample(ts_ms=2000, rebuild_id=3),
-        sample(ts_ms=3000),
-    ]
-    plot = get_resource_plot(samples, TOTALS, 0, 5000)
-    assert plot.rebuild_start_times_s == ()
-    assert plot.rebuild_end_times_s == pytest.approx((2.0,))
-
-
-def test_get_resource_plot_rebuild_spanning_every_sample_has_no_markers():
+def test_event_tracker_rebuild_spanning_every_sample_has_no_events():
     samples = [sample(ts_ms=ts, rebuild_id=3) for ts in (1000, 2000, 3000)]
-    plot = get_resource_plot(samples, TOTALS, 0, 5000)
-    assert plot.rebuild_start_times_s == ()
-    assert plot.rebuild_end_times_s == ()
+    assert tracked(samples) == []
 
 
-def test_get_resource_plot_new_rebuild_id_ends_the_previous_one():
-    # Needs two rebuilds inside one sampling interval, so in practice
-    # this is a server restart renumbering ids while a rebuild ran.
-    samples = [
-        sample(ts_ms=1000),
-        sample(ts_ms=2000, rebuild_id=3),
-        sample(ts_ms=3000, rebuild_id=4),
-        sample(ts_ms=4000),
+def test_event_tracker_rebuild_start_before_the_window():
+    # The rebuild began before the window opened, so only its end shows.
+    assert tracked(REBUILD_SAMPLES, start_ms=2500, end_ms=5000) == [
+        ("rebuild_end", 3.0)
     ]
-    plot = get_resource_plot(samples, TOTALS, 0, 5000)
-    assert plot.rebuild_start_times_s == pytest.approx((2.0, 3.0))
-    assert plot.rebuild_end_times_s == pytest.approx((2.0, 3.0))
 
 
-def test_get_resource_plot_rebuild_start_before_window():
-    plot = get_resource_plot(REBUILD_SAMPLES, TOTALS, 2500, 5000)
-    assert plot.rebuild_start_times_s == ()
-    assert plot.rebuild_end_times_s == pytest.approx((3.0,))
-
-
-def test_get_resource_plot_rebuild_end_after_window():
-    plot = get_resource_plot(REBUILD_SAMPLES, TOTALS, 0, 2500)
-    assert plot.rebuild_start_times_s == pytest.approx((2.0,))
-    assert plot.rebuild_end_times_s == ()
-
-
-def test_get_resource_plot_old_format_samples_have_no_rebuilds():
-    samples = [sample(ts_ms=ts) for ts in (1000, 2000, 3000)]
-    plot = get_resource_plot(samples, TOTALS, 0, 5000)
-    assert plot.rebuild_start_times_s == ()
-    assert plot.rebuild_end_times_s == ()
+def test_event_tracker_rebuild_end_after_the_window():
+    assert tracked(REBUILD_SAMPLES, start_ms=0, end_ms=2500) == [
+        ("rebuild_start", 2.0)
+    ]
 
 
 # The same rebuild as REBUILD_SAMPLES, as log rows. An empty cell is how
@@ -550,33 +481,130 @@ REBUILD_ROWS = [
 
 def test_read_window_detects_rebuild_with_both_edges(tmp_path):
     path = write_log(tmp_path, REBUILD_ROWS)
-    plot = read_resource_window(path, TOTALS, 0, 5000, 500)
-    assert plot.rebuild_start_times_s == pytest.approx((2.0,))
-    assert plot.rebuild_end_times_s == pytest.approx((3.0,))
+    window = read_resource_window(path, TOTALS, 0, 5000, 500)
+    assert events_of(window) == [
+        ("rebuild_start", 2.0),
+        ("rebuild_end", 3.0),
+    ]
 
 
 def test_read_window_rebuild_end_across_window_end(tmp_path):
     # The rebuild is still running when the window closes at 3500. The
-    # row past the window is tracked before the loop breaks, so its end
-    # lands on the last in-window sample.
+    # row read past the window is tracked, so its end lands on the last
+    # in-window sample.
     path = write_log(tmp_path, REBUILD_ROWS)
-    plot = read_resource_window(path, TOTALS, 0, 3500, 500)
-    assert plot.rebuild_start_times_s == pytest.approx((2.0,))
-    assert plot.rebuild_end_times_s == pytest.approx((3.0,))
+    window = read_resource_window(path, TOTALS, 0, 3500, 500)
+    assert events_of(window) == [
+        ("rebuild_start", 2.0),
+        ("rebuild_end", 3.0),
+    ]
 
 
 def test_read_window_rebuild_start_across_window_start(tmp_path):
     # The rebuild began before the window, so only its end shows.
     path = write_log(tmp_path, REBUILD_ROWS)
-    plot = read_resource_window(path, TOTALS, 2500, 5000, 500)
-    assert plot.rebuild_start_times_s == ()
-    assert plot.rebuild_end_times_s == pytest.approx((3.0,))
+    window = read_resource_window(path, TOTALS, 2500, 5000, 500)
+    assert events_of(window) == [("rebuild_end", 3.0)]
 
 
 def test_read_window_old_format_log_has_no_rebuilds(tmp_path):
     # No rebuild column at all, so the markers degrade to nothing with no
     # format check anywhere in the read path.
     path = write_log(tmp_path, REBUILD_ROWS, columns=REQUIRED_COLUMNS)
-    plot = read_resource_window(path, TOTALS, 0, 5000, 500)
-    assert plot.rebuild_start_times_s == ()
-    assert plot.rebuild_end_times_s == ()
+    window = read_resource_window(path, TOTALS, 0, 5000, 500)
+    assert events_of(window) == []
+
+
+def test_window_peak_column_keeps_the_bucket_maximum():
+    samples = [
+        sample(ts_ms=1100, rss=3_000_000_000),
+        sample(ts_ms=1600, rss=5_000_000_000),
+    ]
+    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    assert window.series["rss"].values == pytest.approx((5.0,))
+
+
+def test_window_mean_column_averages_the_bucket():
+    samples = [
+        sample(ts_ms=1100, read_bytes_per_s=1e6),
+        sample(ts_ms=1600, read_bytes_per_s=3e6),
+    ]
+    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    assert window.series["read_bytes_per_s"].values == pytest.approx((2.0,))
+
+
+def test_window_skips_buckets_with_no_sample():
+    samples = [sample(ts_ms=1100), sample(ts_ms=3200)]
+    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    assert window.times_s == pytest.approx((1.1, 3.2))
+
+
+def test_window_every_series_is_as_long_as_times_s():
+    samples = [sample(ts_ms=ts, read_bytes_per_s=1e6) for ts in (1100, 3200)]
+    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    for series in window.series.values():
+        assert len(series.values) == len(window.times_s)
+
+
+def test_window_omits_a_column_that_never_reported():
+    window = window_for_samples([sample(ts_ms=1100)], TOTALS, 1000, 5000, 4)
+    assert "read_bytes_per_s" not in window.series
+    assert "io_stall_percent" not in window.series
+
+
+def test_window_keeps_the_required_columns_with_no_samples():
+    window = window_for_samples([], TOTALS, 1000, 5000, 4)
+    assert window.series["rss"].values == ()
+    assert window.series["cpu_percent"].label == "CPU"
+
+
+def test_window_zero_where_a_column_reported_nothing():
+    # The server began reporting disk I/O part way through the window.
+    samples = [
+        sample(ts_ms=1100),
+        sample(ts_ms=3200, read_bytes_per_s=2e6),
+    ]
+    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    assert window.series["read_bytes_per_s"].values == pytest.approx(
+        (0.0, 2.0)
+    )
+
+
+def test_window_rate_columns_have_no_capacity():
+    samples = [sample(ts_ms=1100, read_bytes_per_s=1e6)]
+    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    assert window.series["read_bytes_per_s"].total is None
+
+
+def test_window_unknown_core_count_leaves_the_cpu_capacity_none():
+    capacity = Capacity(ram_gb=134.0, cores=None)
+    samples = [sample(ts_ms=1100)]
+    window = window_for_samples(samples, capacity, 1000, 5000, 4)
+    assert window.series["cpu_percent"].total is None
+    assert window.series["rss"].total == 134.0
+
+
+def test_window_frames_the_edges_with_no_samples():
+    window = window_for_samples([], TOTALS, 1000, 5000, 4)
+    assert window.start_s == pytest.approx(1.0)
+    assert window.end_s == pytest.approx(5.0)
+    assert window.times_s == ()
+
+
+def test_window_never_exceeds_the_bucket_count():
+    samples = [sample(ts_ms=1000 + index) for index in range(1000)]
+    window = window_for_samples(samples, TOTALS, 1000, 2000, 50)
+    assert len(window.times_s) <= 50
+
+
+def test_bucket_value_rejects_an_unknown_reducer():
+    column = Column(
+        key="rss",
+        label="RSS",
+        unit="GB",
+        scale=1.0,
+        reduce="median",
+        capacity=None,
+    )
+    with pytest.raises(ValueError):
+        bucket_value(column, 5.0, 1)

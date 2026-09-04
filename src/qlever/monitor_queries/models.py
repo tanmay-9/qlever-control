@@ -131,17 +131,20 @@ class FilterState:
 
 @dataclass(frozen=True)
 class ResourceSeries:
-    """One sparkline's readings, already in display units.
+    """One log column's readings over a window, in display units.
 
-    `total` is the capacity the bars scale against, in the same `unit`
-    as `values`. It is None when that capacity could not be read, as
-    happens with the core count.
+    `key` is the log's column name, which is also the key this series
+    is stored under. `total` is the capacity the bars and the axis
+    scale against, in the same `unit` as `values`. It is None when that
+    capacity could not be read, as happens with the core count, or when
+    the column has no ceiling at all.
     """
 
+    key: str
     label: str
+    unit: str
     values: tuple[float, ...]
     total: float | None
-    unit: str
 
 
 @dataclass(frozen=True)
@@ -158,35 +161,19 @@ class ResourceEvent:
 
 
 @dataclass(frozen=True)
-class ResourceUsage:
-    """The two resource sparklines shown in the Live header, as one unit."""
-
-    rss: ResourceSeries
-    cpu: ResourceSeries
-
-
-@dataclass(frozen=True)
 class ResourceWindow:
     """One time window of resource readings, in display units.
 
-    `times_s`: shared x-axis, in epoch seconds
-    `rss_gb`, `cpu_cores`: the two y-series
-    `rss_total`, `cpu_total`: axis capacities, None if unknown
-    `start_s`, `end_s`: the window edges the x-axis frames, often wider
-      than the samples that fall inside them
-    the four `*_times_s`: when the server went down or came back up,
-      and when a rebuild started or ended. One time per event, since a
-      window can hold several of each. Every one draws a vertical line.
+    `times_s` holds one time per bucket that had a sample, and every
+    series has one value per entry, so they all line up. `series` is
+    keyed by the log's column name, and a column with no reading
+    anywhere in the window is absent, which is how a plot knows it
+    cannot be drawn. `start_s` and `end_s` frame the time axis and are
+    often wider than the samples that fall inside them.
     """
 
-    times_s: tuple[float, ...]
-    rss_gb: tuple[float, ...]
-    cpu_cores: tuple[float, ...]
-    rss_total: float
-    cpu_total: float | None
     start_s: float
     end_s: float
-    start_times_s: tuple[float, ...]
-    stop_times_s: tuple[float, ...]
-    rebuild_start_times_s: tuple[float, ...]
-    rebuild_end_times_s: tuple[float, ...]
+    times_s: tuple[float, ...]
+    series: dict[str, ResourceSeries]
+    events: tuple[ResourceEvent, ...]

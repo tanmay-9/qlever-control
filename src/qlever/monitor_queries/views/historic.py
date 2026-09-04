@@ -38,8 +38,8 @@ from qlever.monitor_queries.models import (
     TimelineBounds,
 )
 from qlever.monitor_queries.resource_data import (
-    get_resource_plot,
     read_resource_window,
+    window_for_samples,
 )
 from qlever.monitor_queries.util import oneline, truncate
 from qlever.monitor_queries.views.filter_modal import (
@@ -197,7 +197,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.render_cache = {}
         self.rescan_timer = None
         self.cached_window = None
-        self.resource_plot = None
+        self.resource_window = None
 
     def compose(self) -> ComposeResult:
         self.log_start_ms = self.app.log_start_ms
@@ -239,9 +239,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
         yield DetailSwitcher(
-            source=self.historic_resource_plot,
+            source=self.historic_resource_window,
             refresh_interval=None,
-            reload=self.reload_plot,
+            reload=self.reread_resource_window,
         )
         yield Footer(show_command_palette=False)
 
@@ -360,7 +360,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.query_details_cache = {}
             self.render_cache = {}
             self.cached_window = (self.window_start_ms, self.window_end_ms)
-            plot = read_resource_window(
+            resource_window = read_resource_window(
                 self.app.resource_log,
                 self.app.capacity,
                 self.window_start_ms,
@@ -370,7 +370,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             )
             if worker.is_cancelled:
                 return
-            self.resource_plot = plot
+            self.resource_window = resource_window
         if self.mode in self.render_cache:
             selected, metrics = self.render_cache[self.mode]
         else:
@@ -414,35 +414,36 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.refresh_sort_indicator()
         self.query_one(DetailSwitcher).replot()
 
-    def historic_resource_plot(self) -> ResourceWindow:
-        """Return the current window's resource plot for the pane to draw.
+    def historic_resource_window(self) -> ResourceWindow:
+        """Return the resource readings for the selected time window.
 
-        The plot is read on the refresh_data worker when the window
-        changes and held in self.resource_plot, so this hands it back
-        directly. A resize or theme redraw reuses that plot rather than
-        re-reading the log. Before the first read, an empty plot frames
-        the current window.
+        They are read on the refresh_data worker when the time window
+        changes and held in `self.resource_window`, so this hands them
+        back directly. A resize or theme redraw reuses them rather than
+        re-reading the log. Before the first read, an empty resource
+        window frames the selected time window.
         """
-        if self.resource_plot is not None:
-            return self.resource_plot
-        return get_resource_plot(
+        if self.resource_window is not None:
+            return self.resource_window
+        return window_for_samples(
             [],
             self.app.capacity,
             self.window_start_ms,
             self.window_end_ms,
+            MIN_PLOT_POINTS,
         )
 
-    @work(thread=True, exclusive=True, group="reload_plot")
-    def reload_plot(self, max_points: int) -> None:
-        """Re-read the current window's plot at a new width, off the UI thread.
+    @work(thread=True, exclusive=True, group="reread_resource_window")
+    def reread_resource_window(self, max_points: int) -> None:
+        """Re-read the resource readings at a new width, off the UI thread.
 
         The inline pane calls this when a resize changes its point budget.
         An exclusive worker means a fast drag cancels superseded reads, so
-        only the final width lands. Reads the resource plot alone, not the
+        only the final width lands. Reads the resource log alone, not the
         query table, which a resize has no reason to redo.
         """
         worker = get_current_worker()
-        plot = read_resource_window(
+        resource_window = read_resource_window(
             self.app.resource_log,
             self.app.capacity,
             self.window_start_ms,
@@ -452,11 +453,11 @@ class HistoricScreen(Screen, inherit_bindings=False):
         )
         if worker.is_cancelled:
             return
-        self.app.call_from_thread(self.apply_reload_plot, plot)
+        self.app.call_from_thread(self.apply_resource_window, resource_window)
 
-    def apply_reload_plot(self, plot: ResourceWindow) -> None:
-        """Store the re-read plot and redraw the inline pane if shown."""
-        self.resource_plot = plot
+    def apply_resource_window(self, resource_window: ResourceWindow) -> None:
+        """Store the re-read readings and redraw the pane if shown."""
+        self.resource_window = resource_window
         self.query_one(DetailSwitcher).replot()
 
     def action_show_plot(self) -> None:
@@ -488,7 +489,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
 
         self.app.push_screen(
             ResourcePlotModal(
-                source=self.historic_resource_plot, reader=read_window
+                source=self.historic_resource_window, reader=read_window
             )
         )
 

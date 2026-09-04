@@ -7,7 +7,7 @@ Getting the rows out of the file is `resource_reader.py`'s job.
 """
 
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -15,10 +15,13 @@ from typing import NamedTuple
 from qlever.monitor_queries.models import (
     ResourceEvent,
     ResourceSeries,
-    ResourceUsage,
     ResourceWindow,
 )
-from qlever.monitor_queries.resource_reader import Sample, iter_samples
+from qlever.monitor_queries.resource_reader import (
+    REQUIRED_COLUMNS,
+    Sample,
+    iter_samples,
+)
 
 LIVE_RESOURCE_WINDOW_MS = 300_000
 
@@ -141,35 +144,45 @@ def is_sample_fresh(
     return now_ms - last_ts_ms <= fresh_ms
 
 
-def zero_pad_left(values: tuple[float, ...], size: int) -> tuple[float, ...]:
-    """Left-pad a partial window up to `size` with zeros.
+def bucket_value(column: Column, running: float, count: int) -> float:
+    """Collapse one bucket's readings into a single display value.
 
-    A not-yet-full buffer would otherwise stretch its few readings into
-    fat bars. Fixing the slot count keeps the bar width constant, with
-    the empty pre-monitoring past on the left and 'now' at the right.
+    A count of zero means the column had nothing to report in this
+    bucket, which happens when a server starts reporting a column part
+    way through a window.
     """
-    missing = size - len(values)
-    return (0.0,) * missing + values if missing > 0 else values
+    if count == 0:
+        return 0.0
+    if column.reduce == "peak":
+        return running / column.scale
+    if column.reduce == "mean":
+        return running / count / column.scale
+    raise ValueError(f"{column.key} has an unknown reducer {column.reduce}")
 
 
-def get_resource_usage(
-    history: SampleBuffer, capacity: Capacity
-) -> ResourceUsage:
-    """Snapshot the buffer as two display-ready sparkline series.
+def series_for_column(
+    column: Column,
+    capacity: Capacity,
+    running: list[float],
+    counts: list[int],
+    filled: list[int],
+) -> ResourceSeries:
+    """Build one column's series from the buckets that had a sample.
 
-    Walks the buffer once, converting raw samples to display units: rss
-    bytes to GB, cpu percent to cores.
+    `running` holds a maximum per bucket for a peak column and a sum
+    for a mean one. `filled` names the non-empty buckets and is shared
+    by every column, so the series all line up with the window's
+    `times_s`.
     """
-    rss_values = zero_pad_left(
-        tuple(sample.rss / 1e9 for sample in history.samples), history.size
-    )
-    cpu_values = zero_pad_left(
-        tuple(sample.cpu_percent / 100 for sample in history.samples),
-        history.size,
-    )
-    return ResourceUsage(
-        rss=ResourceSeries("RSS", rss_values, capacity.ram_gb, "GB"),
-        cpu=ResourceSeries("CPU", cpu_values, capacity.cores, "cores"),
+    return ResourceSeries(
+        key=column.key,
+        label=column.label,
+        unit=column.unit,
+        values=tuple(
+            bucket_value(column, running[index], counts[index])
+            for index in filled
+        ),
+        total=getattr(capacity, column.capacity) if column.capacity else None,
     )
 
 
@@ -217,131 +230,70 @@ class EventTracker:
             self.events.append(ResourceEvent(kind=kind, time_s=ts_ms / 1000))
 
 
-class RestartTracker:
-    """Finds server restarts from drops in the log's elapsed-time column.
-
-    Fed samples in timestamp order. The elapsed-time counter resets when
-    the server restarts, so a drop between two samples means a restart
-    happened between them. The earlier sample is the stop, the later one
-    the start, and each is kept only if it falls in the window, so a
-    restart straddling a window edge still records the half that shows.
-    """
-
-    def __init__(self, start_ms: int, end_ms: int) -> None:
-        self.start_ms = start_ms
-        self.end_ms = end_ms
-        self.stop_times_s = []
-        self.start_times_s = []
-        self.last_elapsed_s = None
-        self.last_ts_ms = None
-
-    def track(self, elapsed_s: float, ts_ms: int) -> None:
-        """Note one sample; record a restart if elapsed time dropped."""
-        if self.last_elapsed_s is not None and elapsed_s < self.last_elapsed_s:
-            if self.start_ms <= self.last_ts_ms <= self.end_ms:
-                self.stop_times_s.append(self.last_ts_ms / 1000)
-            if self.start_ms <= ts_ms <= self.end_ms:
-                self.start_times_s.append(ts_ms / 1000)
-        self.last_elapsed_s = elapsed_s
-        self.last_ts_ms = ts_ms
-
-
-class RebuildIndexTracker:
-    """Finds index rebuilds from changes in the log's rebuild_id column.
-
-    Fed samples in timestamp order. The server writes the id of the
-    running rebuild and leaves the cell empty when none is running, so
-    the id changing between two samples marks a boundary. Each marker
-    is kept only if it falls in the window, so a rebuild straddling a
-    window edge still records the half that shows.
-    """
-
-    def __init__(self, start_ms: int, end_ms: int) -> None:
-        self.start_ms = start_ms
-        self.end_ms = end_ms
-        self.start_times_s = []
-        self.end_times_s = []
-        self.last_rebuild_id = None
-        self.last_ts_ms = None
-
-    def track(self, rebuild_id: int | None, ts_ms: int) -> None:
-        """Note one sample; record a rebuild that began or ended."""
-        if self.last_ts_ms is not None and rebuild_id != self.last_rebuild_id:
-            if (
-                self.last_rebuild_id is not None
-                and self.start_ms <= self.last_ts_ms <= self.end_ms
-            ):
-                self.end_times_s.append(self.last_ts_ms / 1000)
-            if (
-                rebuild_id is not None
-                and self.start_ms <= ts_ms <= self.end_ms
-            ):
-                self.start_times_s.append(ts_ms / 1000)
-        self.last_rebuild_id = rebuild_id
-        self.last_ts_ms = ts_ms
-
-
-def build_plot(
-    times_s: list[float],
-    rss_gb: list[float],
-    cpu_cores: list[float],
+def window_for_samples(
+    samples: Iterable[Sample],
     capacity: Capacity,
     start_ms: int,
     end_ms: int,
-    restarts: RestartTracker,
-    rebuilds: RebuildIndexTracker,
+    buckets: int,
 ) -> ResourceWindow:
-    """Put the gathered series, edges and events into one window."""
+    """Bucket samples by time into one window the widgets can draw.
+
+    Samples arrive oldest first and may fall outside the window: those
+    count towards events, so a restart just off the edge is not lost,
+    but they get no bucket. Only the buckets are kept, so memory
+    follows `buckets` and not the number of samples.
+    """
+    buckets = max(1, buckets)
+    bucket_span_ms = (end_ms - start_ms) / buckets
+    if bucket_span_ms <= 0:
+        bucket_span_ms = 1
+    bucket_ts = [None] * buckets
+    running = {column.key: [0.0] * buckets for column in COLUMNS}
+    counts = {column.key: [0] * buckets for column in COLUMNS}
+    tracker = EventTracker(start_ms, end_ms)
+
+    for sample in samples:
+        tracker.track(sample)
+        if start_ms <= sample.ts_ms <= end_ms:
+            index = int((sample.ts_ms - start_ms) / bucket_span_ms)
+            if index >= buckets:
+                index = buckets - 1
+            if bucket_ts[index] is None:
+                bucket_ts[index] = sample.ts_ms
+            for column in COLUMNS:
+                raw = getattr(sample, column.key)
+                if raw is not None:
+                    if column.reduce == "peak":
+                        running[column.key][index] = max(
+                            running[column.key][index], raw
+                        )
+                    else:
+                        running[column.key][index] += raw
+                    counts[column.key][index] += 1
+
+    filled = [
+        index for index in range(buckets) if bucket_ts[index] is not None
+    ]
+    series = {}
+    for column in COLUMNS:
+        # The required columns are in every version of the log, so
+        # their series exists even before a sample arrives. An optional
+        # column appears only once one is actually seen.
+        if any(counts[column.key]) or column.key in REQUIRED_COLUMNS:
+            series[column.key] = series_for_column(
+                column,
+                capacity,
+                running[column.key],
+                counts[column.key],
+                filled,
+            )
     return ResourceWindow(
-        times_s=tuple(times_s),
-        rss_gb=tuple(rss_gb),
-        cpu_cores=tuple(cpu_cores),
-        rss_total=capacity.ram_gb,
-        cpu_total=capacity.cores,
         start_s=start_ms / 1000,
         end_s=end_ms / 1000,
-        stop_times_s=tuple(restarts.stop_times_s),
-        start_times_s=tuple(restarts.start_times_s),
-        rebuild_start_times_s=tuple(rebuilds.start_times_s),
-        rebuild_end_times_s=tuple(rebuilds.end_times_s),
-    )
-
-
-def get_resource_plot(
-    samples: list[Sample],
-    capacity: Capacity,
-    start_ms: int,
-    end_ms: int,
-) -> ResourceWindow:
-    """Turn samples in a time window into the dual-axis plot model.
-
-    Keeps only samples inside [start_ms, end_ms] and converts each to
-    display units: rss bytes to GB, cpu percent to cores. The window
-    edges frame the plot's x-axis and may be wider than the samples that
-    fall inside them. Restarts are detected by RestartTracker, and rebuilds
-    are detected by RebuildIndexTracker.
-    """
-    times_s = []
-    rss_gb = []
-    cpu_cores_series = []
-    restarts = RestartTracker(start_ms, end_ms)
-    rebuilds = RebuildIndexTracker(start_ms, end_ms)
-    for sample in samples:
-        restarts.track(sample.elapsed_s, sample.ts_ms)
-        rebuilds.track(sample.rebuild_id, sample.ts_ms)
-        if start_ms <= sample.ts_ms <= end_ms:
-            times_s.append(sample.ts_ms / 1000)
-            rss_gb.append(sample.rss / 1e9)
-            cpu_cores_series.append(sample.cpu_percent / 100)
-    return build_plot(
-        times_s,
-        rss_gb,
-        cpu_cores_series,
-        capacity,
-        start_ms,
-        end_ms,
-        restarts,
-        rebuilds,
+        times_s=tuple(bucket_ts[index] / 1000 for index in filled),
+        series=series,
+        events=tuple(tracker.events),
     )
 
 
@@ -350,60 +302,19 @@ def read_resource_window(
     capacity: Capacity,
     start_ms: int,
     end_ms: int,
-    max_points: int,
+    buckets: int,
     should_cancel: Callable[[], bool] | None = None,
 ) -> ResourceWindow:
-    """Read samples in [start_ms, end_ms] and bucket them for the plot.
-
-    Folds each row into one of `max_points` equal time buckets as it
-    arrives, keeping the bucket's peak rss and cpu so spikes survive.
-    Nothing but the buckets is held, so the memory needed follows the
-    plot's width and not the size of the log.
-    """
+    """Read a past window off disk, straight into the buckets."""
     # No log yet: the server has not started, or resource logging is
     # off. Frame the window empty rather than fail the read.
     if not path.exists():
-        return get_resource_plot([], capacity, start_ms, end_ms)
-    max_points = max(1, max_points)
-    bucket_span_ms = (end_ms - start_ms) / max_points
-    if bucket_span_ms <= 0:
-        bucket_span_ms = 1
-    bucket_ts = [None] * max_points
-    bucket_rss = [0] * max_points
-    bucket_cpu = [0.0] * max_points
-    restarts = RestartTracker(start_ms, end_ms)
-    rebuilds = RebuildIndexTracker(start_ms, end_ms)
-
+        return window_for_samples([], capacity, start_ms, end_ms, buckets)
     with open(path, "rb") as stream:
-        for sample in iter_samples(stream, start_ms, end_ms, should_cancel):
-            restarts.track(sample.elapsed_s, sample.ts_ms)
-            rebuilds.track(sample.rebuild_id, sample.ts_ms)
-            # The rows from just outside the window are here for the
-            # trackers only, so only in-window rows get a bucket.
-            if start_ms <= sample.ts_ms <= end_ms:
-                index = int((sample.ts_ms - start_ms) / bucket_span_ms)
-                if index >= max_points:
-                    index = max_points - 1
-                if bucket_ts[index] is None:
-                    bucket_ts[index] = sample.ts_ms
-                bucket_rss[index] = max(bucket_rss[index], sample.rss)
-                bucket_cpu[index] = max(bucket_cpu[index], sample.cpu_percent)
-
-    times_s = []
-    rss_gb = []
-    cpu_cores_series = []
-    for index in range(max_points):
-        if bucket_ts[index] is not None:
-            times_s.append(bucket_ts[index] / 1000)
-            rss_gb.append(bucket_rss[index] / 1e9)
-            cpu_cores_series.append(bucket_cpu[index] / 100)
-    return build_plot(
-        times_s,
-        rss_gb,
-        cpu_cores_series,
-        capacity,
-        start_ms,
-        end_ms,
-        restarts,
-        rebuilds,
-    )
+        return window_for_samples(
+            iter_samples(stream, start_ms, end_ms, should_cancel),
+            capacity,
+            start_ms,
+            end_ms,
+            buckets,
+        )

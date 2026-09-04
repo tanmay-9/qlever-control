@@ -17,6 +17,7 @@ from qlever.monitor_queries.live_data import (
     discard_finished_backlog,
     get_live_metrics,
     get_live_query_rows,
+    get_live_resource_window,
     is_log_fresh,
 )
 from qlever.monitor_queries.models import (
@@ -27,8 +28,6 @@ from qlever.monitor_queries.models import (
 from qlever.monitor_queries.resource_data import (
     LIVE_RESOURCE_WINDOW_MS,
     SampleBuffer,
-    get_resource_plot,
-    get_resource_usage,
     is_sample_fresh,
 )
 from qlever.monitor_queries.resource_reader import Sample, SampleTail
@@ -70,8 +69,8 @@ class LiveScreen(Screen, inherit_bindings=False):
     def __init__(self) -> None:
         """Set the screen's blank default state.
 
-        The app-derived fields (liveness, resource totals, the sample
-        buffer and its reader) are read in compose, where the app is
+        The app-derived fields (liveness, capacity, the resource samples
+        and the log tail) are read in compose, where the app is
         available.
         """
         super().__init__()
@@ -95,8 +94,8 @@ class LiveScreen(Screen, inherit_bindings=False):
             "reachable" if is_log_fresh(state, current_ms()) else "checking"
         )
         self.capacity = self.app.capacity
-        self.resource_history = SampleBuffer(self.app.sample_interval_s)
-        self.resource_reader = SampleTail(self.resource_history.size)
+        self.resource_samples = SampleBuffer(self.app.sample_interval_s)
+        self.resource_log_tail = SampleTail(self.resource_samples.size)
 
         yield ResourceRow(
             LiveSubtitle(
@@ -104,7 +103,7 @@ class LiveScreen(Screen, inherit_bindings=False):
                 state=self.liveness,
                 n_active=len(rows),
             ),
-            get_resource_usage(self.resource_history, self.capacity),
+            self.live_resource_window(),
         )
         yield MetricsRow(
             get_live_metrics(state, slow_ms, current_ms()),
@@ -113,7 +112,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         yield LiveQueryTable(rows)
         yield Static("", id="table-status")
         yield DetailSwitcher(
-            source=self.live_resource_plot,
+            source=self.live_resource_window,
             refresh_interval=self.app.sample_interval_s,
         )
         yield Footer()
@@ -232,7 +231,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         """
         now = current_ms()
         samples_fresh = is_sample_fresh(
-            self.resource_reader.last_ts_ms, now, self.app.sample_interval_s
+            self.resource_log_tail.last_ts_ms, now, self.app.sample_interval_s
         )
         self.query_one(ResourceRow).stale = not samples_fresh
         alive = samples_fresh or is_log_fresh(self.app.live_state, now)
@@ -297,12 +296,12 @@ class LiveScreen(Screen, inherit_bindings=False):
         if worker.is_cancelled:
             return
         with self.app.resource_log.open("rb") as stream:
-            seeded = self.resource_reader.seed(
+            seeded = self.resource_log_tail.seed(
                 stream, current_ms() - LIVE_RESOURCE_WINDOW_MS
             )
             self.app.call_from_thread(self.apply_resource_samples, seeded)
             while not worker.is_cancelled:
-                fresh = self.resource_reader.read_new(stream)
+                fresh = self.resource_log_tail.read_new(stream)
                 if fresh:
                     self.app.call_from_thread(
                         self.apply_resource_samples, fresh
@@ -312,23 +311,20 @@ class LiveScreen(Screen, inherit_bindings=False):
     def apply_resource_samples(self, samples: list[Sample]) -> None:
         """Add new samples to the buffer and repaint; runs on the UI thread."""
         for sample in samples:
-            self.resource_history.add(sample)
-        self.query_one(ResourceRow).usage = get_resource_usage(
-            self.resource_history, self.capacity
-        )
+            self.resource_samples.add(sample)
+        self.query_one(ResourceRow).window = self.live_resource_window()
 
-    def live_resource_plot(self) -> ResourceWindow:
-        """Snapshot the buffer as the rolling 5-minute plot window.
+    def live_resource_window(self) -> ResourceWindow:
+        """Snapshot the buffer as the rolling 5-minute window.
 
-        Recomputes the window end on each call, so the plot's timer rolls
-        the view forward the same way the sparklines roll.
+        One bucket per sampling interval, so the sparklines and the plot
+        keep every reading the buffer holds.
         """
-        now = current_ms()
-        return get_resource_plot(
-            list(self.resource_history.samples),
+        return get_live_resource_window(
+            self.resource_samples,
             self.capacity,
-            now - LIVE_RESOURCE_WINDOW_MS,
-            now,
+            current_ms(),
+            self.resource_samples.size,
         )
 
     def action_show_plot(self) -> None:
@@ -344,7 +340,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         """
         self.app.push_screen(
             ResourcePlotModal(
-                source=self.live_resource_plot,
+                source=self.live_resource_window,
                 refresh_interval=self.app.sample_interval_s,
             )
         )
