@@ -26,13 +26,12 @@ from qlever.monitor_queries.models import (
 )
 from qlever.monitor_queries.resource_data import (
     LIVE_RESOURCE_WINDOW_MS,
-    Sample,
     SampleBuffer,
-    SampleTail,
     get_resource_plot,
     get_resource_usage,
     is_sample_fresh,
 )
+from qlever.monitor_queries.resource_reader import Sample, SampleTail
 from qlever.monitor_queries.views.resource_plot_modal import (
     ResourcePlotModal,
 )
@@ -298,7 +297,9 @@ class LiveScreen(Screen, inherit_bindings=False):
         if worker.is_cancelled:
             return
         with self.app.resource_log.open("rb") as stream:
-            seeded = self.resource_reader.seed(stream, current_ms())
+            seeded = self.resource_reader.seed(
+                stream, current_ms() - LIVE_RESOURCE_WINDOW_MS
+            )
             self.app.call_from_thread(self.apply_resource_samples, seeded)
             while not worker.is_cancelled:
                 fresh = self.resource_reader.read_new(stream)

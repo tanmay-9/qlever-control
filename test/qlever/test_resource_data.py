@@ -6,17 +6,20 @@ from dataclasses import replace
 import pytest
 
 from qlever.monitor_queries.resource_data import (
+    Capacity,
+    get_resource_plot,
+    read_resource_window,
+)
+from qlever.monitor_queries.resource_reader import (
     LOG_COLUMNS,
     OPTIONAL_COLUMNS,
     REQUIRED_COLUMNS,
     SEEK_BACKUP_BYTES,
-    Capacity,
     Sample,
-    get_resource_plot,
+    iter_samples,
     line_ts_ms,
     log_has_new_columns,
     parse_tsv_row,
-    read_resource_window,
     seek_to_window_start,
 )
 
@@ -219,6 +222,51 @@ def test_seek_never_skips_the_boundary_in_a_large_file():
     )
     for target in (100000, 1_500_000, 3_000_000, 4_099_000):
         assert first_in_window(text, target) == target
+
+
+def sample_times_ms(text, start_ms, end_ms, should_cancel=None):
+    """Timestamps `iter_samples` yields for a window of this log."""
+    stream = io.BytesIO(text.encode())
+    return [
+        sample.ts_ms
+        for sample in iter_samples(stream, start_ms, end_ms, should_cancel)
+    ]
+
+
+def test_iter_samples_covers_the_window():
+    text = log_text([{"timestamp_ms": ts} for ts in range(1000, 6000, 1000)])
+    assert 3000 in sample_times_ms(text, 3000, 4000)
+    assert 4000 in sample_times_ms(text, 3000, 4000)
+
+
+def test_iter_samples_yields_one_row_past_the_window_end():
+    text = log_text([{"timestamp_ms": ts} for ts in range(1000, 6000, 1000)])
+    times = sample_times_ms(text, 2000, 3000)
+    # 4000 is out of the window, but an event at 3000 needs it to pair.
+    assert times[-1] == 4000
+
+
+def test_iter_samples_yields_rows_before_the_window_start():
+    text = log_text([{"timestamp_ms": ts} for ts in range(1000, 6000, 1000)])
+    # The backup before the seek boundary brings earlier rows along, and
+    # the trackers need them to spot a restart that began before 3000.
+    assert min(sample_times_ms(text, 3000, 4000)) < 3000
+
+
+def test_iter_samples_skips_the_header():
+    text = log_text([{"timestamp_ms": 1000}])
+    assert sample_times_ms(text, 0, 9999) == [1000]
+
+
+def test_iter_samples_stops_when_cancelled():
+    rows = [{"timestamp_ms": 1000 + row * 10} for row in range(200_000)]
+    text = log_text(rows)
+    times = sample_times_ms(text, 0, 9_999_999, should_cancel=lambda: True)
+    assert 0 < len(times) < len(rows)
+
+
+def test_iter_samples_empty_log_yields_nothing():
+    assert sample_times_ms(log_text([]), 0, 9999) == []
 
 
 def test_read_window_returns_rows_in_range(tmp_path):
