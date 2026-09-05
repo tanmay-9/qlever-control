@@ -23,12 +23,14 @@ from qlever.monitor_queries.log_reader import (
     open_log_buffer,
     read_first_timestamp,
 )
+from qlever.monitor_queries.models import ResourceWindow
 from qlever.monitor_queries.resource_data import Capacity
 from qlever.monitor_queries.util import clipboard_install_hint, copy_text
 from qlever.monitor_queries.views.historic import HistoricScreen
 from qlever.monitor_queries.views.live import LiveScreen
 from qlever.monitor_queries.widgets.header_row import ThemeSelect
 from qlever.monitor_queries.widgets.query_table import QueryTable
+from qlever.monitor_queries.widgets.resource_plot_pane import ResourcePlotPane
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane, SparqlScroll
 from qlever.util import pretty_printed_query
 
@@ -168,6 +170,18 @@ class MonitorQueriesApp(App):
         self.live_state.metrics_known_from_ms = max(
             log_start_or_boot, self.boot_time_ms - LIVE_HORIZON_MS
         )
+
+    def push_resource_window(self, window: ResourceWindow) -> None:
+        """Hand fresh readings to every resource plot on screen.
+
+        The maximized plot is a screen of its own, so the screen that
+        read the window cannot reach it. The app owns the screen stack,
+        so it hands the window over: while the plot is maximized, it and
+        the pane underneath show the same readings.
+        """
+        for screen in self.screen_stack:
+            for pane in screen.query(ResourcePlotPane):
+                pane.window = window
 
     def action_swap_screen(self) -> None:
         """Toggle between Live and Historic (bound to Tab on each screen)."""

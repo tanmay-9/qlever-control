@@ -97,13 +97,14 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.resource_samples = SampleBuffer(self.app.sample_interval_s)
         self.resource_log_tail = SampleTail(self.resource_samples.size)
 
+        resource_window = self.live_resource_window()
         yield ResourceRow(
             LiveSubtitle(
                 endpoint=self.app.sparql_endpoint,
                 state=self.liveness,
                 n_active=len(rows),
             ),
-            self.live_resource_window(),
+            resource_window,
         )
         yield MetricsRow(
             get_live_metrics(state, slow_ms, current_ms()),
@@ -111,10 +112,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         )
         yield LiveQueryTable(rows)
         yield Static("", id="table-status")
-        yield DetailSwitcher(
-            source=self.live_resource_window,
-            refresh_interval=self.app.sample_interval_s,
-        )
+        yield DetailSwitcher(resource_window)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -123,6 +121,9 @@ class LiveScreen(Screen, inherit_bindings=False):
             self.app.refresh_interval, self.refresh_table
         )
         self.metrics_timer = self.set_interval(2.0, self.refresh_metrics)
+        self.resource_timer = self.set_interval(
+            self.app.sample_interval_s, self.refresh_resource_window
+        )
         # A worker, not a paused-on-suspend timer: it keeps reading the
         # log regardless of the active tab so the history never gaps.
         self.tail_resource_log()
@@ -138,12 +139,18 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.metrics_timer.pause()
         if self.ping_timer is not None:
             self.ping_timer.pause()
+        # Maximizing the plot also suspends Live, but leaves it on the
+        # stack, and that plot is on screen and still ours to roll.
+        if self in self.app.screen_stack:
+            return
+        self.resource_timer.pause()
 
     def on_screen_resume(self) -> None:
         """Resume periodic UI work; recheck server unless already reachable."""
         # Drop the backlog of queries that finished while suspended.
         discard_finished_backlog(self.app.live_state)
         self.table_timer.resume()
+        self.resource_timer.resume()
         self.update_liveness_visuals()
         if self.ping_timer is not None:
             self.ping_timer.resume()
@@ -278,6 +285,17 @@ class LiveScreen(Screen, inherit_bindings=False):
             state, slow_ms, current_ms()
         )
 
+    def refresh_resource_window(self) -> None:
+        """Roll the window forward into the sparklines and the plot.
+
+        Built once and handed to both, so the sparklines and the plot
+        always show the same readings. Freezing the table leaves this
+        running, since the window is about the server and not the rows.
+        """
+        window = self.live_resource_window()
+        self.query_one(ResourceRow).window = window
+        self.app.push_resource_window(window)
+
     @work(thread=True, exclusive=True, group="tail_resource_log")
     def tail_resource_log(self) -> None:
         """Read the resource log off the UI thread, seeding then tailing.
@@ -309,10 +327,13 @@ class LiveScreen(Screen, inherit_bindings=False):
                 time.sleep(interval_s)
 
     def apply_resource_samples(self, samples: list[Sample]) -> None:
-        """Add new samples to the buffer and repaint; runs on the UI thread."""
+        """Add new samples to the buffer, on the UI thread.
+
+        Runs there so the buffer is never written while the resource
+        timer is reading it. Repainting is that timer's job.
+        """
         for sample in samples:
             self.resource_samples.add(sample)
-        self.query_one(ResourceRow).window = self.live_resource_window()
 
     def live_resource_window(self) -> ResourceWindow:
         """Snapshot the buffer as the rolling 5-minute window.
@@ -335,15 +356,10 @@ class LiveScreen(Screen, inherit_bindings=False):
     def action_maximize_plot(self) -> None:
         """Open the resource plot as a full-screen modal.
 
-        The modal draws from the same rolling source as the inline pane,
-        with the same refresh interval, so it rolls while open.
+        Opens on the window the inline pane is showing. The resource
+        timer reaches the modal's pane as well, so it keeps rolling.
         """
-        self.app.push_screen(
-            ResourcePlotModal(
-                source=self.live_resource_window,
-                refresh_interval=self.app.sample_interval_s,
-            )
-        )
+        self.app.push_screen(ResourcePlotModal(self.live_resource_window()))
 
     def action_show_sparql(self) -> None:
         """Switch the detail pane to the SPARQL query."""

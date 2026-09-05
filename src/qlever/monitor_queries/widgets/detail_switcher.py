@@ -1,7 +1,7 @@
 """Bottom pane that holds the SPARQL view and the resource plot.
 
 Both panes stay mounted and one is shown, so switching keeps the other's
-state: the plot its rolling timer, the SPARQL view its scroll position.
+state: the plot its window, the SPARQL view its scroll position.
 """
 
 from __future__ import annotations
@@ -31,20 +31,16 @@ class DetailSwitcher(ContentSwitcher):
 
     def __init__(
         self,
-        source: Callable[[], ResourceWindow],
-        refresh_interval: float | None = None,
+        window: ResourceWindow,
         reload: Callable[[int], None] | None = None,
     ) -> None:
         super().__init__(initial=PLOT_ID)
-        self.source = source
-        self.refresh_interval = refresh_interval
+        self.window = window
         self.reload = reload
 
     def compose(self) -> ComposeResult:
         yield SparqlPane(id=SPARQL_ID)
-        yield ResourcePlotPane(
-            self.source, self.refresh_interval, self.reload, id=PLOT_ID
-        )
+        yield ResourcePlotPane(self.window, self.reload, id=PLOT_ID)
 
     def show_plot(self) -> None:
         """Switch to the resource plot pane."""
@@ -57,7 +53,3 @@ class DetailSwitcher(ContentSwitcher):
     def set_sparql(self, content: SparqlContent | None) -> None:
         """Fill the SPARQL pane with the given row's query."""
         self.query_one(SparqlPane).content = content
-
-    def replot(self) -> None:
-        """Redraw the plot; a no-op while the SPARQL pane is shown."""
-        self.query_one(ResourcePlotPane).replot()

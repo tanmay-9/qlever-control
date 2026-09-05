@@ -1,8 +1,9 @@
 """Dual-axis RSS and CPU plot, shared by the inline pane and the modal.
 
-Draws from a source callable rather than owning data, so the same widget
-serves Live's rolling window and Historic's fixed span. Ticks are picked
-by hand because plotext's defaults crowd a short terminal pane.
+Draws the window the screen hands it and owns no data of its own, so the
+same widget serves Live's rolling window and Historic's fixed span.
+Axis ticks are picked by hand because plotext's defaults crowd a short
+terminal pane.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import NamedTuple
 
+from textual.reactive import Reactive
 from textual_plotext import PlotextPlot
 
 from qlever.monitor_queries.models import (
@@ -211,35 +213,35 @@ LABEL_GAP = 2
 class ResourcePlotPane(PlotextPlot):
     """Dual-axis RSS and CPU plot over a time window.
 
-    Takes a source that returns the points to draw and an optional
-    refresh interval. With an interval the plot replots on a timer and
-    rolls forward, for the Live window; without one it draws once and
-    stays fixed, for a historic span.
+    Draws the window the screen hands it, so the same widget serves
+    Live's rolling window and Historic's fixed span.
     """
 
     can_focus = False
 
+    window = Reactive(None, init=False)
+
     def __init__(
         self,
-        source: Callable[[], ResourceWindow],
-        refresh_interval: float | None = None,
+        window: ResourceWindow,
         reload: Callable[[int], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.source = source
-        self.refresh_interval = refresh_interval
+        self.set_reactive(ResourcePlotPane.window, window)
         self.reload = reload
         self.last_budget = None
 
     def on_mount(self) -> None:
-        """Draw once; with an interval, also replot on a timer to roll."""
+        """Draw once, and again whenever the theme's colors change."""
         self.replot()
-        if self.refresh_interval is not None:
-            self.set_interval(self.refresh_interval, self.replot)
         self.app.theme_changed_signal.subscribe(
             self, lambda theme: self.replot()
         )
+
+    def watch_window(self) -> None:
+        """Redraw with the window the screen just handed down."""
+        self.replot()
 
     def on_resize(self) -> None:
         """Redraw at the new size, and re-read if the pane got wider.
@@ -262,7 +264,7 @@ class ResourcePlotPane(PlotextPlot):
         """
         if not self.display:
             return
-        window = self.source()
+        window = self.window
         legend = marker_legend(window, self.app.current_theme.dark)
         self.tooltip = legend or None
         self.plt.clear_figure()

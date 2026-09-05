@@ -24,39 +24,29 @@ from qlever.monitor_queries.widgets.resource_plot_pane import ResourcePlotPane
 class ResourcePlotModal(ModalScreen):
     """Shows the resource plot full screen.
 
-    The pane draws itself; this screen only frames it and closes it.
-    Historic passes a reader, so the window is read again at the bigger
-    size and the plot gains detail. Live reads from its buffer instead.
+    Opens on the window the inline pane is showing, and only frames it
+    and closes it. Historic passes a reader, so the window is read again
+    at the bigger size and the plot gains detail. Live keeps this plot
+    rolling by handing it fresh readings on its timer.
     """
 
     BINDINGS = [Binding("escape", "close", "Close")]
 
     def __init__(
         self,
-        source: Callable[[], ResourceWindow],
-        refresh_interval: float | None = None,
+        window: ResourceWindow,
         reader: Callable[[int, Callable[[], bool]], ResourceWindow]
         | None = None,
     ) -> None:
         super().__init__()
-        self.source = source
-        self.refresh_interval = refresh_interval
+        self.window = window
         self.reader = reader
-        self.plot = None
 
     def compose(self) -> ComposeResult:
         reload = self.load_plot if self.reader is not None else None
         with Vertical(id="resource-plot-modal"):
-            yield ResourcePlotPane(
-                self.pane_source, self.refresh_interval, reload
-            )
+            yield ResourcePlotPane(self.window, reload)
         yield Footer(show_command_palette=False)
-
-    def pane_source(self) -> ResourceWindow:
-        """Draw the re-read plot once we have it, else the initial one."""
-        if self.plot is not None:
-            return self.plot
-        return self.source()
 
     @work(thread=True, exclusive=True)
     def load_plot(self, max_points: int) -> None:
@@ -67,15 +57,14 @@ class ResourcePlotModal(ModalScreen):
         result if the modal closed while reading.
         """
         worker = get_current_worker()
-        plot = self.reader(max_points, lambda: worker.is_cancelled)
+        resource_window = self.reader(max_points, lambda: worker.is_cancelled)
         if worker.is_cancelled or not self.is_current:
             return
-        self.app.call_from_thread(self.apply_plot, plot)
+        self.app.call_from_thread(self.apply_plot, resource_window)
 
-    def apply_plot(self, plot: ResourceWindow) -> None:
-        """Store the re-read plot and redraw the pane."""
-        self.plot = plot
-        self.query_one(ResourcePlotPane).replot()
+    def apply_plot(self, resource_window: ResourceWindow) -> None:
+        """Draw the readings that were re-read at this modal's width."""
+        self.query_one(ResourcePlotPane).window = resource_window
 
     def action_close(self) -> None:
         """Close the modal, unless a prior event already closed it."""

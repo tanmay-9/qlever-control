@@ -212,6 +212,15 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.log_start_ms if width is None else self.log_end_ms - width
         )
         self.window_end_ms = self.log_end_ms
+        # An empty window frames the selected time span until the first
+        # read lands, so the plot has axes to draw from the start.
+        self.resource_window = window_for_samples(
+            [],
+            self.app.capacity,
+            self.window_start_ms,
+            self.window_end_ms,
+            MIN_PLOT_POINTS,
+        )
         controls = ControlsState(
             window_size=self.window_size,
             mode=self.mode,
@@ -239,9 +248,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
         yield DetailSwitcher(
-            source=self.historic_resource_window,
-            refresh_interval=None,
-            reload=self.reread_resource_window,
+            self.resource_window, reload=self.reread_resource_window
         )
         yield Footer(show_command_palette=False)
 
@@ -412,26 +419,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.status_text(len(self.all_rows))
         )
         self.refresh_sort_indicator()
-        self.query_one(DetailSwitcher).replot()
-
-    def historic_resource_window(self) -> ResourceWindow:
-        """Return the resource readings for the selected time window.
-
-        They are read on the refresh_data worker when the time window
-        changes and held in `self.resource_window`, so this hands them
-        back directly. A resize or theme redraw reuses them rather than
-        re-reading the log. Before the first read, an empty resource
-        window frames the selected time window.
-        """
-        if self.resource_window is not None:
-            return self.resource_window
-        return window_for_samples(
-            [],
-            self.app.capacity,
-            self.window_start_ms,
-            self.window_end_ms,
-            MIN_PLOT_POINTS,
-        )
+        self.app.push_resource_window(self.resource_window)
 
     @work(thread=True, exclusive=True, group="reread_resource_window")
     def reread_resource_window(self, max_points: int) -> None:
@@ -456,9 +444,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.app.call_from_thread(self.apply_resource_window, resource_window)
 
     def apply_resource_window(self, resource_window: ResourceWindow) -> None:
-        """Store the re-read readings and redraw the pane if shown."""
+        """Store the re-read readings and hand them to the plot."""
         self.resource_window = resource_window
-        self.query_one(DetailSwitcher).replot()
+        self.app.push_resource_window(resource_window)
 
     def action_show_plot(self) -> None:
         """Switch the detail pane to the resource plot.
@@ -488,9 +476,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             )
 
         self.app.push_screen(
-            ResourcePlotModal(
-                source=self.historic_resource_window, reader=read_window
-            )
+            ResourcePlotModal(self.resource_window, reader=read_window)
         )
 
     def action_show_sparql(self) -> None:
