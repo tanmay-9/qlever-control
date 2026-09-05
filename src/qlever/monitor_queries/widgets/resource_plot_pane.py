@@ -8,10 +8,10 @@ terminal pane.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import datetime
 from typing import NamedTuple
 
+from textual.message import Message
 from textual.reactive import Reactive
 from textual_plotext import PlotextPlot
 
@@ -71,17 +71,17 @@ def event_color(kind: str, dark: bool) -> RgbColor:
     return style.dark if dark else style.light
 
 
-# A plot column holds 2 braille dots across, so 2 points per usable
+# A plot column holds 2 braille dots across, so 2 buckets per usable
 # column is the most the plot can resolve; more just overplots. Reserve
 # columns for the two y-axis label gutters.
 Y_AXIS_CHROME = 16
-MIN_PLOT_POINTS = 60
+MIN_BUCKETS = 60
 
 
-def point_budget(width: int) -> int:
-    """Points worth plotting for a pane this wide (2 per braille column)."""
+def buckets_for_width(width: int) -> int:
+    """Buckets worth reading for a pane this wide (2 per braille column)."""
     usable_cols = max(10, width - Y_AXIS_CHROME)
-    return max(MIN_PLOT_POINTS, usable_cols * 2)
+    return max(MIN_BUCKETS, usable_cols * 2)
 
 
 # Interior rows = pane height minus the two borders and the x-axis label
@@ -219,18 +219,23 @@ class ResourcePlotPane(PlotextPlot):
 
     can_focus = False
 
+    class BucketsChanged(Message):
+        """Posted when a resize changes how many buckets the pane fits.
+
+        Bubbles up so whoever holds the readings decides whether they
+        are worth re-reading at the new width.
+        """
+
+        def __init__(self, buckets: int) -> None:
+            super().__init__()
+            self.buckets = buckets
+
     window = Reactive(None, init=False)
 
-    def __init__(
-        self,
-        window: ResourceWindow,
-        reload: Callable[[int], None] | None = None,
-        **kwargs,
-    ) -> None:
+    def __init__(self, window: ResourceWindow, **kwargs) -> None:
         super().__init__(**kwargs)
         self.set_reactive(ResourcePlotPane.window, window)
-        self.reload = reload
-        self.last_budget = None
+        self.last_buckets = None
 
     def on_mount(self) -> None:
         """Draw once, and again whenever the theme's colors change."""
@@ -244,18 +249,18 @@ class ResourcePlotPane(PlotextPlot):
         self.replot()
 
     def on_resize(self) -> None:
-        """Redraw at the new size, and re-read if the pane got wider.
+        """Redraw at the new size, and say so if the bucket count moved.
 
-        A visible pane whose point budget changed asks the owner to
-        re-read, so a wider pane shows more detail. A hidden pane has
+        Staying quiet unless the count moved keeps a resize that only
+        changed the height from asking for a re-read. A hidden pane has
         width 0 and is skipped.
         """
         self.replot()
-        if self.reload is not None and self.size.width > 0:
-            budget = point_budget(self.size.width)
-            if budget != self.last_budget:
-                self.last_budget = budget
-                self.reload(budget)
+        if self.size.width > 0:
+            buckets = buckets_for_width(self.size.width)
+            if buckets != self.last_buckets:
+                self.last_buckets = buckets
+                self.post_message(self.BucketsChanged(buckets))
 
     def replot(self) -> None:
         """Draw the current window, and set the marker tooltip.

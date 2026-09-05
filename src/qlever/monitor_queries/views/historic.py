@@ -58,9 +58,9 @@ from qlever.monitor_queries.widgets.mode_picker import MODES, ModePicker
 from qlever.monitor_queries.widgets.nav_pill import NavPill
 from qlever.monitor_queries.widgets.query_table import HistoricQueryTable
 from qlever.monitor_queries.widgets.resource_plot_pane import (
-    MIN_PLOT_POINTS,
+    MIN_BUCKETS,
     ResourcePlotPane,
-    point_budget,
+    buckets_for_width,
 )
 from qlever.monitor_queries.widgets.selected_window import SelectedWindow
 from qlever.monitor_queries.widgets.timeline import Timeline
@@ -219,7 +219,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.app.capacity,
             self.window_start_ms,
             self.window_end_ms,
-            MIN_PLOT_POINTS,
+            MIN_BUCKETS,
         )
         controls = ControlsState(
             window_size=self.window_size,
@@ -247,9 +247,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         yield Static("", id="filter-row")
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
-        yield DetailSwitcher(
-            self.resource_window, reload=self.reread_resource_window
-        )
+        yield DetailSwitcher(self.resource_window)
         yield Footer(show_command_palette=False)
 
     def on_mount(self) -> None:
@@ -328,16 +326,16 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Collapse a fast window scrub into one scan of where the user lands."""
         if self.rescan_timer is not None:
             self.rescan_timer.stop()
-        max_points = point_budget(self.query_one(ResourcePlotPane).size.width)
+        buckets = buckets_for_width(
+            self.query_one(ResourcePlotPane).size.width
+        )
         self.rescan_timer = self.set_timer(
             RESCAN_DEBOUNCE_S,
-            lambda: self.refresh_data(rescan=True, max_points=max_points),
+            lambda: self.refresh_data(rescan=True, buckets=buckets),
         )
 
     @work(thread=True, exclusive=True, group="refresh_data")
-    def refresh_data(
-        self, rescan: bool, max_points: int = MIN_PLOT_POINTS
-    ) -> None:
+    def refresh_data(self, rescan: bool, buckets: int = MIN_BUCKETS) -> None:
         """Scan and/or re-filter the window, push rows + metrics + status.
 
         On `rescan` the log is read into a fresh list of window queries
@@ -372,7 +370,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
                 self.app.capacity,
                 self.window_start_ms,
                 self.window_end_ms,
-                max_points,
+                buckets,
                 should_cancel=lambda: worker.is_cancelled,
             )
             if worker.is_cancelled:
@@ -422,13 +420,14 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.app.push_resource_window(self.resource_window)
 
     @work(thread=True, exclusive=True, group="reread_resource_window")
-    def reread_resource_window(self, max_points: int) -> None:
+    def reread_resource_window(self, buckets: int) -> None:
         """Re-read the resource readings at a new width, off the UI thread.
 
-        The inline pane calls this when a resize changes its point budget.
-        An exclusive worker means a fast drag cancels superseded reads, so
-        only the final width lands. Reads the resource log alone, not the
-        query table, which a resize has no reason to redo.
+        A resized plot says how many buckets it now fits, whether it is
+        the inline one or the maximized one. An exclusive worker means a
+        fast drag cancels superseded reads, so only the final width
+        lands. Reads the resource log alone, not the query table, which
+        a resize has no reason to redo.
         """
         worker = get_current_worker()
         resource_window = read_resource_window(
@@ -436,7 +435,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.app.capacity,
             self.window_start_ms,
             self.window_end_ms,
-            max_points,
+            buckets,
             should_cancel=lambda: worker.is_cancelled,
         )
         if worker.is_cancelled:
@@ -459,25 +458,11 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def action_maximize_plot(self) -> None:
         """Open the resource plot as a full-screen modal.
 
-        The modal first shows the inline plot, then re-reads the window at
-        its own wider width so maximizing shows more detail. read_window
-        carries the window and log the modal does not know; the modal
-        supplies the point budget for its width.
+        The modal opens on the readings the inline plot is showing. Its
+        wider pane then fits more buckets and says so, which brings back
+        a window read at that size, so maximizing shows more detail.
         """
-
-        def read_window(max_points, should_cancel):
-            return read_resource_window(
-                self.app.resource_log,
-                self.app.capacity,
-                self.window_start_ms,
-                self.window_end_ms,
-                max_points,
-                should_cancel=should_cancel,
-            )
-
-        self.app.push_screen(
-            ResourcePlotModal(self.resource_window, reader=read_window)
-        )
+        self.app.push_screen(ResourcePlotModal(self.resource_window))
 
     def action_show_sparql(self) -> None:
         """Switch the detail pane to the SPARQL query."""

@@ -6,8 +6,6 @@ state: the plot its window, the SPARQL view its scroll position.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from textual.app import ComposeResult
 from textual.widgets import ContentSwitcher
 
@@ -29,18 +27,13 @@ class DetailSwitcher(ContentSwitcher):
 
     can_focus = False
 
-    def __init__(
-        self,
-        window: ResourceWindow,
-        reload: Callable[[int], None] | None = None,
-    ) -> None:
+    def __init__(self, window: ResourceWindow) -> None:
         super().__init__(initial=PLOT_ID)
         self.window = window
-        self.reload = reload
 
     def compose(self) -> ComposeResult:
         yield SparqlPane(id=SPARQL_ID)
-        yield ResourcePlotPane(self.window, self.reload, id=PLOT_ID)
+        yield ResourcePlotPane(self.window, id=PLOT_ID)
 
     def show_plot(self) -> None:
         """Switch to the resource plot pane."""

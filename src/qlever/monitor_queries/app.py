@@ -183,6 +183,20 @@ class MonitorQueriesApp(App):
             for pane in screen.query(ResourcePlotPane):
                 pane.window = window
 
+    def on_resource_plot_pane_buckets_changed(
+        self, event: ResourcePlotPane.BucketsChanged
+    ) -> None:
+        """Let Historic re-read its readings at the plot's new width.
+
+        Live has nothing to do here, because its window is the buffer it
+        already holds and a width cannot change that. This sits on the
+        app because a maximized plot has no log of its own to read, and
+        the app can find the screen that has one.
+        """
+        for screen in self.screen_stack:
+            if isinstance(screen, HistoricScreen):
+                screen.reread_resource_window(event.buckets)
+
     def action_swap_screen(self) -> None:
         """Toggle between Live and Historic (bound to Tab on each screen)."""
         target = "historic" if isinstance(self.screen, LiveScreen) else "live"
