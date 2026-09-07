@@ -32,24 +32,21 @@ def load_color(ratio: float) -> str:
 
 
 def column_values(
-    series: ResourceSeries,
-    times_s: tuple[float, ...],
-    start_s: float,
-    end_s: float,
-    width: int,
+    series: ResourceSeries, window: ResourceWindow, width: int
 ) -> list[float]:
     """One bar height per terminal column, placed by the reading's time.
 
-    An empty column stays at zero, so a young server draws only at the
+    The window frames the time axis the readings are placed along. An
+    empty column stays at zero, so a young server draws only at the
     right and an outage leaves a real gap. A column holding several
     readings shows the largest, so a spike survives.
     """
-    span_s = end_s - start_s
+    span_s = window.end_s - window.start_s
     if span_s <= 0:
         return [0.0] * width
     columns = [0.0] * width
-    for value, time_s in zip(series.values, times_s):
-        index = int((time_s - start_s) / span_s * width)
+    for value, time_s in zip(series.values, window.times_s):
+        index = int((time_s - window.start_s) / span_s * width)
         index = min(max(index, 0), width - 1)
         columns[index] = max(columns[index], value)
     return columns
@@ -104,8 +101,8 @@ class ResourceSparkline(Static):
         """This sparkline's column, which the log always carries."""
         return self.window.series[self.key]
 
-    def watch_window(self, window: ResourceWindow) -> None:
-        self.border_title = series_title(window.series[self.key], self.stale)
+    def watch_window(self) -> None:
+        self.border_title = series_title(self.series, self.stale)
 
     def watch_stale(self, stale: bool) -> None:
         self.border_title = series_title(self.series, stale)
@@ -121,13 +118,7 @@ class ResourceSparkline(Static):
             return Text()
         # One (height, color) per column, both from the curved load.
         cells = []
-        for value in column_values(
-            series,
-            self.window.times_s,
-            self.window.start_s,
-            self.window.end_s,
-            width,
-        ):
+        for value in column_values(series, self.window, width):
             load = min(1.0, max(0.0, value / total))
             # The curve expands the low band the process actually uses and
             # compresses the top it never reaches

@@ -17,7 +17,6 @@ from qlever.monitor_queries.live_data import (
     discard_finished_backlog,
     get_live_metrics,
     get_live_query_rows,
-    get_live_resource_window,
     is_log_fresh,
 )
 from qlever.monitor_queries.models import (
@@ -29,6 +28,7 @@ from qlever.monitor_queries.resource_data import (
     LIVE_RESOURCE_WINDOW_MS,
     SampleBuffer,
     is_sample_fresh,
+    window_for_samples,
 )
 from qlever.monitor_queries.resource_reader import Sample, SampleTail
 from qlever.monitor_queries.views.resource_plot_modal import (
@@ -339,12 +339,15 @@ class LiveScreen(Screen, inherit_bindings=False):
         """Snapshot the buffer as the rolling 5-minute window.
 
         One bucket per sampling interval, so the sparklines and the plot
-        keep every reading the buffer holds.
+        keep every reading the buffer holds. The clock is read once, so
+        the window's start and end are the same instant.
         """
-        return get_live_resource_window(
-            self.resource_samples,
+        now_ms = current_ms()
+        return window_for_samples(
+            self.resource_samples.samples,
             self.capacity,
-            current_ms(),
+            now_ms - LIVE_RESOURCE_WINDOW_MS,
+            now_ms,
             self.resource_samples.size,
         )
 

@@ -268,7 +268,7 @@ def window_for_samples(
                         running[column.key][index] = max(
                             running[column.key][index], raw
                         )
-                    else:
+                    elif column.reduce == "mean":
                         running[column.key][index] += raw
                     counts[column.key][index] += 1
 

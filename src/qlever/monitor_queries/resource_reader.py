@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-# Bytes to read from the tail per buffered row when seeding, a generous
-# 64 so the whole window always fits however large the log grew.
-SEED_BYTES_PER_ROW = 64
+# Bytes to read from the tail per buffered row when seeding. A full row
+# runs to about 80 bytes, so 96 always covers the whole window.
+SEED_BYTES_PER_ROW = 96
 
 # Backup before the bisect's landing offset, so the forward scan never
 # skips the boundary line when it lands exactly on a line start.
@@ -72,7 +72,7 @@ def log_has_new_columns(log_path: Path) -> bool:
 def optional_cell(
     text: str, convert: Callable[[str], float | int]
 ) -> float | int | None:
-    """Convert one optional column cell, or None if empty"""
+    """Convert one optional column cell, or None if empty."""
     text = text.strip()
     return convert(text) if text else None
 
