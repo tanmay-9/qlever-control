@@ -39,11 +39,6 @@ class DetailSwitcher(ContentSwitcher):
         yield SparqlPane(id=SPARQL_ID)
         yield ResourcePlotPane(self.window, PLOTS[0], id=PLOT_ID)
 
-    @property
-    def plot(self) -> Plot:
-        """The plot the pane is showing, for the modal to open on."""
-        return self.query_one(ResourcePlotPane).plot
-
     def show_plot(self, offered: list[Plot]) -> None:
         """Switch to the resource plot, or step to the next one.
 

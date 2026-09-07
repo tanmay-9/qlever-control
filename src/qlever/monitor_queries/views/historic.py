@@ -462,13 +462,15 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def action_maximize_plot(self) -> None:
         """Open the resource plot as a full-screen modal.
 
-        The modal opens on the readings the inline plot is showing. Its
-        wider pane then fits more buckets and says so, which brings back
-        a window read at that size, so maximizing shows more detail.
+        Shows every plot this log can carry, on the readings the inline
+        plot is showing. A wider pane then fits more buckets and says
+        so, which brings back a window read at that size, so maximizing
+        shows more detail as well as more plots.
         """
         self.app.push_screen(
             ResourcePlotModal(
-                self.resource_window, self.query_one(DetailSwitcher).plot
+                self.resource_window,
+                available_plots(log_has_new_columns(self.app.resource_log)),
             )
         )
 

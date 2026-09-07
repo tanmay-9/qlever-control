@@ -1,8 +1,10 @@
-"""Full-screen modal showing the resource plot.
+"""Full-screen modal showing every resource plot at once.
 
-The pane inside does the drawing. This modal only frames it and closes
-it. The bigger pane fits more buckets, and it says so when it resizes,
-so the screen that holds the readings can send a more detailed window.
+The panes inside do the drawing. This modal only stacks them, frames
+them and closes them. They all read the same window, so the same moment
+in time is at the same place in each, and the whole stack is one read:
+a bigger pane fits more buckets and says so when it resizes, so the
+screen that holds the readings can send a more detailed window.
 """
 
 from __future__ import annotations
@@ -18,27 +20,37 @@ from qlever.monitor_queries.widgets.footer import Footer
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     Plot,
     ResourcePlotPane,
+    label_width,
 )
 
 
 class ResourcePlotModal(ModalScreen):
-    """Shows the resource plot full screen.
+    """Shows the plots this log can carry, stacked, full screen.
 
     Opens on the window the inline pane is showing. After that the
-    screen keeps it up to date: Historic sends the window it re-reads at
-    this size, and Live sends fresh readings on its timer.
+    screen keeps every pane up to date: Historic sends the window it
+    re-reads at this size, and Live sends fresh readings on its timer.
     """
 
     BINDINGS = [Binding("escape", "close", "Close")]
 
-    def __init__(self, window: ResourceWindow, plot: Plot) -> None:
+    def __init__(self, window: ResourceWindow, plots: list[Plot]) -> None:
         super().__init__()
         self.window = window
-        self.plot = plot
+        self.plots = plots
 
     def compose(self) -> ComposeResult:
+        # One width for the whole stack, since a pane only knows its own
+        # numbers and the gutters have to come out the same size.
+        width = label_width(self.window, self.plots)
         with Vertical(id="resource-plot-modal"):
-            yield ResourcePlotPane(self.window, self.plot)
+            for plot in self.plots:
+                yield ResourcePlotPane(
+                    self.window,
+                    plot,
+                    time_labels=plot is self.plots[-1],
+                    label_width=width,
+                )
         yield Footer(show_command_palette=False)
 
     def action_close(self) -> None:

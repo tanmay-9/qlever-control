@@ -1,16 +1,19 @@
 """Tests for the plot widget's scaling, series picking, and colors.
 
 These are the parts a plot definition drives: how far up an axis goes,
-which of a plot's columns the window actually has, and which color a
-line is drawn in. Drawing itself is left to the widget.
+which of a plot's columns the window actually has, which color a line
+is drawn in, which plots a log can carry, and how wide a stack pads its
+labels. Drawing itself is left to the widget.
 """
 
 from qlever.monitor_queries.models import ResourceSeries, ResourceWindow
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     PLOTS,
+    Plot,
     available_plots,
     axis_top,
     empty_note,
+    label_width,
     line_color,
     series_for_keys,
 )
@@ -115,6 +118,41 @@ def test_an_empty_window_says_it_has_no_samples():
 def test_a_window_missing_only_this_plot_names_the_plot():
     win = window(series("rss", (1.0,), total=32.9))
     assert empty_note(win, PLOTS[1]) == "No Disk I/O readings in this window"
+
+
+def test_label_width_takes_the_longest_number_in_the_stack():
+    win = window(
+        series("rss", (7.0,), total=32.9),
+        series("cpu_percent", (400.0,), total=16.0),
+        series("read_bytes_per_s", (2.0,)),
+        series("write_bytes_per_s", (6000.0,)),
+    )
+    stack = [
+        Plot(name="A", left=("rss",), right=("cpu_percent",)),
+        Plot(
+            name="B", left=("read_bytes_per_s", "write_bytes_per_s"), right=()
+        ),
+    ]
+    # 33, 16 and 2 are two digits or fewer; 6000 is four.
+    assert label_width(win, stack) == 4
+
+
+def test_label_width_of_one_plot_is_its_own_longest():
+    win = window(
+        series("rss", (7.0,), total=32.9),
+        series("cpu_percent", (400.0,), total=16.0),
+    )
+    assert label_width(win, [PLOTS[0]]) == 2
+
+
+def test_label_width_counts_the_zero_of_a_side_with_no_series():
+    win = window(series("rss", (7.0,), total=32.9))
+    only_absent = Plot(name="A", left=("io_stall_percent",), right=())
+    assert label_width(win, [only_absent]) == 1
+
+
+def test_label_width_of_no_plots_pads_nothing():
+    assert label_width(window(), []) == 0
 
 
 def test_left_axis_gives_each_series_its_own_color():

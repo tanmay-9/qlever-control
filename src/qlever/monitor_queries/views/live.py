@@ -370,13 +370,14 @@ class LiveScreen(Screen, inherit_bindings=False):
     def action_maximize_plot(self) -> None:
         """Open the resource plot as a full-screen modal.
 
-        Opens on the window the inline pane is showing. The resource
-        timer reaches the modal's pane as well, so it keeps rolling.
+        Shows every plot this log can carry, on the window the inline
+        pane is showing. The resource timer reaches the modal's panes as
+        well, so they keep rolling.
         """
         self.app.push_screen(
             ResourcePlotModal(
                 self.live_resource_window(),
-                self.query_one(DetailSwitcher).plot,
+                available_plots(log_has_new_columns(self.app.resource_log)),
             )
         )
 

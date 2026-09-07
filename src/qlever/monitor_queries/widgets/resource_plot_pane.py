@@ -174,6 +174,22 @@ def axis_top(window: ResourceWindow, keys: tuple[str, ...]) -> float:
     return top
 
 
+def label_width(window: ResourceWindow, plots: list[Plot]) -> int:
+    """Digits in the longest y label these plots print for this window.
+
+    plotext sizes its gutters from the longest label it has, so stacked
+    plots whose numbers differ in length start their data at different
+    columns and the same moment does not line up down the stack.
+    Padding every label to this width lines them up.
+    """
+    width = 0
+    for plot in plots:
+        for keys in (plot.left, plot.right):
+            highest = axis_top(window, keys)
+            width = max(width, len(str(round(highest))))
+    return width
+
+
 def clock_ticks(
     start_s: float, end_s: float, count: int = 5
 ) -> tuple[list[float], list[str]]:
@@ -337,10 +353,23 @@ class ResourcePlotPane(PlotextPlot):
     window = Reactive(None, init=False)
     plot = Reactive(None, init=False)
 
-    def __init__(self, window: ResourceWindow, plot: Plot, **kwargs) -> None:
+    def __init__(
+        self,
+        window: ResourceWindow,
+        plot: Plot,
+        time_labels: bool = True,
+        label_width: int = 0,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self.set_reactive(ResourcePlotPane.window, window)
         self.set_reactive(ResourcePlotPane.plot, plot)
+        # Stacked plots share one clock row, printed under the last of
+        # them, so the ones above give their row back to the data.
+        self.time_labels = time_labels
+        # Width to pad the y labels to, so a stack's gutters come out
+        # the same size. Zero for a plot drawn on its own.
+        self.label_width = label_width
         self.last_buckets = None
 
     def on_mount(self) -> None:
@@ -389,6 +418,10 @@ class ResourcePlotPane(PlotextPlot):
         self.draw_series(window, plot, left_axis_max)
         self.refresh()
 
+    def padded(self, labels: list[str]) -> list[str]:
+        """Right-justify y labels so a stack's gutters match."""
+        return [label.rjust(self.label_width) for label in labels]
+
     def draw_axes(
         self, window: ResourceWindow, plot: Plot
     ) -> tuple[float, float | None]:
@@ -396,7 +429,8 @@ class ResourcePlotPane(PlotextPlot):
 
         Returns the two axis maximums the labels anchor to. The right
         one is None when the window has nothing to read against it, so
-        that axis gets no ticks.
+        that axis gets no ticks. Labels are padded to `label_width`,
+        which lines a stack's gutters up and is zero on its own.
         """
         plt = self.plt
         left_top = axis_top(window, plot.left)
@@ -409,18 +443,23 @@ class ResourcePlotPane(PlotextPlot):
             left_top, count, gaps
         )
         plt.ylim(0, left_axis_max, yside="left")
-        plt.yticks(left_positions, left_labels, yside="left")
+        plt.yticks(left_positions, self.padded(left_labels), yside="left")
         right_axis_max = None
         if right_top > 0:
             right_axis_max, right_positions, right_labels = axis_ticks(
                 right_top, count, gaps
             )
             plt.ylim(0, right_axis_max, yside="right")
-            plt.yticks(right_positions, right_labels, yside="right")
+            plt.yticks(
+                right_positions, self.padded(right_labels), yside="right"
+            )
         else:
             plt.ylim(0, None, yside="right")
-        positions, labels = clock_ticks(window.start_s, window.end_s)
-        plt.xticks(positions, labels)
+        if self.time_labels:
+            positions, labels = clock_ticks(window.start_s, window.end_s)
+            plt.xticks(positions, labels)
+        else:
+            plt.xticks([], [])
         return left_axis_max, right_axis_max
 
     def draw_labels(
