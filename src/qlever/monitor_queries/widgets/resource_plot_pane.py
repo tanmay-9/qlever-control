@@ -4,6 +4,7 @@ Draws the window the screen hands it and owns no data of its own, so the
 same widget serves Live's rolling window and Historic's fixed span. A
 `Plot` says which columns to draw and on which axis, so one widget draws
 every plot.
+
 Axis ticks are picked by hand because plotext's defaults crowd a short
 terminal pane.
 """
@@ -23,6 +24,7 @@ from qlever.monitor_queries.models import (
     ResourceSeries,
     ResourceWindow,
 )
+from qlever.monitor_queries.resource_reader import REQUIRED_COLUMNS
 
 RgbColor = tuple[int, int, int]
 
@@ -268,7 +270,43 @@ class Plot(NamedTuple):
 
 
 # One row per plot, in the order they are offered.
-PLOTS = (Plot(name="Memory and CPU", left=("rss",), right=("cpu_percent",)),)
+PLOTS = (
+    Plot(name="Memory and CPU", left=("rss",), right=("cpu_percent",)),
+    Plot(
+        name="Disk I/O",
+        left=("read_bytes_per_s", "write_bytes_per_s"),
+        right=("io_stall_percent",),
+    ),
+)
+
+
+def empty_note(window: ResourceWindow, plot: Plot) -> str:
+    """Why a plot drew no lines: no samples at all, or none of its own.
+
+    A machine that does not measure a column reports it blank, so the
+    log can carry a plot that this server never fills in.
+    """
+    if window.times_s:
+        return f"No {plot.name} readings in this window"
+    return "No samples in this window"
+
+
+def available_plots(log_has_new_columns: bool) -> list[Plot]:
+    """The plots a log of this format can carry.
+
+    An older log holds only the columns every log has, so a plot
+    needing any other one has nothing to draw from and is not offered.
+    Whether a machine or a window actually reported a column is a
+    separate question, answered in the plot itself.
+    """
+    if log_has_new_columns:
+        return list(PLOTS)
+    return [
+        plot
+        for plot in PLOTS
+        if all(key in REQUIRED_COLUMNS for key in plot.left + plot.right)
+    ]
+
 
 # The plot name and the axis names share the plot's top row, so the
 # name is drawn only when they all fit with a gap between them.
@@ -460,7 +498,7 @@ class ResourcePlotPane(PlotextPlot):
     def draw_series(
         self, window: ResourceWindow, plot: Plot, left_axis_max: float
     ) -> None:
-        """Plot this plot's lines, or a note when the window is empty.
+        """Plot this plot's lines, or a note when it has none to draw.
 
         The lines are broken across each restart's downtime. Vlines mark
         the server going down and coming back, and an index rebuild
@@ -468,27 +506,33 @@ class ResourcePlotPane(PlotextPlot):
         """
         dark = self.app.current_theme.dark
         plt = self.plt
-        if window.times_s:
-            for side, keys in (("left", plot.left), ("right", plot.right)):
-                for index, series in enumerate(series_for_keys(window, keys)):
-                    times, values = break_at_restarts(
-                        window.times_s, series.values, window.events
-                    )
-                    plt.plot(
-                        times,
-                        values,
-                        yside=side,
-                        marker="braille",
-                        color=line_color(side, index, dark),
-                    )
-        else:
+        # The index is the series' place on its side, which picks its
+        # color, so it is taken before the empty ones are dropped.
+        lines = [
+            (side, index, series)
+            for side, keys in (("left", plot.left), ("right", plot.right))
+            for index, series in enumerate(series_for_keys(window, keys))
+            if series.values
+        ]
+        for side, index, series in lines:
+            times, values = break_at_restarts(
+                window.times_s, series.values, window.events
+            )
+            plt.plot(
+                times,
+                values,
+                yside=side,
+                marker="braille",
+                color=line_color(side, index, dark),
+            )
+        if not lines:
             # plotext only draws a y-axis for a side that has data, so an
-            # empty window would frame the left axis but not the right.
+            # empty plot would frame the left axis but not the right.
             # Anchor an invisible point on each side to keep both framed.
             plt.plot([window.start_s], [0], yside="left", marker=" ")
             plt.plot([window.start_s], [0], yside="right", marker=" ")
             plt.text(
-                "No samples in this window",
+                empty_note(window, plot),
                 (window.start_s + window.end_s) / 2,
                 left_axis_max / 2,
                 yside="left",

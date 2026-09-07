@@ -30,7 +30,11 @@ from qlever.monitor_queries.resource_data import (
     is_sample_fresh,
     window_for_samples,
 )
-from qlever.monitor_queries.resource_reader import Sample, SampleTail
+from qlever.monitor_queries.resource_reader import (
+    Sample,
+    SampleTail,
+    log_has_new_columns,
+)
 from qlever.monitor_queries.views.resource_plot_modal import (
     ResourcePlotModal,
 )
@@ -43,6 +47,7 @@ from qlever.monitor_queries.widgets.header_row import HeaderRow
 from qlever.monitor_queries.widgets.metrics_row import MetricsRow
 from qlever.monitor_queries.widgets.nav_pill import NavPill
 from qlever.monitor_queries.widgets.query_table import LiveQueryTable
+from qlever.monitor_queries.widgets.resource_plot_pane import available_plots
 from qlever.monitor_queries.widgets.resource_row import ResourceRow
 from qlever.monitor_queries.widgets.resource_sparkline import ResourceSparkline
 from qlever.monitor_queries.widgets.sparql_pane import SELECT_ROW_HINT
@@ -57,8 +62,9 @@ class LiveScreen(Screen, inherit_bindings=False):
     BINDINGS = [
         Binding("tab", "app.swap_screen", "Historic>", priority=True),
         Binding("f", "toggle_freeze", "Freeze/Unfreeze"),
-        # One footer entry for both: r shows the pane, R the modal.
-        Binding("r", "show_plot", "Resource plot", key_display="r/R"),
+        # One footer entry for both: r shows the pane and steps through
+        # the plots, R opens the modal.
+        Binding("r", "show_plot", "Resource plots", key_display="r/R"),
         Binding("R", "maximize_plot", "Maximize plot", show=False),
         Binding("s", "show_sparql", "SPARQL"),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
@@ -352,8 +358,13 @@ class LiveScreen(Screen, inherit_bindings=False):
         )
 
     def action_show_plot(self) -> None:
-        """Switch the detail pane to the resource plot."""
-        self.query_one(DetailSwitcher).show_plot()
+        """Show the resource plot, or step to the next one.
+
+        The log's format is read now rather than at startup, since the
+        server may have begun writing it after this screen opened.
+        """
+        offered = available_plots(log_has_new_columns(self.app.resource_log))
+        self.query_one(DetailSwitcher).show_plot(offered)
         self.refresh_table_status()
 
     def action_maximize_plot(self) -> None:

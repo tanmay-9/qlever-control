@@ -7,7 +7,10 @@ line is drawn in. Drawing itself is left to the widget.
 
 from qlever.monitor_queries.models import ResourceSeries, ResourceWindow
 from qlever.monitor_queries.widgets.resource_plot_pane import (
+    PLOTS,
+    available_plots,
     axis_top,
+    empty_note,
     line_color,
     series_for_keys,
 )
@@ -91,6 +94,27 @@ def test_series_for_keys_drops_the_absent_ones():
 
 def test_series_for_keys_of_an_empty_window_is_empty():
     assert series_for_keys(window(), ("rss",)) == []
+
+
+def test_an_old_log_offers_only_the_plot_it_has_columns_for():
+    offered = available_plots(log_has_new_columns=False)
+    assert [plot.name for plot in offered] == ["Memory and CPU"]
+
+
+def test_a_new_log_offers_every_plot():
+    assert available_plots(log_has_new_columns=True) == list(PLOTS)
+
+
+def test_an_empty_window_says_it_has_no_samples():
+    win = ResourceWindow(
+        start_s=0.0, end_s=10.0, times_s=(), series={}, events=()
+    )
+    assert empty_note(win, PLOTS[0]) == "No samples in this window"
+
+
+def test_a_window_missing_only_this_plot_names_the_plot():
+    win = window(series("rss", (1.0,), total=32.9))
+    assert empty_note(win, PLOTS[1]) == "No Disk I/O readings in this window"
 
 
 def test_left_axis_gives_each_series_its_own_color():

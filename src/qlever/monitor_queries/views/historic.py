@@ -41,6 +41,7 @@ from qlever.monitor_queries.resource_data import (
     read_resource_window,
     window_for_samples,
 )
+from qlever.monitor_queries.resource_reader import log_has_new_columns
 from qlever.monitor_queries.util import oneline, truncate
 from qlever.monitor_queries.views.filter_modal import (
     FILTER_STATUSES,
@@ -60,6 +61,7 @@ from qlever.monitor_queries.widgets.query_table import HistoricQueryTable
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     MIN_BUCKETS,
     ResourcePlotPane,
+    available_plots,
     buckets_for_width,
 )
 from qlever.monitor_queries.widgets.selected_window import SelectedWindow
@@ -171,8 +173,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("i", "invert_sort", "Invert sort"),
         Binding("f", "edit_filter", "Filter"),
         Binding("F", "clear_filters", "Clear filters"),
-        # One footer entry for both: r shows the pane, R the modal.
-        Binding("r", "show_plot", "Resource plot", key_display="r/R"),
+        # One footer entry for both: r shows the pane and steps through
+        # the plots, R opens the modal.
+        Binding("r", "show_plot", "Resource plots", key_display="r/R"),
         Binding("R", "maximize_plot", "Maximize plot", show=False),
         Binding("s", "show_sparql", "SPARQL"),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
@@ -448,12 +451,13 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.app.push_resource_window(resource_window)
 
     def action_show_plot(self) -> None:
-        """Switch the detail pane to the resource plot.
+        """Show the resource plot, or step to the next one.
 
         Showing the hidden pane resizes it from zero, so its on_resize
-        redraws with the current window's plot; no explicit replot here.
+        redraws it; no explicit replot here.
         """
-        self.query_one(DetailSwitcher).show_plot()
+        offered = available_plots(log_has_new_columns(self.app.resource_log))
+        self.query_one(DetailSwitcher).show_plot(offered)
 
     def action_maximize_plot(self) -> None:
         """Open the resource plot as a full-screen modal.

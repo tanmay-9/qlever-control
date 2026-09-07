@@ -44,9 +44,19 @@ class DetailSwitcher(ContentSwitcher):
         """The plot the pane is showing, for the modal to open on."""
         return self.query_one(ResourcePlotPane).plot
 
-    def show_plot(self) -> None:
-        """Switch to the resource plot pane."""
-        self.current = PLOT_ID
+    def show_plot(self, offered: list[Plot]) -> None:
+        """Switch to the resource plot, or step to the next one.
+
+        A hidden plot is shown as it was left, so the first press never
+        moves it. `offered` is what this log can carry, and a plot no
+        longer in it steps back to the first.
+        """
+        if self.current != PLOT_ID:
+            self.current = PLOT_ID
+            return
+        pane = self.query_one(ResourcePlotPane)
+        place = offered.index(pane.plot) if pane.plot in offered else -1
+        pane.plot = offered[(place + 1) % len(offered)]
 
     def show_sparql(self) -> None:
         """Switch to the SPARQL pane."""
