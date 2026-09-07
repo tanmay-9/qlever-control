@@ -1,7 +1,9 @@
-"""Dual-axis RSS and CPU plot, shared by the inline pane and the modal.
+"""Dual-axis plot of a resource window, shared by the pane and the modal.
 
 Draws the window the screen hands it and owns no data of its own, so the
-same widget serves Live's rolling window and Historic's fixed span.
+same widget serves Live's rolling window and Historic's fixed span. A
+`Plot` says which columns to draw and on which axis, so one widget draws
+every plot.
 Axis ticks are picked by hand because plotext's defaults crowd a short
 terminal pane.
 """
@@ -9,6 +11,7 @@ terminal pane.
 from __future__ import annotations
 
 from datetime import datetime
+from math import isnan
 from typing import NamedTuple
 
 from textual.message import Message
@@ -23,12 +26,24 @@ from qlever.monitor_queries.models import (
 
 RgbColor = tuple[int, int, int]
 
-# Saturated line colors, one pair per theme background: deeper on a
-# light background, brighter on a dark one, so both stay legible.
-CPU_COLOR_LIGHT = (0, 150, 130)
-RSS_COLOR_LIGHT = (176, 25, 127)
-CPU_COLOR_DARK = (34, 211, 200)
-RSS_COLOR_DARK = (255, 105, 190)
+
+class AxisColors(NamedTuple):
+    """The colors one axis lends its lines, in the plot's series order."""
+
+    light: tuple[RgbColor, ...]
+    dark: tuple[RgbColor, ...]
+
+
+# Saturated on the left, one hue per series, and grey on the right,
+# which never holds more than one. Deeper colors on a light background
+# and brighter ones on a dark background, so both stay legible.
+AXIS_COLORS = {
+    "left": AxisColors(
+        light=((176, 25, 127), (0, 150, 130)),
+        dark=((255, 105, 190), (34, 211, 200)),
+    ),
+    "right": AxisColors(light=((100, 100, 100),), dark=((170, 170, 170),)),
+}
 
 
 class EventStyle(NamedTuple):
@@ -58,11 +73,14 @@ EVENT_STYLE = {
 }
 
 
-def series_colors(dark: bool) -> tuple[RgbColor, RgbColor]:
-    """Pick the (RSS, CPU) line colors for the active theme background."""
-    if dark:
-        return RSS_COLOR_DARK, CPU_COLOR_DARK
-    return RSS_COLOR_LIGHT, CPU_COLOR_LIGHT
+def line_color(side: str, index: int, dark: bool) -> RgbColor:
+    """Pick a line's color for the active theme background.
+
+    The color comes from the axis a line is read against, so the same
+    series looks the same on every plot it appears on.
+    """
+    colors = AXIS_COLORS[side]
+    return (colors.dark if dark else colors.light)[index]
 
 
 def event_color(kind: str, dark: bool) -> RgbColor:
@@ -131,6 +149,27 @@ def axis_ticks(
     axis_max = value_step * gaps / row_step
     positions = [value_step * index for index in range(count)]
     return axis_max, positions, [str(pos) for pos in positions]
+
+
+def axis_top(window: ResourceWindow, keys: tuple[str, ...]) -> float:
+    """Highest value one axis has to show, over all its series.
+
+    A column with a capacity is measured against it, so a light load
+    stays low instead of filling the plot. A column without a capacity
+    is measured against its largest reading, skipping the buckets where
+    it reported nothing. Zero when the window holds none of the keys.
+    """
+    top = 0.0
+    for key in keys:
+        series = window.series.get(key)
+        if series is None:
+            continue
+        if series.total is not None:
+            top = max(top, series.total)
+        else:
+            readings = [value for value in series.values if not isnan(value)]
+            top = max([top, *readings])
+    return top
 
 
 def clock_ticks(
@@ -204,17 +243,44 @@ def axis_label(series: ResourceSeries) -> str:
     return f"{series.label} ({series.unit})"
 
 
-# The plot name and the two series names share the plot's top row, so
-# the name is drawn only when all three fit with a gap between them.
-PLOT_NAME = "Memory and CPU"
+def series_for_keys(
+    window: ResourceWindow, keys: tuple[str, ...]
+) -> list[ResourceSeries]:
+    """The series one axis has, in plot order, skipping the absent keys.
+
+    Both the names and the lines are drawn from this list, so a name
+    always takes the color its own line was drawn in.
+    """
+    return [window.series[key] for key in keys if key in window.series]
+
+
+class Plot(NamedTuple):
+    """What one plot draws: a name, and the columns on each axis.
+
+    `left` and `right` hold log column keys, drawn against the left and
+    the right y-axis. A side's keys share a unit, because one axis
+    carries one unit label.
+    """
+
+    name: str
+    left: tuple[str, ...]
+    right: tuple[str, ...]
+
+
+# One row per plot, in the order they are offered.
+PLOTS = (Plot(name="Memory and CPU", left=("rss",), right=("cpu_percent",)),)
+
+# The plot name and the axis names share the plot's top row, so the
+# name is drawn only when they all fit with a gap between them.
 LABEL_GAP = 2
 
 
 class ResourcePlotPane(PlotextPlot):
-    """Dual-axis RSS and CPU plot over a time window.
+    """Dual-axis plot of one resource window.
 
-    Draws the window the screen hands it, so the same widget serves
-    Live's rolling window and Historic's fixed span.
+    Draws the window and the plot the screen hands it, so the same
+    widget serves Live's rolling window, Historic's fixed span, and
+    every plot in `PLOTS`.
     """
 
     can_focus = False
@@ -231,10 +297,12 @@ class ResourcePlotPane(PlotextPlot):
             self.buckets = buckets
 
     window = Reactive(None, init=False)
+    plot = Reactive(None, init=False)
 
-    def __init__(self, window: ResourceWindow, **kwargs) -> None:
+    def __init__(self, window: ResourceWindow, plot: Plot, **kwargs) -> None:
         super().__init__(**kwargs)
         self.set_reactive(ResourcePlotPane.window, window)
+        self.set_reactive(ResourcePlotPane.plot, plot)
         self.last_buckets = None
 
     def on_mount(self) -> None:
@@ -246,6 +314,10 @@ class ResourcePlotPane(PlotextPlot):
 
     def watch_window(self) -> None:
         """Redraw with the window the screen just handed down."""
+        self.replot()
+
+    def watch_plot(self) -> None:
+        """Redraw the same window as the plot it was just switched to."""
         self.replot()
 
     def on_resize(self) -> None:
@@ -269,58 +341,56 @@ class ResourcePlotPane(PlotextPlot):
         """
         if not self.display:
             return
-        window = self.window
+        window, plot = self.window, self.plot
         legend = marker_legend(window, self.app.current_theme.dark)
         self.tooltip = legend or None
         self.plt.clear_figure()
         self.plt.xlim(window.start_s, window.end_s)
-        rss_axis_max, cpu_axis_max = self.draw_axes(window)
-        self.draw_labels(window, rss_axis_max, cpu_axis_max)
-        self.draw_series(window, rss_axis_max)
+        left_axis_max, right_axis_max = self.draw_axes(window, plot)
+        self.draw_labels(window, plot, left_axis_max, right_axis_max)
+        self.draw_series(window, plot, left_axis_max)
         self.refresh()
 
-    def draw_axes(self, window: ResourceWindow) -> tuple[float, float | None]:
+    def draw_axes(
+        self, window: ResourceWindow, plot: Plot
+    ) -> tuple[float, float | None]:
         """Scale and label both y-axes and the x-axis for this window.
 
-        Returns the two axis maximums the labels anchor to. The CPU one
-        is None when the core count is unknown, so the right axis gets
-        no ticks.
+        Returns the two axis maximums the labels anchor to. The right
+        one is None when the window has nothing to read against it, so
+        that axis gets no ticks.
         """
         plt = self.plt
-        rss = window.series["rss"]
-        cpu = window.series["cpu_percent"]
-        # Base the right axis on the tallest CPU point when the core count
-        # is unknown.
-        cpu_top = (
-            cpu.total if cpu.total is not None else max(cpu.values, default=0)
-        )
+        left_top = axis_top(window, plot.left)
+        right_top = axis_top(window, plot.right)
         # Cap the shared tick count by the smaller axis so its labels stay
         # distinct.
-        smaller_top = min(rss.total, cpu_top) if cpu_top > 0 else rss.total
+        smaller_top = min(left_top, right_top) if right_top > 0 else left_top
         count, gaps = tick_layout(self.size.height, round(smaller_top) + 1)
-        rss_axis_max, rss_positions, rss_labels = axis_ticks(
-            rss.total, count, gaps
+        left_axis_max, left_positions, left_labels = axis_ticks(
+            left_top, count, gaps
         )
-        plt.ylim(0, rss_axis_max, yside="left")
-        plt.yticks(rss_positions, rss_labels, yside="left")
-        cpu_axis_max = None
-        if cpu_top > 0:
-            cpu_axis_max, cpu_positions, cpu_labels = axis_ticks(
-                cpu_top, count, gaps
+        plt.ylim(0, left_axis_max, yside="left")
+        plt.yticks(left_positions, left_labels, yside="left")
+        right_axis_max = None
+        if right_top > 0:
+            right_axis_max, right_positions, right_labels = axis_ticks(
+                right_top, count, gaps
             )
-            plt.ylim(0, cpu_axis_max, yside="right")
-            plt.yticks(cpu_positions, cpu_labels, yside="right")
+            plt.ylim(0, right_axis_max, yside="right")
+            plt.yticks(right_positions, right_labels, yside="right")
         else:
-            plt.ylim(0, cpu.total, yside="right")
+            plt.ylim(0, None, yside="right")
         positions, labels = clock_ticks(window.start_s, window.end_s)
         plt.xticks(positions, labels)
-        return rss_axis_max, cpu_axis_max
+        return left_axis_max, right_axis_max
 
     def draw_labels(
         self,
         window: ResourceWindow,
-        rss_axis_max: float,
-        cpu_axis_max: float | None,
+        plot: Plot,
+        left_axis_max: float,
+        right_axis_max: float | None,
     ) -> None:
         """Name each series in its axis corner and the plot between them.
 
@@ -329,80 +399,98 @@ class ResourcePlotPane(PlotextPlot):
         A bottom label row would sit under the footer keys.
         """
         dark = self.app.current_theme.dark
-        rss_color, cpu_color = series_colors(dark)
         plt = self.plt
-        rss_label = axis_label(window.series["rss"])
-        cpu_label = axis_label(window.series["cpu_percent"])
-        plt.text(
-            rss_label,
-            window.start_s,
-            rss_axis_max,
-            yside="left",
-            color=rss_color,
-            background="default",
-            alignment="left",
+        usable_cols = max(1, self.size.width - Y_AXIS_CHROME)
+        left_labels = [
+            axis_label(series) for series in series_for_keys(window, plot.left)
+        ]
+        right_labels = (
+            [
+                axis_label(series)
+                for series in series_for_keys(window, plot.right)
+            ]
+            if right_axis_max is not None
+            else []
         )
-        if cpu_axis_max is not None:
+        # plotext anchors text at a time, so a name's place in the row
+        # is a column count turned back into seconds.
+        seconds_per_col = (window.end_s - window.start_s) / usable_cols
+        next_col = 0
+        for index, label in enumerate(left_labels):
             plt.text(
-                cpu_label,
+                label,
+                window.start_s + next_col * seconds_per_col,
+                left_axis_max,
+                yside="left",
+                color=line_color("left", index, dark),
+                background="default",
+                alignment="left",
+            )
+            next_col += len(label) + LABEL_GAP
+        for index, label in enumerate(right_labels):
+            plt.text(
+                label,
                 window.end_s,
-                cpu_axis_max,
+                right_axis_max,
                 yside="right",
-                color=cpu_color,
+                color=line_color("right", index, dark),
                 background="default",
                 alignment="right",
             )
         # plotext neither wraps nor clips, so a name that does not fit
         # would be painted over the data.
-        row_width = len(rss_label) + len(PLOT_NAME) + 2 * LABEL_GAP
-        if cpu_axis_max is not None:
-            row_width += len(cpu_label)
-        if row_width <= self.size.width - Y_AXIS_CHROME:
+        # The cursor already counts the left names and one gap after them.
+        row_width = (
+            next_col
+            + len(plot.name)
+            + LABEL_GAP
+            + sum(len(label) for label in right_labels)
+        )
+        if row_width <= usable_cols:
             plt.text(
-                PLOT_NAME,
+                plot.name,
                 (window.start_s + window.end_s) / 2,
-                rss_axis_max,
+                left_axis_max,
                 yside="left",
                 background="default",
                 style="bold",
                 alignment="center",
             )
 
-    def draw_series(self, window: ResourceWindow, rss_axis_max: float) -> None:
-        """Plot the RSS and CPU lines, or a note when the window is empty.
+    def draw_series(
+        self, window: ResourceWindow, plot: Plot, left_axis_max: float
+    ) -> None:
+        """Plot this plot's lines, or a note when the window is empty.
 
         The lines are broken across each restart's downtime. Vlines mark
         the server going down and coming back, and an index rebuild
         starting and ending.
         """
         dark = self.app.current_theme.dark
-        rss_color, cpu_color = series_colors(dark)
         plt = self.plt
         if window.times_s:
-            for key, side, color in (
-                ("rss", "left", rss_color),
-                ("cpu_percent", "right", cpu_color),
-            ):
-                times, values = break_at_restarts(
-                    window.times_s, window.series[key].values, window.events
-                )
-                plt.plot(
-                    times,
-                    values,
-                    yside=side,
-                    marker="braille",
-                    color=color,
-                )
+            for side, keys in (("left", plot.left), ("right", plot.right)):
+                for index, series in enumerate(series_for_keys(window, keys)):
+                    times, values = break_at_restarts(
+                        window.times_s, series.values, window.events
+                    )
+                    plt.plot(
+                        times,
+                        values,
+                        yside=side,
+                        marker="braille",
+                        color=line_color(side, index, dark),
+                    )
         else:
             # plotext only draws a y-axis for a side that has data, so an
-            # empty window would show the RSS axis but not the CPU one.
+            # empty window would frame the left axis but not the right.
             # Anchor an invisible point on each side to keep both framed.
             plt.plot([window.start_s], [0], yside="left", marker=" ")
             plt.plot([window.start_s], [0], yside="right", marker=" ")
             plt.text(
                 "No samples in this window",
                 (window.start_s + window.end_s) / 2,
-                rss_axis_max / 2,
+                left_axis_max / 2,
                 yside="left",
                 background="default",
                 alignment="center",

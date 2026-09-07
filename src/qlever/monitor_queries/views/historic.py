@@ -462,7 +462,11 @@ class HistoricScreen(Screen, inherit_bindings=False):
         wider pane then fits more buckets and says so, which brings back
         a window read at that size, so maximizing shows more detail.
         """
-        self.app.push_screen(ResourcePlotModal(self.resource_window))
+        self.app.push_screen(
+            ResourcePlotModal(
+                self.resource_window, self.query_one(DetailSwitcher).plot
+            )
+        )
 
     def action_show_sparql(self) -> None:
         """Switch the detail pane to the SPARQL query."""

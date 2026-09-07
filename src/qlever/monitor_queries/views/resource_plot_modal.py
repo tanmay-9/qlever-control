@@ -15,7 +15,10 @@ from textual.screen import ModalScreen
 
 from qlever.monitor_queries.models import ResourceWindow
 from qlever.monitor_queries.widgets.footer import Footer
-from qlever.monitor_queries.widgets.resource_plot_pane import ResourcePlotPane
+from qlever.monitor_queries.widgets.resource_plot_pane import (
+    Plot,
+    ResourcePlotPane,
+)
 
 
 class ResourcePlotModal(ModalScreen):
@@ -28,13 +31,14 @@ class ResourcePlotModal(ModalScreen):
 
     BINDINGS = [Binding("escape", "close", "Close")]
 
-    def __init__(self, window: ResourceWindow) -> None:
+    def __init__(self, window: ResourceWindow, plot: Plot) -> None:
         super().__init__()
         self.window = window
+        self.plot = plot
 
     def compose(self) -> ComposeResult:
         with Vertical(id="resource-plot-modal"):
-            yield ResourcePlotPane(self.window)
+            yield ResourcePlotPane(self.window, self.plot)
         yield Footer(show_command_palette=False)
 
     def action_close(self) -> None:

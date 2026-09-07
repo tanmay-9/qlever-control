@@ -10,7 +10,11 @@ from textual.app import ComposeResult
 from textual.widgets import ContentSwitcher
 
 from qlever.monitor_queries.models import ResourceWindow, SparqlContent
-from qlever.monitor_queries.widgets.resource_plot_pane import ResourcePlotPane
+from qlever.monitor_queries.widgets.resource_plot_pane import (
+    PLOTS,
+    Plot,
+    ResourcePlotPane,
+)
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
 
 SPARQL_ID = "sparql-pane"
@@ -33,7 +37,12 @@ class DetailSwitcher(ContentSwitcher):
 
     def compose(self) -> ComposeResult:
         yield SparqlPane(id=SPARQL_ID)
-        yield ResourcePlotPane(self.window, id=PLOT_ID)
+        yield ResourcePlotPane(self.window, PLOTS[0], id=PLOT_ID)
+
+    @property
+    def plot(self) -> Plot:
+        """The plot the pane is showing, for the modal to open on."""
+        return self.query_one(ResourcePlotPane).plot
 
     def show_plot(self) -> None:
         """Switch to the resource plot pane."""

@@ -362,7 +362,12 @@ class LiveScreen(Screen, inherit_bindings=False):
         Opens on the window the inline pane is showing. The resource
         timer reaches the modal's pane as well, so it keeps rolling.
         """
-        self.app.push_screen(ResourcePlotModal(self.live_resource_window()))
+        self.app.push_screen(
+            ResourcePlotModal(
+                self.live_resource_window(),
+                self.query_one(DetailSwitcher).plot,
+            )
+        )
 
     def action_show_sparql(self) -> None:
         """Switch the detail pane to the SPARQL query."""
