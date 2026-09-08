@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import contextlib
 import shlex
+import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
+
+import psutil
 
 from qlever.command import QleverCommand
 from qlever.commands.cache_stats import CacheStatsCommand
@@ -89,7 +94,14 @@ def construct_command(args) -> str:
             f" {shlex.quote(view_name)}"
             for view_name in preload_materialized_views
         )
-    start_cmd += f" > {args.name}.server-log.txt 2>&1"
+    if args.server_log_mode == "no-log":
+        # No log file is written. In the foreground, the server output
+        # goes to the terminal; in the background, it is discarded.
+        if not args.run_in_foreground:
+            start_cmd += " > /dev/null 2>&1"
+    else:
+        redirect = ">>" if args.server_log_mode == "append" else ">"
+        start_cmd += f" {redirect} {args.name}.server-log.txt 2>&1"
     return start_cmd
 
 
@@ -196,6 +208,99 @@ def merge_runtime_parameters(
     return list(merged.values())
 
 
+def rotate_server_log(log_file: Path) -> None:
+    """
+    Move an existing server log to `<log>.1`, first shifting all older
+    generations up by one (`<log>.1` -> `<log>.2`, ...). All generations
+    are kept.
+    """
+    if not log_file.exists():
+        return
+    num_old = 0
+    while Path(f"{log_file}.{num_old + 1}").exists():
+        num_old += 1
+    for i in range(num_old, 0, -1):
+        Path(f"{log_file}.{i}").rename(f"{log_file}.{i + 1}")
+    log_file.rename(f"{log_file}.1")
+
+
+def show_log_follow_info(log_name: str, run_in_foreground: bool) -> None:
+    """
+    Tell the user which log is being followed, until when, and what
+    Ctrl-C does. The two cases differ in whether Ctrl-C stops the
+    server, so the wording is centralized here instead of being
+    repeated at each call site.
+    """
+    if run_in_foreground:
+        log.info(
+            f"Follow {log_name} as long as the server is running "
+            "(Ctrl-C stops the server)"
+        )
+    else:
+        log.info(
+            f"Follow {log_name} until the server is ready "
+            "(Ctrl-C stops following the log, but NOT the server)"
+        )
+    log.info("")
+
+
+def make_server_liveness_check(
+    args, process: subprocess.Popen | None, pid: int | None
+) -> Callable[[], bool]:
+    """
+    Build a check that tells whether the server is still running: via the
+    container runtime, via the `Popen` handle (foreground), or via the
+    `pid` of the process started with `nohup`.
+    """
+    if args.system in Containerize.supported_systems():
+        return lambda: Containerize.is_running(
+            args.system, args.server_container
+        )
+    if args.run_in_foreground:
+        return lambda: process.poll() is None
+    if pid is not None:
+        return lambda: psutil.pid_exists(pid)
+    return lambda: True
+
+
+def wait_until_server_ready(
+    is_alive: Callable[[], bool],
+    is_still_running: Callable[[], bool],
+    poll_interval_s: float = 1.0,
+) -> bool:
+    """
+    Poll until the server answers. Returns False if the server process
+    exited before it became ready (e.g. because of a corrupt index).
+    """
+    while not is_alive():
+        if not is_still_running():
+            log.error("Server process exited before becoming ready")
+            return False
+        time.sleep(poll_interval_s)
+    return True
+
+
+def wait_for_foreground_server(
+    process: subprocess.Popen,
+    log_proc: subprocess.Popen | None,
+    on_interrupt: Callable[[], None],
+) -> None:
+    """
+    Wait until the server started in the foreground is stopped. On
+    Ctrl-C, terminate it and call `on_interrupt` for engine-specific
+    cleanup (such as removing the server container).
+    """
+    try:
+        process.wait()
+    except KeyboardInterrupt:
+        log.warning("\rCtrl-C pressed, stopping the server ...")
+        log.info("")
+        process.terminate()
+        on_interrupt()
+    if log_proc is not None:
+        log_proc.terminate()
+
+
 class StartCommand(QleverCommand):
     """
     Class for executing the `start` command.
@@ -238,6 +343,7 @@ class StartCommand(QleverCommand):
                 "resource_usage_log",
                 "resource_usage_interval",
                 "preload_materialized_views",
+                "server_log_mode",
                 "warmup_cmd",
                 "enable_metrics",
             ],
@@ -296,9 +402,7 @@ class StartCommand(QleverCommand):
 
         # Kill existing server on the same port if so desired.
         if args.kill_existing_with_same_port:
-            if args.kill_existing_with_same_port and not kill_existing_server(
-                args
-            ):
+            if not kill_existing_server(args):
                 return False
 
         # Construct the command line based on the config file.
@@ -312,7 +416,10 @@ class StartCommand(QleverCommand):
         elif args.run_in_foreground:
             start_cmd = f"{start_cmd}"
         else:
-            start_cmd = f"nohup {start_cmd} &"
+            # The `echo $!` reports the PID of the server process, which the
+            # liveness check below uses to detect a server that exits before
+            # it becomes ready (see `make_server_liveness_check`).
+            start_cmd = f"nohup {start_cmd} & echo $!"
 
         # Show the command line.
         self.show(start_cmd, only_show=args.show)
@@ -360,17 +467,51 @@ class StartCommand(QleverCommand):
         #                   f" (use `lsof -i :{port}` to find out which one)")
         #         return False
 
-        # Remove old log file so that the wait loop below correctly
-        # waits for the server to create a fresh one.
+        # Handle an existing log file from a previous server run according
+        # to `--server-log-mode`: keep it and append (`append`), remove it
+        # (`overwrite`), move it to `.1`, `.2`, ... (`rotate`, the
+        # default), or write no log at all (`no-log`). For `overwrite` and
+        # `rotate`, the wait loop below then correctly waits for the server
+        # to create a fresh log.
         log_file = Path(f"{args.name}.server-log.txt")
-        log_file.unlink(missing_ok=True)
+        if args.server_log_mode == "rotate":
+            rotate_server_log(log_file)
+        elif args.server_log_mode == "overwrite":
+            log_file.unlink(missing_ok=True)
 
         # Execute the command line.
+        # For a server started with `nohup`, the `echo $!` in the command
+        # reports its PID, which the liveness check below uses (a server in a
+        # container or in the foreground is checked via the container runtime
+        # or the process handle instead, see `make_server_liveness_check`).
+        capture_pid = (
+            not args.run_in_foreground
+            and args.system not in Containerize.supported_systems()
+        )
+        pid = None
         try:
-            process = run_command(
-                start_cmd,
-                use_popen=args.run_in_foreground,
-            )
+            if capture_pid:
+                output = run_command(start_cmd, return_output=True)
+                process = None
+                with contextlib.suppress(ValueError, AttributeError):
+                    pid = int(output.strip().splitlines()[-1])
+            else:
+                # For `no-log` in the foreground, the command has no
+                # redirection, so the output must go to the terminal
+                # (otherwise it would fill a pipe that nobody reads and
+                # eventually block the server).
+                if args.run_in_foreground and args.server_log_mode == "no-log":
+                    process = run_command(
+                        start_cmd,
+                        use_popen=True,
+                        show_output=True,
+                        show_stderr=True,
+                    )
+                else:
+                    process = run_command(
+                        start_cmd,
+                        use_popen=args.run_in_foreground,
+                    )
         except Exception as e:
             log.error(f"Starting the QLever server failed ({e})")
             return False
@@ -378,36 +519,32 @@ class StartCommand(QleverCommand):
         # Tail the server log until the server is ready (note that the `exec`
         # is important to make sure that the tail process is killed and not
         # just the bash process).
-        if args.run_in_foreground:
-            log.info(
-                f"Follow {args.name}.server-log.txt as long as the server is"
-                f" running (Ctrl-C stops the server)"
-            )
-        else:
-            log.info(
-                f"Follow {args.name}.server-log.txt until the server is ready"
-                f" (Ctrl-C stops following the log, but NOT the server)"
-            )
-        log.info("")
-        tail_proc = tail_log_file(log_file)
-        if tail_proc is None:
-            return False
-        while not is_qlever_server_alive(args.endpoint_url):
-            # Check if the server process/container is still running.
-            # If it exited (e.g. due to a corrupt index), stop waiting.
-            if args.system in Containerize.supported_systems():
-                still_running = Containerize.is_running(
-                    args.system, args.server_container
+        if args.server_log_mode == "no-log":
+            if args.run_in_foreground:
+                log.info(
+                    "No server log is written, the server output goes to "
+                    "this terminal (Ctrl-C stops the server)"
                 )
-            elif args.run_in_foreground:
-                still_running = process.poll() is None
             else:
-                still_running = True  # nohup: can't easily check
-            if not still_running:
-                log.error("Server process exited before becoming ready")
-                tail_proc.terminate()
+                log.info("Server log disabled (`--server-log-mode no-log`)")
+            log.info("")
+            tail_proc = None
+        else:
+            show_log_follow_info(str(log_file), args.run_in_foreground)
+            # With `append`, only follow what the new server run writes,
+            # not the content of the previous runs.
+            tail_proc = tail_log_file(
+                log_file, from_beginning=args.server_log_mode != "append"
+            )
+            if tail_proc is None:
                 return False
-            time.sleep(1)
+        if not wait_until_server_ready(
+            lambda: is_qlever_server_alive(args.endpoint_url),
+            make_server_liveness_check(args, process, pid),
+        ):
+            if tail_proc is not None:
+                tail_proc.terminate()
+            return False
 
         # Set the description for the index and text.
         access_arg = f'--data-urlencode "access-token={args.access_token}"'
@@ -425,7 +562,7 @@ class StartCommand(QleverCommand):
                 return False
 
         # Kill the tail process. NOTE: `tail_proc.kill()` does not work.
-        if not args.run_in_foreground:
+        if not args.run_in_foreground and tail_proc is not None:
             tail_proc.terminate()
 
         # Execute the warmup command.
@@ -449,17 +586,13 @@ class StartCommand(QleverCommand):
 
         # With `--run-in-foreground`, wait until the server is stopped.
         if args.run_in_foreground:
-            try:
-                process.wait()
-            except KeyboardInterrupt:
-                log.warning("\rCtrl-C pressed, stopping the server ...")
-                log.info("")
-                process.terminate()
-                # Stop the container process manually
+
+            def stop_container() -> None:
                 if args.system in Containerize.supported_systems():
                     args.cmdline_regex = "qlever-server.* -i [^ ]*%%NAME%%"
                     args.no_containers = False
                     StopCommand().execute(args)
-            tail_proc.terminate()
+
+            wait_for_foreground_server(process, tail_proc, stop_container)
 
         return True
