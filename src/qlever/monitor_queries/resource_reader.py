@@ -29,7 +29,7 @@ OPTIONAL_COLUMNS = (
     "read_bytes_per_s",
     "write_bytes_per_s",
     "io_stall_percent",
-    "rebuild_id",
+    "index_rebuild_id",
 )
 LOG_COLUMNS = REQUIRED_COLUMNS + OPTIONAL_COLUMNS
 
@@ -45,8 +45,8 @@ class Sample:
     `read_bytes_per_s`, `write_bytes_per_s`: this server's disk I/O
     `io_stall_percent`: share of time anything on the machine waited on
       disk, so machine-wide and not just this server
-    `rebuild_id`: which index rebuild was running, counted from 1, and
-      None when no rebuild was in progress
+    `index_rebuild_id`: which index rebuild was running, counted from 1,
+      and None when no rebuild was in progress
     """
 
     elapsed_s: float
@@ -56,7 +56,7 @@ class Sample:
     read_bytes_per_s: float | None = None
     write_bytes_per_s: float | None = None
     io_stall_percent: float | None = None
-    rebuild_id: int | None = None
+    index_rebuild_id: int | None = None
 
 
 def log_has_new_columns(log_path: Path) -> bool:
@@ -100,7 +100,7 @@ def parse_tsv_row(line: str) -> Sample | None:
             read_bytes_per_s=optional_cell(read_bytes, float),
             write_bytes_per_s=optional_cell(write_bytes, float),
             io_stall_percent=optional_cell(io_stall, float),
-            rebuild_id=optional_cell(rebuild_id, int),
+            index_rebuild_id=optional_cell(rebuild_id, int),
         )
     except ValueError:
         return None

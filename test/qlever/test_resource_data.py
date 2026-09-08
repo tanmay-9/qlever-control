@@ -42,7 +42,7 @@ ROW = {
     "read_bytes_per_s": 1048576,
     "write_bytes_per_s": 524288,
     "io_stall_percent": 12.5,
-    "rebuild_id": 3,
+    "index_rebuild_id": 3,
 }
 
 # The same row as a parsed sample, with the new columns unset, as an
@@ -96,7 +96,7 @@ def test_parse_row_with_every_column():
         read_bytes_per_s=1048576.0,
         write_bytes_per_s=524288.0,
         io_stall_percent=12.5,
-        rebuild_id=3,
+        index_rebuild_id=3,
     )
 
 
@@ -113,7 +113,7 @@ def test_parse_empty_optional_cell_is_none(column):
         parsed.read_bytes_per_s,
         parsed.write_bytes_per_s,
         parsed.io_stall_percent,
-        parsed.rebuild_id,
+        parsed.index_rebuild_id,
     )
     assert new_values.count(None) == 1
 
@@ -388,19 +388,19 @@ def test_event_tracker_elapsed_drop_is_a_restart():
 
 
 def test_event_tracker_rebuild_appearing_has_no_end():
-    samples = [sample(ts_ms=1000), sample(ts_ms=2000, rebuild_id=3)]
+    samples = [sample(ts_ms=1000), sample(ts_ms=2000, index_rebuild_id=3)]
     assert tracked(samples) == [("rebuild_start", 2.0)]
 
 
 def test_event_tracker_rebuild_vanishing_has_no_start():
-    samples = [sample(ts_ms=1000, rebuild_id=3), sample(ts_ms=2000)]
+    samples = [sample(ts_ms=1000, index_rebuild_id=3), sample(ts_ms=2000)]
     assert tracked(samples) == [("rebuild_end", 1.0)]
 
 
 def test_event_tracker_new_rebuild_id_ends_the_previous_one():
     samples = [
-        sample(ts_ms=1000, rebuild_id=3),
-        sample(ts_ms=2000, rebuild_id=4),
+        sample(ts_ms=1000, index_rebuild_id=3),
+        sample(ts_ms=2000, index_rebuild_id=4),
     ]
     assert tracked(samples) == [
         ("rebuild_end", 1.0),
@@ -410,7 +410,7 @@ def test_event_tracker_new_rebuild_id_ends_the_previous_one():
 
 def test_event_tracker_restart_and_rebuild_end_stay_in_time_order():
     samples = [
-        sample(elapsed_s=10.0, ts_ms=3000, rebuild_id=3),
+        sample(elapsed_s=10.0, ts_ms=3000, index_rebuild_id=3),
         sample(elapsed_s=1.0, ts_ms=4000),
     ]
     # Both events at 3.0 come before the one at 4.0, unsorted.
@@ -440,21 +440,23 @@ def test_event_tracker_drops_events_outside_the_window():
 
 
 def test_event_tracker_old_format_samples_have_no_rebuilds():
-    samples = [sample(ts_ms=ts, rebuild_id=None) for ts in (1000, 2000)]
+    samples = [sample(ts_ms=ts, index_rebuild_id=None) for ts in (1000, 2000)]
     assert tracked(samples) == []
 
 
 # Rebuild 3 runs at ts 2000 and 3000, with no rebuild either side of it.
 REBUILD_SAMPLES = [
     sample(ts_ms=1000),
-    sample(ts_ms=2000, rebuild_id=3),
-    sample(ts_ms=3000, rebuild_id=3),
+    sample(ts_ms=2000, index_rebuild_id=3),
+    sample(ts_ms=3000, index_rebuild_id=3),
     sample(ts_ms=4000),
 ]
 
 
 def test_event_tracker_rebuild_spanning_every_sample_has_no_events():
-    samples = [sample(ts_ms=ts, rebuild_id=3) for ts in (1000, 2000, 3000)]
+    samples = [
+        sample(ts_ms=ts, index_rebuild_id=3) for ts in (1000, 2000, 3000)
+    ]
     assert tracked(samples) == []
 
 
@@ -474,10 +476,10 @@ def test_event_tracker_rebuild_end_after_the_window():
 # The same rebuild as REBUILD_SAMPLES, as log rows. An empty cell is how
 # the server writes "no rebuild running".
 REBUILD_ROWS = [
-    {"timestamp_ms": 1000, "rebuild_id": ""},
-    {"timestamp_ms": 2000, "rebuild_id": 3},
-    {"timestamp_ms": 3000, "rebuild_id": 3},
-    {"timestamp_ms": 4000, "rebuild_id": ""},
+    {"timestamp_ms": 1000, "index_rebuild_id": ""},
+    {"timestamp_ms": 2000, "index_rebuild_id": 3},
+    {"timestamp_ms": 3000, "index_rebuild_id": 3},
+    {"timestamp_ms": 4000, "index_rebuild_id": ""},
 ]
 
 

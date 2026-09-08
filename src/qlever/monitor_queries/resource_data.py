@@ -191,7 +191,7 @@ class EventTracker:
     Both show up as a change between one sample and the next, so one
     pass in timestamp order finds them all. A restart is a drop in
     `elapsed_s`, which resets when the server starts. A rebuild
-    boundary is a change in `rebuild_id`, which is empty when no
+    boundary is a change in `index_rebuild_id`, which is empty when no
     rebuild is running.
 
     An event is kept only if its own time falls in the window, so a
@@ -211,16 +211,16 @@ class EventTracker:
         if previous is None:
             return
         restarted = sample.elapsed_s < previous.elapsed_s
-        rebuild_changed = sample.rebuild_id != previous.rebuild_id
+        rebuild_changed = sample.index_rebuild_id != previous.index_rebuild_id
         # Events at the earlier sample come first, so the list stays in
         # time order without sorting it.
         if restarted:
             self.add("server_down", previous.ts_ms)
-        if rebuild_changed and previous.rebuild_id is not None:
+        if rebuild_changed and previous.index_rebuild_id is not None:
             self.add("rebuild_end", previous.ts_ms)
         if restarted:
             self.add("server_up", sample.ts_ms)
-        if rebuild_changed and sample.rebuild_id is not None:
+        if rebuild_changed and sample.index_rebuild_id is not None:
             self.add("rebuild_start", sample.ts_ms)
 
     def add(self, kind: str, ts_ms: int) -> None:
