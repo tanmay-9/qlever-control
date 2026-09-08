@@ -140,8 +140,8 @@ class ResourceSample:
     read_bytes_per_s, write_bytes_per_s: this server's disk I/O
     io_stall_percent: share of time anything on the machine waited on disk,
       so machine-wide and not just this server
-    rebuild_id: which index rebuild was running, counted from 1. None when
-      no rebuild in progress.
+    index_rebuild_id: which index rebuild was running, counted from 1. None
+      when no rebuild in progress.
     """
 
     elapsed_s: float
@@ -151,7 +151,7 @@ class ResourceSample:
     read_bytes_per_s: float | None = None
     write_bytes_per_s: float | None = None
     io_stall_percent: float | None = None
-    rebuild_id: int | None = None
+    index_rebuild_id: int | None = None
 
 
 @dataclass(frozen=True)

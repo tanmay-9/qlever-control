@@ -33,7 +33,7 @@ ROW = {
     "read_bytes_per_s": 1048576,
     "write_bytes_per_s": 524288,
     "io_stall_percent": 12.5,
-    "rebuild_id": 3,
+    "index_rebuild_id": 3,
 }
 
 # The same row as a parsed sample, with the new columns unset, as an
@@ -87,7 +87,7 @@ def test_parse_row_with_every_column():
         read_bytes_per_s=1048576.0,
         write_bytes_per_s=524288.0,
         io_stall_percent=12.5,
-        rebuild_id=3,
+        index_rebuild_id=3,
     )
 
 
@@ -104,7 +104,7 @@ def test_parse_empty_optional_cell_is_none(column):
         parsed.read_bytes_per_s,
         parsed.write_bytes_per_s,
         parsed.io_stall_percent,
-        parsed.rebuild_id,
+        parsed.index_rebuild_id,
     )
     assert new_values.count(None) == 1
 
@@ -343,8 +343,8 @@ def test_get_resource_plot_keeps_only_windowed_samples():
 # Rebuild 3 runs at ts 2000 and 3000, with no rebuild either side of it.
 REBUILD_SAMPLES = [
     sample(ts_ms=1000),
-    sample(ts_ms=2000, rebuild_id=3),
-    sample(ts_ms=3000, rebuild_id=3),
+    sample(ts_ms=2000, index_rebuild_id=3),
+    sample(ts_ms=3000, index_rebuild_id=3),
     sample(ts_ms=4000),
 ]
 
@@ -360,8 +360,8 @@ def test_get_resource_plot_rebuild_already_running_has_no_start():
     # The window opens mid-rebuild, so its start is not in the data. The
     # end still shows.
     samples = [
-        sample(ts_ms=1000, rebuild_id=3),
-        sample(ts_ms=2000, rebuild_id=3),
+        sample(ts_ms=1000, index_rebuild_id=3),
+        sample(ts_ms=2000, index_rebuild_id=3),
         sample(ts_ms=3000),
     ]
     plot = get_resource_plot(samples, TOTALS, 0, 5000)
@@ -370,7 +370,9 @@ def test_get_resource_plot_rebuild_already_running_has_no_start():
 
 
 def test_get_resource_plot_rebuild_spanning_every_sample_has_no_markers():
-    samples = [sample(ts_ms=ts, rebuild_id=3) for ts in (1000, 2000, 3000)]
+    samples = [
+        sample(ts_ms=ts, index_rebuild_id=3) for ts in (1000, 2000, 3000)
+    ]
     plot = get_resource_plot(samples, TOTALS, 0, 5000)
     assert plot.rebuild_start_times_s == ()
     assert plot.rebuild_end_times_s == ()
@@ -381,8 +383,8 @@ def test_get_resource_plot_new_rebuild_id_ends_the_previous_one():
     # this is a server restart renumbering ids while a rebuild ran.
     samples = [
         sample(ts_ms=1000),
-        sample(ts_ms=2000, rebuild_id=3),
-        sample(ts_ms=3000, rebuild_id=4),
+        sample(ts_ms=2000, index_rebuild_id=3),
+        sample(ts_ms=3000, index_rebuild_id=4),
         sample(ts_ms=4000),
     ]
     plot = get_resource_plot(samples, TOTALS, 0, 5000)
@@ -412,10 +414,10 @@ def test_get_resource_plot_old_format_samples_have_no_rebuilds():
 # The same rebuild as REBUILD_SAMPLES, as log rows. An empty cell is how
 # the server writes "no rebuild running".
 REBUILD_ROWS = [
-    {"timestamp_ms": 1000, "rebuild_id": ""},
-    {"timestamp_ms": 2000, "rebuild_id": 3},
-    {"timestamp_ms": 3000, "rebuild_id": 3},
-    {"timestamp_ms": 4000, "rebuild_id": ""},
+    {"timestamp_ms": 1000, "index_rebuild_id": ""},
+    {"timestamp_ms": 2000, "index_rebuild_id": 3},
+    {"timestamp_ms": 3000, "index_rebuild_id": 3},
+    {"timestamp_ms": 4000, "index_rebuild_id": ""},
 ]
 
 

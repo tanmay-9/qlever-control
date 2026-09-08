@@ -37,7 +37,7 @@ OPTIONAL_COLUMNS = (
     "read_bytes_per_s",
     "write_bytes_per_s",
     "io_stall_percent",
-    "rebuild_id",
+    "index_rebuild_id",
 )
 LOG_COLUMNS = REQUIRED_COLUMNS + OPTIONAL_COLUMNS
 
@@ -113,7 +113,7 @@ def parse_tsv_row(line: str) -> ResourceSample | None:
             read_bytes_per_s=optional_cell(read_bytes, float),
             write_bytes_per_s=optional_cell(write_bytes, float),
             io_stall_percent=optional_cell(io_stall, float),
-            rebuild_id=optional_cell(rebuild_id, int),
+            index_rebuild_id=optional_cell(rebuild_id, int),
         )
     except ValueError:
         return None
@@ -253,7 +253,7 @@ class RestartTracker:
 
 
 class RebuildIndexTracker:
-    """Finds index rebuilds from changes in the log's rebuild_id column.
+    """Finds index rebuilds from changes in the log's `index_rebuild_id`.
 
     Fed samples in timestamp order. The server writes the id of the
     running rebuild and leaves the cell empty when none is running, so
@@ -336,7 +336,7 @@ def get_resource_plot(
     rebuilds = RebuildIndexTracker(start_ms, end_ms)
     for sample in samples:
         restarts.track(sample.elapsed_s, sample.ts_ms)
-        rebuilds.track(sample.rebuild_id, sample.ts_ms)
+        rebuilds.track(sample.index_rebuild_id, sample.ts_ms)
         if start_ms <= sample.ts_ms <= end_ms:
             times_s.append(sample.ts_ms / 1000)
             rss_gb.append(sample.rss / 1e9)
@@ -454,7 +454,7 @@ def read_resource_window(
             if sample is None:
                 continue
             restarts.track(sample.elapsed_s, sample.ts_ms)
-            rebuilds.track(sample.rebuild_id, sample.ts_ms)
+            rebuilds.track(sample.index_rebuild_id, sample.ts_ms)
             # Break only after tracking, so the first row past the window
             # still pairs with an in-window stop.
             if sample.ts_ms > end_ms:
