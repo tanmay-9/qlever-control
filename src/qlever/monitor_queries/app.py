@@ -80,6 +80,7 @@ class MonitorQueriesApp(App):
         resource_log: Path,
         sample_interval_s: int,
         system: str = "docker",
+        read_write_min_max_mbs: tuple[float, float] | None = None,
     ) -> None:
         super().__init__()
         self.log_file = log_file
@@ -97,6 +98,7 @@ class MonitorQueriesApp(App):
         self.capacity = Capacity(
             ram_gb=psutil.virtual_memory().total / 1e9,
             cores=psutil.cpu_count(),
+            read_write_min_max_mbs=read_write_min_max_mbs,
         )
         self.system = system
         self.live_state = LiveState()

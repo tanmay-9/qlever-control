@@ -32,7 +32,11 @@ class ResourcePlotModal(ModalScreen):
     re-reads at this size, and Live sends fresh readings on its timer.
     """
 
-    BINDINGS = [Binding("escape", "close", "Close")]
+    # `R` closes again, so the key that opened the modal toggles it.
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("R", "close", "Close", show=False),
+    ]
 
     def __init__(self, window: ResourceWindow, plots: list[Plot]) -> None:
         super().__init__()

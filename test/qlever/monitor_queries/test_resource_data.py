@@ -580,6 +580,36 @@ def test_window_rate_columns_have_no_capacity():
     assert window.series["read_bytes_per_s"].total is None
 
 
+def test_window_read_write_bounds_land_on_the_rate_series():
+    # The user bounded the read/write axis with --read-write-min-max-mbs.
+    capacity = Capacity(
+        ram_gb=134.0, cores=64.0, read_write_min_max_mbs=(100.0, 200.0)
+    )
+    samples = [
+        sample(
+            ts_ms=1100,
+            read_bytes_per_s=1e6,
+            write_bytes_per_s=2e6,
+            io_stall_percent=3.0,
+        )
+    ]
+    window = window_for_samples(samples, capacity, 1000, 5000, 4)
+    for key in ("read_bytes_per_s", "write_bytes_per_s"):
+        assert window.series[key].total is None
+        assert window.series[key].axis_min == 100.0
+        assert window.series[key].axis_max == 200.0
+    # The stall keeps its hard-coded floor and has no cap.
+    assert window.series["io_stall_percent"].axis_min == 20.0
+    assert window.series["io_stall_percent"].axis_max is None
+
+
+def test_window_without_bounds_leaves_the_rate_series_free():
+    samples = [sample(ts_ms=1100, read_bytes_per_s=1e6)]
+    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    assert window.series["read_bytes_per_s"].axis_min == 0.0
+    assert window.series["read_bytes_per_s"].axis_max is None
+
+
 def test_window_unknown_core_count_leaves_the_cpu_capacity_none():
     capacity = Capacity(ram_gb=134.0, cores=None)
     samples = [sample(ts_ms=1100)]

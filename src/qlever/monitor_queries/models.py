@@ -137,7 +137,9 @@ class ResourceSeries:
     is stored under. `total` is the capacity the bars and the axis
     scale against, in the same `unit` as `values`. It is None when that
     capacity could not be read, as happens with the core count, or when
-    the column has no ceiling at all.
+    the column has no ceiling at all. `axis_min` and `axis_max` bound
+    the axis of a column without a `total`: it scales to the data, but
+    never below `axis_min` nor past `axis_max` (None = no cap).
     """
 
     key: str
@@ -145,6 +147,8 @@ class ResourceSeries:
     unit: str
     values: tuple[float, ...]
     total: float | None
+    axis_min: float = 0.0
+    axis_max: float | None = None
 
 
 @dataclass(frozen=True)

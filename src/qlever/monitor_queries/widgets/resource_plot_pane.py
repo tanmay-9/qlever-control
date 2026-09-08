@@ -159,7 +159,8 @@ def axis_top(window: ResourceWindow, keys: tuple[str, ...]) -> float:
     A column with a capacity is measured against it, so a light load
     stays low instead of filling the plot. A column without a capacity
     is measured against its largest reading, skipping the buckets where
-    it reported nothing. Zero when the window holds none of the keys.
+    it reported nothing, clamped into the axis bounds the series
+    carries. Zero when the window holds none of the keys.
     """
     top = 0.0
     for key in keys:
@@ -170,7 +171,10 @@ def axis_top(window: ResourceWindow, keys: tuple[str, ...]) -> float:
             top = max(top, series.total)
         else:
             readings = [value for value in series.values if not isnan(value)]
-            top = max([top, *readings])
+            series_top = max([series.axis_min, *readings])
+            if series.axis_max is not None:
+                series_top = min(series_top, series.axis_max)
+            top = max(top, series_top)
     return top
 
 

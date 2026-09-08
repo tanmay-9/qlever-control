@@ -21,10 +21,16 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
 NAN = float("nan")
 
 
-def series(key, values, total=None):
+def series(key, values, total=None, axis_min=0.0, axis_max=None):
     """One series with the label and unit the tests never look at."""
     return ResourceSeries(
-        key=key, label=key, unit="u", values=values, total=total
+        key=key,
+        label=key,
+        unit="u",
+        values=values,
+        total=total,
+        axis_min=axis_min,
+        axis_max=axis_max,
     )
 
 
@@ -57,6 +63,27 @@ def test_axis_top_skips_the_buckets_that_reported_nothing():
 def test_axis_top_of_a_column_that_never_reported_is_zero():
     win = window(series("read_bytes_per_s", (NAN, NAN)))
     assert axis_top(win, ("read_bytes_per_s",)) == 0.0
+
+
+def test_axis_top_never_drops_below_the_axis_min():
+    # A small reading must look small, so the axis keeps its minimum.
+    win = window(series("io_stall_percent", (1.0, 3.5), axis_min=20.0))
+    assert axis_top(win, ("io_stall_percent",)) == 20.0
+
+
+def test_axis_top_grows_past_the_axis_min_with_the_data():
+    win = window(series("io_stall_percent", (1.0, 65.0), axis_min=20.0))
+    assert axis_top(win, ("io_stall_percent",)) == 65.0
+
+
+def test_axis_top_never_grows_past_the_axis_max():
+    # A spike above the cap runs off the top instead of flattening
+    # everything else.
+    win = window(
+        series("read_bytes_per_s", (150.0, 900.0), axis_min=100.0,
+               axis_max=200.0)
+    )
+    assert axis_top(win, ("read_bytes_per_s",)) == 200.0
 
 
 def test_axis_top_spans_every_series_on_the_side():
