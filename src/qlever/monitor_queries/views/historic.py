@@ -129,7 +129,6 @@ CHIP_SUBSTR_LIMIT = 20
 TABLE_HELP_ACTIONS = [
     "sort_prev_column",
     "invert_sort",
-    "clear_filters",
 ]
 
 
@@ -184,7 +183,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("greater_than_sign", "sort_next_column", "", show=False),
         Binding("i", "invert_sort", "Invert sort"),
         Binding("f", "edit_filter", "Filter"),
-        Binding("F", "clear_filters", "Clear filters"),
+        Binding("F", "clear_filters", "Clear filters", show=False),
         Binding("r", "show_plot", "Resource plot", show=False),
         Binding("R", "maximize_plot", "Zoom the plot", show=False),
         Binding("s", "show_sparql", "SPARQL", show=False),
@@ -263,7 +262,22 @@ class HistoricScreen(Screen, inherit_bindings=False):
             filter_button,
             id="metrics-filter-row",
         )
-        yield Static("", id="filter-row")
+        clear_button = Button(
+            "Clear all",
+            variant="primary",
+            id="clear-filters",
+            compact=True,
+            action="screen.clear_filters",
+            tooltip="Drop every filter and show the whole window.",
+        )
+        # Clicking it must not take focus off the table.
+        clear_button.can_focus = False
+        yield Horizontal(
+            Static("", id="filter-summary"),
+            Static("", id="clear-filters-key", classes="key-pill"),
+            clear_button,
+            id="filter-row",
+        )
         yield Static("", id="table-help")
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
@@ -728,13 +742,22 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.refresh_data(rescan=False)
 
     def sync_filter_ui(self) -> None:
-        """Show the active filters above the table, or hide the row if none."""
-        row = self.query_one("#filter-row", Static)
+        """Show the active filters above the table, or hide the row if none.
+
+        The key label is filled here rather than at mount: the binding
+        only exists while a filter is active.
+        """
+        row = self.query_one("#filter-row", Horizontal)
         if self.filters.is_empty():
             row.display = False
-        else:
-            row.update(filter_summary(self.filters))
-            row.display = True
+            return
+        self.query_one("#filter-summary", Static).update(
+            filter_summary(self.filters)
+        )
+        self.query_one("#clear-filters-key", Static).update(
+            action_key(self, "clear_filters")
+        )
+        row.display = True
 
     def action_clear_filters(self) -> None:
         """Drop all filters and re-render (no rescan)."""

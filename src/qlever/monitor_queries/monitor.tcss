@@ -180,10 +180,11 @@ HistoricScreen MetricsRow {
     height: auto;
 }
 
-/* Those buttons, in one rule so the two cannot drift apart. Freeze is
-   given the width of its longer label, so the swap moves nothing. */
+/* The buttons parked at the right end of a row, in one rule so they
+   cannot drift apart. Freeze is given the width of its longer label,
+   so the swap between Freeze and Unfreeze moves nothing. */
 
-#edit-filter, #freeze {
+#edit-filter, #freeze, #clear-filters {
     min-width: 0;
     padding: 0 2;
     margin-right: 2;
@@ -194,7 +195,7 @@ HistoricScreen MetricsRow {
     width: 12;
 }
 
-#edit-filter:hover, #freeze:hover {
+#edit-filter:hover, #freeze:hover, #clear-filters:hover {
     background: $primary-lighten-2;
 }
 
@@ -229,6 +230,11 @@ QueryTable.stale > .datatable--header {
     margin-bottom: 1;
     margin-left: 1;
     display: none;
+}
+
+#filter-summary {
+    width: 1fr;
+    height: 1;
 }
 
 /* help row above the table; hidden until help mode */
