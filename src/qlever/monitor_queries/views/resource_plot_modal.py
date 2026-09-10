@@ -29,7 +29,11 @@ class ResourcePlotModal(ModalScreen):
     size and the plot gains detail. Live reads from its buffer instead.
     """
 
-    BINDINGS = [Binding("escape", "close", "Close")]
+    BINDINGS = [
+        # One footer entry for the pair: the key that opened it closes it.
+        Binding("escape", "close", "Close", key_display="esc/z"),
+        Binding("z", "close", "Close", show=False),
+    ]
 
     def __init__(
         self,

@@ -35,7 +35,10 @@ class FilterModal(ModalScreen[FilterState | None]):
 
     BINDINGS = [
         Binding("enter", "apply", "Apply", priority=True),
-        Binding("escape", "cancel", "Cancel"),
+        # One footer entry for the pair: the key that opened it closes
+        # it again, unchanged.
+        Binding("escape", "cancel", "Cancel", key_display="esc/f"),
+        Binding("f", "cancel", "Cancel", show=False),
         Binding("c", "clear", "Clear"),
     ]
 
