@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from functools import partial
 
 from textual import work
 from textual.app import ComposeResult
@@ -33,9 +34,11 @@ from qlever.monitor_queries.resource_data import (
     get_resource_usage,
     is_resource_sample_fresh,
 )
+from qlever.monitor_queries.util import action_key
 from qlever.monitor_queries.views.resource_plot_modal import (
     ResourcePlotModal,
 )
+from qlever.monitor_queries.widgets.detail_row import DetailRow
 from qlever.monitor_queries.widgets.detail_switcher import (
     PLOT_ID,
     DetailSwitcher,
@@ -59,10 +62,9 @@ class LiveScreen(Screen, inherit_bindings=False):
     BINDINGS = [
         Binding("tab", "app.swap_screen", "Historic>", priority=True),
         Binding("f", "toggle_freeze", "Freeze/Unfreeze"),
-        # One footer entry for both: r shows the pane, R the modal.
-        Binding("r", "show_plot", "Resource plot", key_display="r/R"),
-        Binding("R", "maximize_plot", "Maximize plot", show=False),
-        Binding("s", "show_sparql", "SPARQL"),
+        Binding("r", "show_plot", "Resource plot", show=False),
+        Binding("R", "maximize_plot", "Zoom the plot", show=False),
+        Binding("s", "show_sparql", "SPARQL", show=False),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
 
@@ -113,8 +115,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         )
         yield LiveQueryTable(rows)
         yield Static("", id="table-status")
-        yield Static("", id="detail-help")
-        yield DetailSwitcher(
+        yield DetailRow(
             source=self.live_resource_plot,
             refresh_interval=self.app.sample_interval_s,
         )
@@ -129,6 +130,9 @@ class LiveScreen(Screen, inherit_bindings=False):
         # A worker, not a paused-on-suspend timer: it keeps reading the
         # log regardless of the active tab so the history never gaps.
         self.tail_resource_log()
+        # Label the gutter controls with the keys that run them; CSS
+        # decides when the labels show.
+        self.query_one(DetailRow).set_help_keys(partial(action_key, self))
         if self.liveness == "checking":
             self.start_pinging(initial=True)
         # Focus the table so the header theme dropdown can't take it.

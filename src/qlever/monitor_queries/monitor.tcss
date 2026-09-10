@@ -171,6 +171,25 @@ Timeline {
 
 HistoricScreen MetricsRow {
     height: auto;
+    width: 1fr;
+}
+
+/* The metrics line with the filter button parked at its end */
+
+#metrics-filter-row {
+    height: auto;
+}
+
+#edit-filter {
+    width: auto;
+    min-width: 0;
+    padding: 0 2;
+    margin-right: 2;
+    text-style: bold;
+}
+
+#edit-filter:hover {
+    background: $primary-lighten-2;
 }
 
 /* query tables (Live + Historic) */
@@ -206,9 +225,9 @@ QueryTable.stale > .datatable--header {
     display: none;
 }
 
-/* help rows above the table and the detail pane; hidden until help mode */
+/* help row above the table; hidden until help mode */
 
-#table-help, #detail-help {
+#table-help {
     height: 1;
     padding: 0 1;
     background: $secondary-muted;
@@ -216,8 +235,7 @@ QueryTable.stale > .datatable--header {
     display: none;
 }
 
-.-help #table-help,
-.-help #detail-help {
+.-help #table-help {
     display: block;
 }
 
@@ -244,9 +262,69 @@ QueryTable.stale > .datatable--header {
     color: $text-muted;
 }
 
+/* DetailRow: the detail pane with a gutter of controls each side */
+
+#detail-row {
+    height: 1fr;
+}
+
+/* Centred, so the controls sit level with the middle of either pane
+   whatever its border costs and however many controls it has. */
+
+.pane-gutter {
+    width: 3;
+    height: 1fr;
+    margin-left: 1;
+    align-vertical: middle;
+}
+
+/* A control owns its glyph's row and its key label's row, with a blank
+   row after it so the labels are not squeezed together. */
+
+.gutter-control {
+    width: 3;
+    height: auto;
+    margin-bottom: 1;
+}
+
+.gutter-glyph {
+    width: 3;
+    min-width: 0;
+    padding: 0;
+    text-align: center;
+}
+
+.gutter-glyph:hover {
+    background: $primary-lighten-2;
+}
+
+/* The label's row is always reserved, so a glyph never moves. */
+
+.gutter-key {
+    width: 3;
+    height: 1;
+    text-align: center;
+    visibility: hidden;
+}
+
+.-help .gutter-key {
+    visibility: visible;
+    background: $success;
+    color: $text;
+    text-style: bold;
+}
+
+/* Only the showing pane's controls are drawn */
+
+#detail-row.-plot .-sparql,
+#detail-row.-sparql .-plot {
+    display: none;
+}
+
 /* DetailSwitcher */
 
 DetailSwitcher {
+    width: 1fr;
     height: 1fr;
 }
 
@@ -373,6 +451,11 @@ FilterModal {
 
 #filter-modal Input {
     margin-bottom: 1;
+}
+
+#filter-apply {
+    dock: bottom;
+    width: 100%;
 }
 
 /* ResourcePlotModal */

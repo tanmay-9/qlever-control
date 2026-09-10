@@ -13,12 +13,6 @@ from functools import lru_cache
 
 from textual.binding import ActiveBinding, Binding
 from textual.screen import Screen
-from textual.widgets import Static
-
-
-def pill(key: str) -> str:
-    """A key drawn as a cap, in the colour only help mode uses."""
-    return f"[$text on $success] {key} [/]"
 
 
 def help_text(
@@ -37,7 +31,8 @@ def help_text(
         entry = by_action.get(action)
         if entry is None or not entry.enabled:
             continue
-        cap = pill(key_display(entry.binding))
+        # The key wears the colour help mode uses everywhere else.
+        cap = f"[$text on $success] {key_display(entry.binding)} [/]"
         parts.append(f"{cap} {entry.binding.description}")
     return "   ".join(parts)
 
@@ -48,19 +43,6 @@ def action_key(screen: Screen, action: str) -> str:
         if entry.binding.action == action:
             return screen.app.get_key_display(entry.binding)
     return ""
-
-
-def fill_help_row(screen: Screen, row_id: str, actions: list[str]) -> None:
-    """Fill one help row from the screen's bindings; CSS reveals it.
-
-    Rebuilt on each call, so an action that has since been disabled
-    drops out of the row.
-    """
-    text = help_text(
-        screen.active_bindings, actions, screen.app.get_key_display
-    )
-    # Naming the key that opened the row marks it as help.
-    screen.query_one(row_id, Static).update(f"[b]?[/b] help │ {text}")
 
 
 def format_timestamp(ms: int) -> str:

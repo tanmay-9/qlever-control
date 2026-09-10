@@ -6,7 +6,7 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.validation import Integer
-from textual.widgets import Input, Label, SelectionList
+from textual.widgets import Button, Input, Label, SelectionList
 from textual.widgets.selection_list import Selection
 
 from qlever.monitor_queries.models import FilterState
@@ -29,7 +29,8 @@ class FilterModal(ModalScreen[FilterState | None]):
     Filters by status, minimum duration, client IP, and SPARQL text.
 
     Opens pre-filled from the active filters and edits a draft. Enter
-    applies the draft, Esc cancels unchanged, c clears the draft.
+    or the Apply button applies the draft, Esc cancels unchanged, c
+    clears the draft.
     """
 
     BINDINGS = [
@@ -76,6 +77,12 @@ class FilterModal(ModalScreen[FilterState | None]):
                 value=self.filters.sparql_substr or "",
                 placeholder="any",
                 id="filter-sparql",
+            )
+            yield Button(
+                "Apply",
+                variant="primary",
+                id="filter-apply",
+                action="screen.apply",
             )
         yield Footer(show_command_palette=False)
 

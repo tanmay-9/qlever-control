@@ -3,11 +3,6 @@
 from textual.binding import ActiveBinding, Binding
 
 from qlever.monitor_queries.util import help_text
-from qlever.monitor_queries.widgets.detail_switcher import (
-    PLOT_ID,
-    SPARQL_ID,
-    detail_help_actions,
-)
 
 
 def key_display(binding: Binding) -> str:
@@ -95,8 +90,3 @@ def test_skips_a_disabled_action():
 
 def test_no_listed_action_is_bound():
     assert help_text({}, ["edit_filter", "invert_sort"], key_display) == ""
-
-
-def test_each_pane_leads_with_the_switch_to_the_other_pane():
-    assert detail_help_actions(SPARQL_ID)[0] == "show_plot"
-    assert detail_help_actions(PLOT_ID)[0] == "show_sparql"

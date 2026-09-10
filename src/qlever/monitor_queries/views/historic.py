@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import heapq
 from collections.abc import Callable
+from functools import partial
 
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.containers import Horizontal
 from textual.screen import Screen
-from textual.widgets import Static
+from textual.widgets import Button, Static
 from textual.worker import get_current_worker
 
 from qlever.monitor_queries.historic_data import (
@@ -43,7 +45,7 @@ from qlever.monitor_queries.resource_data import (
 )
 from qlever.monitor_queries.util import (
     action_key,
-    fill_help_row,
+    help_text,
     oneline,
     truncate,
 )
@@ -55,6 +57,7 @@ from qlever.monitor_queries.views.resource_plot_modal import (
     ResourcePlotModal,
 )
 from qlever.monitor_queries.widgets.controls_row import HistoricControlsRow
+from qlever.monitor_queries.widgets.detail_row import DetailRow
 from qlever.monitor_queries.widgets.detail_switcher import DetailSwitcher
 from qlever.monitor_queries.widgets.footer import Footer
 from qlever.monitor_queries.widgets.header_row import HeaderRow
@@ -126,7 +129,6 @@ CHIP_SUBSTR_LIMIT = 20
 TABLE_HELP_ACTIONS = [
     "sort_prev_column",
     "invert_sort",
-    "edit_filter",
     "clear_filters",
 ]
 
@@ -183,10 +185,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("i", "invert_sort", "Invert sort"),
         Binding("f", "edit_filter", "Filter"),
         Binding("F", "clear_filters", "Clear filters"),
-        # One footer entry for both: r shows the pane, R the modal.
-        Binding("r", "show_plot", "Resource plot", key_display="r/R"),
-        Binding("R", "maximize_plot", "Maximize plot", show=False),
-        Binding("s", "show_sparql", "SPARQL"),
+        Binding("r", "show_plot", "Resource plot", show=False),
+        Binding("R", "maximize_plot", "Zoom the plot", show=False),
+        Binding("s", "show_sparql", "SPARQL", show=False),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
 
@@ -243,16 +244,30 @@ class HistoricScreen(Screen, inherit_bindings=False):
         )
         yield HistoricControlsRow(controls)
         yield TimelineRow(bounds)
-        yield MetricsRow(
-            [MetricsCounts(label=self.window_size, **EMPTY_FIELDS)],
-            self.app.slow_threshold,
+        filter_button = Button(
+            "Filter",
+            variant="primary",
+            id="edit-filter",
+            compact=True,
+            action="screen.edit_filter",
+            tooltip="Filter the queries shown for this window.",
+        )
+        # Clicking it must not take focus off the table.
+        filter_button.can_focus = False
+        yield Horizontal(
+            MetricsRow(
+                [MetricsCounts(label=self.window_size, **EMPTY_FIELDS)],
+                self.app.slow_threshold,
+            ),
+            Static("", id="edit-filter-key", classes="key-pill"),
+            filter_button,
+            id="metrics-filter-row",
         )
         yield Static("", id="filter-row")
         yield Static("", id="table-help")
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
-        yield Static("", id="detail-help")
-        yield DetailSwitcher(
+        yield DetailRow(
             source=self.historic_resource_plot,
             refresh_interval=None,
             reload=self.reload_plot,
@@ -274,6 +289,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
             action_key(self, "cycle_mode_back"),
             action_key(self, "cycle_mode"),
         )
+        self.query_one("#edit-filter-key", Static).update(
+            action_key(self, "edit_filter")
+        )
         self.query_one(TimelineRow).set_help_keys(
             shift=(
                 action_key(self, "shift_earlier"),
@@ -284,10 +302,21 @@ class HistoricScreen(Screen, inherit_bindings=False):
                 action_key(self, "snap_end"),
             ),
         )
+        self.query_one(DetailRow).set_help_keys(partial(action_key, self))
 
     def refresh_help(self) -> None:
-        """Refill the help row this screen has beyond the shared one."""
-        fill_help_row(self, "#table-help", TABLE_HELP_ACTIONS)
+        """Refill the help row above the table; CSS reveals it.
+
+        Rebuilt on each call, so an action that has since been disabled
+        drops out of the row.
+        """
+        text = help_text(
+            self.active_bindings,
+            TABLE_HELP_ACTIONS,
+            self.app.get_key_display,
+        )
+        # Naming the key that opened the row marks it as help.
+        self.query_one("#table-help", Static).update(f"[b]?[/b] help │ {text}")
 
     def on_screen_resume(self) -> None:
         """Catch up on log growth, then push state and rescan.
@@ -706,7 +735,6 @@ class HistoricScreen(Screen, inherit_bindings=False):
         else:
             row.update(filter_summary(self.filters))
             row.display = True
-        self.refresh_bindings()
 
     def action_clear_filters(self) -> None:
         """Drop all filters and re-render (no rescan)."""
