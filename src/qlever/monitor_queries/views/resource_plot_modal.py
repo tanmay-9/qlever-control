@@ -33,6 +33,8 @@ class ResourcePlotModal(ModalScreen):
         # One footer entry for the pair: the key that opened it closes it.
         Binding("escape", "close", "Close", key_display="esc/z"),
         Binding("z", "close", "Close", show=False),
+        # A modal cuts the app's bindings, so quit is repeated here.
+        Binding("q", "app.quit", "Quit"),
     ]
 
     def __init__(

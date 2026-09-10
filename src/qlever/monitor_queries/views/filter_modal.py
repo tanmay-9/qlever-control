@@ -40,6 +40,8 @@ class FilterModal(ModalScreen[FilterState | None]):
         Binding("escape", "cancel", "Cancel", key_display="esc/f"),
         Binding("f", "cancel", "Cancel", show=False),
         Binding("c", "clear", "Clear"),
+        # A modal cuts the app's bindings, so quit is repeated here.
+        Binding("q", "app.quit", "Quit"),
     ]
 
     def __init__(self, filters: FilterState) -> None:
