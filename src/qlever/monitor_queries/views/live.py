@@ -6,9 +6,10 @@ from functools import partial
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.containers import Horizontal
 from textual.reactive import reactive
 from textual.screen import Screen
-from textual.widgets import Static
+from textual.widgets import Button, Static
 from textual.worker import get_current_worker
 
 from qlever.monitor_queries.live_data import (
@@ -61,7 +62,7 @@ class LiveScreen(Screen, inherit_bindings=False):
 
     BINDINGS = [
         Binding("tab", "app.swap_screen", "Historic>", priority=True),
-        Binding("f", "toggle_freeze", "Freeze/Unfreeze"),
+        Binding("f", "toggle_freeze", "Freeze/Unfreeze", show=False),
         Binding("r", "show_plot", "Resource plot", show=False),
         Binding("R", "maximize_plot", "Zoom the plot", show=False),
         Binding("s", "show_sparql", "SPARQL", show=False),
@@ -109,9 +110,24 @@ class LiveScreen(Screen, inherit_bindings=False):
             ),
             get_resource_usage(self.resource_history, self.resource_totals),
         )
-        yield MetricsRow(
-            get_live_metrics(state, slow_ms, current_ms()),
-            self.app.slow_threshold,
+        freeze_button = Button(
+            "Freeze",
+            variant="primary",
+            id="freeze",
+            compact=True,
+            action="screen.toggle_freeze",
+            tooltip="Stop the table and metrics from updating.",
+        )
+        # Clicking it must not take focus off the table.
+        freeze_button.can_focus = False
+        yield Horizontal(
+            MetricsRow(
+                get_live_metrics(state, slow_ms, current_ms()),
+                self.app.slow_threshold,
+            ),
+            Static("", id="freeze-key", classes="key-pill"),
+            freeze_button,
+            id="metrics-freeze-row",
         )
         yield LiveQueryTable(rows)
         yield Static("", id="table-status")
@@ -133,6 +149,9 @@ class LiveScreen(Screen, inherit_bindings=False):
         # Label the gutter controls with the keys that run them; CSS
         # decides when the labels show.
         self.query_one(DetailRow).set_help_keys(partial(action_key, self))
+        self.query_one("#freeze-key", Static).update(
+            action_key(self, "toggle_freeze")
+        )
         if self.liveness == "checking":
             self.start_pinging(initial=True)
         # Focus the table so the header theme dropdown can't take it.
@@ -381,8 +400,11 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.query_one("#table-status", Static).update(" · ".join(hints))
 
     def watch_frozen(self, frozen: bool) -> None:
-        """Refresh the status line to reflect the frozen state."""
+        """Update the status line and name the way out on the button."""
         self.refresh_table_status()
+        self.query_one("#freeze", Button).label = (
+            "Unfreeze" if frozen else "Freeze"
+        )
 
     def action_toggle_freeze(self) -> None:
         """Toggle the frozen state of the live view."""
