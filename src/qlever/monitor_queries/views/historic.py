@@ -127,8 +127,8 @@ CHIP_SUBSTR_LIMIT = 20
 
 # Actions the help row above the table lists, in reading order.
 TABLE_HELP_ACTIONS = [
-    "sort_next_column",
     "sort_prev_column",
+    "sort_next_column",
     "invert_sort",
 ]
 
@@ -189,9 +189,17 @@ class HistoricScreen(Screen, inherit_bindings=False):
             show=False,
             priority=True,
         ),
-        Binding("o", "sort_next_column", "Sort by next column", show=False),
         Binding(
-            "O", "sort_prev_column", "Sort by previous column", show=False
+            "less_than_sign",
+            "sort_prev_column",
+            "Sort by previous column",
+            show=False,
+        ),
+        Binding(
+            "greater_than_sign",
+            "sort_next_column",
+            "Sort by next column",
+            show=False,
         ),
         Binding("i", "invert_sort", "Invert sort", show=False),
         Binding("f", "edit_filter", "Filter", show=False),

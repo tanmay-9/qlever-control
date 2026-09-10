@@ -268,7 +268,7 @@ QueryTable.stale > .datatable--header {
 #table-help {
     height: 1;
     padding: 0 1;
-    background: $secondary-muted;
+    background: $boost;
     color: $text-muted;
     display: none;
 }
