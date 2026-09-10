@@ -128,11 +128,42 @@ ResourceRow.stale {
 
 /* Timeline (Historic only) */
 
-Timeline {
+TimelineRow {
     height: 2;
     margin-bottom: 1;
     margin-left: 1;
     margin-right: 1;
+}
+
+Timeline {
+    width: 1fr;
+    height: 2;
+}
+
+/* Two stacked controls per side, glyphs kept against the timeline so
+   they line up; the key labels sit on the outside. */
+
+.timeline-controls {
+    width: auto;
+    height: 2;
+}
+
+.timeline-controls.-left {
+    align-horizontal: right;
+}
+
+.timeline-control {
+    width: auto;
+    height: 1;
+}
+
+.timeline-arrow {
+    width: auto;
+    padding: 0 1;
+}
+
+.timeline-arrow:disabled {
+    color: $text-disabled;
 }
 
 /* Historic's MetricsRow is a single line; the global rule above

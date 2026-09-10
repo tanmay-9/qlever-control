@@ -69,6 +69,7 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
 )
 from qlever.monitor_queries.widgets.selected_window import SelectedWindow
 from qlever.monitor_queries.widgets.timeline import Timeline
+from qlever.monitor_queries.widgets.timeline_row import TimelineRow
 from qlever.monitor_queries.widgets.window_stepper import (
     WindowStepper,
     available_presets,
@@ -165,17 +166,13 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("m", "cycle_mode", "Mode"),
         Binding("M", "cycle_mode_back", "Mode", show=False),
         Binding(
-            "left",
-            "shift_earlier",
-            "Shift window",
-            key_display="←→",
-            priority=True,
+            "left", "shift_earlier", "Shift earlier", show=False, priority=True
         ),
         Binding(
-            "right", "shift_later", "Shift window", show=False, priority=True
+            "right", "shift_later", "Shift later", show=False, priority=True
         ),
-        Binding("g", "snap_start", "Window start/end", key_display="g/G"),
-        Binding("G", "snap_end", "Window end", show=False),
+        Binding("g", "snap_start", "Jump to log start", show=False),
+        Binding("G", "snap_end", "Jump to log end", show=False),
         Binding(
             "less_than_sign",
             "sort_prev_column",
@@ -245,7 +242,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             center=Static(TITLE),
         )
         yield HistoricControlsRow(controls)
-        yield Timeline(bounds)
+        yield TimelineRow(bounds)
         yield MetricsRow(
             [MetricsCounts(label=self.window_size, **EMPTY_FIELDS)],
             self.app.slow_threshold,
@@ -276,6 +273,16 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.query_one(ModePicker).set_help_keys(
             action_key(self, "cycle_mode_back"),
             action_key(self, "cycle_mode"),
+        )
+        self.query_one(TimelineRow).set_help_keys(
+            shift=(
+                action_key(self, "shift_earlier"),
+                action_key(self, "shift_later"),
+            ),
+            jump=(
+                action_key(self, "snap_start"),
+                action_key(self, "snap_end"),
+            ),
         )
 
     def refresh_help(self) -> None:
@@ -337,7 +344,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.query_one(WindowStepper).window_size = self.window_size
         self.query_one(ModePicker).selected = self.mode
         self.query_one(SelectedWindow).state = controls
-        self.query_one(Timeline).bounds = bounds
+        self.query_one(TimelineRow).bounds = bounds
         if rescan:
             if (
                 self.window_start_ms,
@@ -772,6 +779,17 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def on_timeline_recentered(self, message: Timeline.Recentered) -> None:
         """Recenter the window on the clicked timeline position."""
         self.center_window_at(message.center_ms)
+
+    def on_timeline_row_shifted(self, message: TimelineRow.Shifted) -> None:
+        """Shift the window when a timeline arrow is clicked."""
+        self.shift_window(message.direction)
+
+    def on_timeline_row_jumped(self, message: TimelineRow.Jumped) -> None:
+        """Jump to a log edge when a jump arrow is clicked."""
+        if message.direction < 0:
+            self.action_snap_start()
+        else:
+            self.action_snap_end()
 
     def on_data_table_header_selected(
         self, message: HistoricQueryTable.HeaderSelected
