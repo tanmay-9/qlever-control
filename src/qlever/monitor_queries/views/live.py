@@ -113,6 +113,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         )
         yield LiveQueryTable(rows)
         yield Static("", id="table-status")
+        yield Static("", id="detail-help")
         yield DetailSwitcher(
             source=self.live_resource_plot,
             refresh_interval=self.app.sample_interval_s,

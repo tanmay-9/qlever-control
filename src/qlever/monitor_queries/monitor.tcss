@@ -12,7 +12,25 @@ HeaderRow {
 
 .slot-center {
     width: 1fr;
-    text-align: center;
+    height: 1;
+    align-horizontal: center;
+}
+
+.title {
+    width: auto;
+    text-style: bold;
+}
+
+#help-badge {
+    display: none;
+}
+
+.-help #help-badge {
+    display: block;
+    width: auto;
+    margin-left: 2;
+    background: $success;
+    color: $text;
     text-style: bold;
 }
 
@@ -157,6 +175,36 @@ QueryTable.stale > .datatable--header {
     display: none;
 }
 
+/* help rows above the table and the detail pane; hidden until help mode */
+
+#table-help, #detail-help {
+    height: 1;
+    padding: 0 1;
+    background: $secondary-muted;
+    color: $text-muted;
+    display: none;
+}
+
+.-help #table-help,
+.-help #detail-help {
+    display: block;
+}
+
+/* Key labels next to the controls they belong to */
+
+.key-pill {
+    display: none;
+}
+
+.-help .key-pill {
+    display: block;
+    width: auto;
+    padding: 0 1;
+    background: $success;
+    color: $text;
+    text-style: bold;
+}
+
 /* table status line; a muted caption flush under the table reads as part of it */
 
 #table-status {
@@ -211,6 +259,11 @@ HistoricControlsRow > ModePicker {
     width: 1fr;
     height: 1;
     align-horizontal: center;
+}
+
+/* In help mode the row carries key pills, so it joins the help rows */
+.-help HistoricControlsRow {
+    background: $secondary-muted;
 }
 
 HistoricControlsRow > SelectedWindow {

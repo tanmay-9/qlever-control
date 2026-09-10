@@ -7,6 +7,7 @@ from textual import work
 from textual.app import App
 from textual.binding import Binding
 from textual.css.query import NoMatches
+from textual.reactive import reactive
 from textual.widgets import Select
 from textual.worker import get_current_worker
 
@@ -23,9 +24,17 @@ from qlever.monitor_queries.log_reader import (
     read_first_timestamp,
 )
 from qlever.monitor_queries.resource_data import system_totals
-from qlever.monitor_queries.util import clipboard_install_hint, copy_text
+from qlever.monitor_queries.util import (
+    clipboard_install_hint,
+    copy_text,
+    fill_help_row,
+)
 from qlever.monitor_queries.views.historic import HistoricScreen
 from qlever.monitor_queries.views.live import LiveScreen
+from qlever.monitor_queries.widgets.detail_switcher import (
+    DetailSwitcher,
+    detail_help_actions,
+)
 from qlever.monitor_queries.widgets.header_row import ThemeSelect
 from qlever.monitor_queries.widgets.query_table import QueryTable
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane, SparqlScroll
@@ -52,6 +61,7 @@ class MonitorQueriesApp(App):
 
     BINDINGS = [
         ("q", "quit", "Quit/Exit"),
+        ("question_mark", "toggle_help", "Help"),
         ("t", "open_theme_picker", "Theme"),
         ("y", "copy_query", "Copy SPARQL"),
         ("p", "pretty_print", "Pretty print"),
@@ -66,6 +76,9 @@ class MonitorQueriesApp(App):
             "shift+down", "scroll_sparql_down", "Scroll SPARQL", show=False
         ),
     ]
+
+    # Lives on the app, not the screens, so help stays on across a swap.
+    help_mode = reactive(False, init=False)
 
     def __init__(
         self,
@@ -177,6 +190,35 @@ class MonitorQueriesApp(App):
                 )
                 return
         self.switch_screen(target)
+        # The arriving screen's help row is stale; fill it once it is up.
+        self.call_after_refresh(self.fill_detail_help)
+
+    def action_toggle_help(self) -> None:
+        """Show or hide the on-screen help annotations."""
+        self.help_mode = not self.help_mode
+
+    def watch_help_mode(self, help_mode: bool) -> None:
+        """Flip the class CSS keys off, then refresh the text it reveals.
+
+        The class sits on the app so it covers both screens and never
+        has to be re-applied; only the text needs computing.
+        """
+        self.set_class(help_mode, "-help")
+        self.fill_detail_help()
+
+    def on_detail_switcher_switched(self) -> None:
+        """Rewrite the pane's help row for the pane now showing."""
+        self.fill_detail_help()
+
+    def fill_detail_help(self) -> None:
+        """Fill the help row above the detail pane of the current screen.
+
+        Both screens share this row, and each pane in it answers to
+        different keys, so the keys follow whichever pane is showing.
+        """
+        screen = self.screen
+        actions = detail_help_actions(screen.query_one(DetailSwitcher).current)
+        fill_help_row(screen, "#detail-help", actions)
 
     def copy_to_clipboard(self, text: str) -> None:
         """Copy text to the clipboard, native tool first, OSC 52 fallback.

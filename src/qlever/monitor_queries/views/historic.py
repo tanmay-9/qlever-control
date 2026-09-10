@@ -41,7 +41,12 @@ from qlever.monitor_queries.resource_data import (
     get_resource_plot,
     read_resource_window,
 )
-from qlever.monitor_queries.util import oneline, truncate
+from qlever.monitor_queries.util import (
+    action_key,
+    fill_help_row,
+    oneline,
+    truncate,
+)
 from qlever.monitor_queries.views.filter_modal import (
     FILTER_STATUSES,
     FilterModal,
@@ -116,6 +121,14 @@ RESCAN_DEBOUNCE_S = 0.1
 # SPARQL substring keeps the row on one line.
 CHIP_SUBSTR_LIMIT = 20
 
+# Actions the help row above the table lists, in reading order.
+TABLE_HELP_ACTIONS = [
+    "sort_prev_column",
+    "invert_sort",
+    "edit_filter",
+    "clear_filters",
+]
+
 
 def filter_summary(filters: FilterState) -> str:
     """Markup readout of the active filters: bold labels, colored values."""
@@ -148,7 +161,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
     BINDINGS = [
         Binding("tab", "app.swap_screen", "<Live", priority=True),
         Binding("w", "cycle_window", "Window size"),
+        Binding("W", "cycle_window_back", "Window size", show=False),
         Binding("m", "cycle_mode", "Mode"),
+        Binding("M", "cycle_mode_back", "Mode", show=False),
         Binding(
             "left",
             "shift_earlier",
@@ -236,8 +251,10 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.app.slow_threshold,
         )
         yield Static("", id="filter-row")
+        yield Static("", id="table-help")
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
+        yield Static("", id="detail-help")
         yield DetailSwitcher(
             source=self.historic_resource_plot,
             refresh_interval=None,
@@ -248,6 +265,22 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def on_mount(self) -> None:
         """Focus the table so the header theme dropdown can't take it."""
         self.query_one(HistoricQueryTable).focus()
+        # The app fills the shared pane row; this screen owns the rest.
+        self.watch(self.app, "help_mode", self.refresh_help)
+        # Label the controls with the keys that step them; CSS decides
+        # when the labels show.
+        self.query_one(WindowStepper).set_help_keys(
+            action_key(self, "cycle_window_back"),
+            action_key(self, "cycle_window"),
+        )
+        self.query_one(ModePicker).set_help_keys(
+            action_key(self, "cycle_mode_back"),
+            action_key(self, "cycle_mode"),
+        )
+
+    def refresh_help(self) -> None:
+        """Refill the help row this screen has beyond the shared one."""
+        fill_help_row(self, "#table-help", TABLE_HELP_ACTIONS)
 
     def on_screen_resume(self) -> None:
         """Catch up on log growth, then push state and rescan.
@@ -266,6 +299,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
         else:
             self.clamp_window()
             self.refresh_view(rescan=True)
+        # Help mode may have been switched on while the other screen showed.
+        self.refresh_help()
 
     def read_log_end(self) -> int:
         """Return the freshest log timestamp the tailer has seen."""
@@ -603,10 +638,22 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Step to the next window-size preset (wraps)."""
         self.step_window(1)
 
+    def action_cycle_window_back(self) -> None:
+        """Step to the previous window-size preset (wraps)."""
+        self.step_window(-1)
+
+    def cycle_mode(self, direction: int) -> None:
+        """Move the match mode one step in `direction` (wraps)."""
+        index = MODES.index(self.mode)
+        self.set_mode(MODES[(index + direction) % len(MODES)])
+
     def action_cycle_mode(self) -> None:
         """Step to the next match mode (wraps)."""
-        index = MODES.index(self.mode)
-        self.set_mode(MODES[(index + 1) % len(MODES)])
+        self.cycle_mode(1)
+
+    def action_cycle_mode_back(self) -> None:
+        """Step to the previous match mode (wraps)."""
+        self.cycle_mode(-1)
 
     def cycle_sort_column(self, direction: int) -> None:
         """Move the sort one column in `direction` (wraps)."""
