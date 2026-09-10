@@ -2,7 +2,7 @@
 
 HeaderRow {
     height: 1;
-    background: $primary;
+    background: $panel;
     color: $text;
 }
 
@@ -16,8 +16,11 @@ HeaderRow {
     align-horizontal: center;
 }
 
+/* Full strength, not the 87% $text the rest of the bar inherits. */
+
 .title {
     width: auto;
+    color: $foreground;
     text-style: bold;
 }
 
@@ -41,8 +44,12 @@ ThemeSelect {
 }
 
 ThemeSelect > SelectCurrent {
-    background: $accent;
+    background: $primary;
     padding: 0 1;
+}
+
+ThemeSelect > SelectCurrent:hover {
+    background: $primary-lighten-2;
 }
 
 ThemeSelect > SelectCurrent #label {
@@ -63,14 +70,14 @@ NavPill {
     width: auto;
     min-width: 18;
     padding: 0 1;
-    background: $accent;
+    background: $primary;
     color: $text;
     text-style: bold;
     text-align: center;
 }
 
 NavPill:hover {
-    background: $accent-lighten-2;
+    background: $primary-lighten-2;
 }
 
 /* ResourceRow: RSS sparkline | server status | CPU sparkline.
@@ -163,6 +170,10 @@ Timeline {
     padding: 0 1;
 }
 
+.timeline-arrow:hover {
+    background: $primary-lighten-2;
+}
+
 /* One width for every key label here, so a longer one cannot push its
    arrow out of line with the arrow above it. Fits the widest, "⇧ →". */
 
@@ -218,6 +229,13 @@ QueryTable {
 
 QueryTable > .datatable--cursor {
     background: $secondary;
+    color: $text;
+}
+
+/* Clicking a header sorts by it, which nothing else says. */
+
+HistoricQueryTable > .datatable--header-hover {
+    background: $primary-lighten-2;
     color: $text;
 }
 
@@ -284,8 +302,13 @@ QueryTable.stale > .datatable--header {
 
 /* DetailRow: the detail pane with a gutter of controls each side */
 
+/* One panel behind both panes and the gutter, so the detail area reads
+   as a single region. The plot draws no background of its own, so this
+   shows through it too. */
+
 #detail-row {
     height: 1fr;
+    background: $boost;
 }
 
 /* Centred, so the controls sit level with the middle of either pane
@@ -402,11 +425,6 @@ HistoricControlsRow > ModePicker {
     align-horizontal: center;
 }
 
-/* In help mode the row carries key pills, so it joins the help rows */
-.-help HistoricControlsRow {
-    background: $secondary-muted;
-}
-
 HistoricControlsRow > SelectedWindow {
     width: 1fr;
     height: 1;
@@ -433,21 +451,34 @@ ModePicker > Static {
     text-style: bold;
 }
 
+/* The bracketed group sits slightly raised off the page, so the
+   selected segment reads against it rather than against the screen. */
+
 .picker-bracket {
-    padding: 0 1;
+    background: $boost;
 }
 
 .picker-segment {
     padding: 0 1;
     color: $text-muted;
+    background: $boost;
+}
+
+/* Before the selected rule, so hovering the active segment leaves it
+   alone: it is already where you are. */
+
+.stepper-arrow:hover,
+.picker-segment:hover {
+    background: $primary-lighten-2;
 }
 
 .picker-sep {
     color: $text-muted;
+    background: $boost;
 }
 
 .picker-segment.-selected {
-    background: $accent;
+    background: $secondary;
     color: $text;
     text-style: bold;
 }
@@ -505,4 +536,32 @@ ResourcePlotModal {
 
 #resource-plot-modal PlotextPlot {
     height: 1fr;
+}
+
+/* Footer */
+
+/* A gap between entries, so a key and its label read as one control
+   rather than running into the next one. */
+
+FooterKey {
+    margin-right: 3;
+}
+
+/* Clicking one presses its key, so the cap is filled like every other
+   control. The green pills elsewhere are labels, not controls. */
+
+FooterKey > .footer-key--key {
+    background: $primary;
+    color: $text;
+    text-style: bold;
+    padding: 0 1;
+}
+
+FooterKey:hover > .footer-key--key {
+    background: $primary-lighten-2;
+}
+
+FooterKey > .footer-key--description {
+    padding: 0 0 0 1;
+    color: $text-muted;
 }

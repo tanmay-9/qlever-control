@@ -54,7 +54,7 @@ class MonitorQueriesApp(App):
     SCREENS = {"live": LiveScreen, "historic": HistoricScreen}
 
     BINDINGS = [
-        ("q", "quit", "Quit/Exit"),
+        ("q", "quit", "Quit"),
         ("question_mark", "toggle_help", "Help"),
         ("t", "open_theme_picker", "Theme"),
         Binding("c", "copy_query", "Copy SPARQL", show=False),
