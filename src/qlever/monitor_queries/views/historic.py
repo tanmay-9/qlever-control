@@ -127,6 +127,7 @@ CHIP_SUBSTR_LIMIT = 20
 
 # Actions the help row above the table lists, in reading order.
 TABLE_HELP_ACTIONS = [
+    "sort_next_column",
     "sort_prev_column",
     "invert_sort",
 ]
@@ -162,9 +163,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
 
     BINDINGS = [
         Binding("tab", "app.swap_screen", "<Live", priority=True),
-        Binding("w", "cycle_window", "Window size"),
+        Binding("w", "cycle_window", "Window size", show=False),
         Binding("W", "cycle_window_back", "Window size", show=False),
-        Binding("m", "cycle_mode", "Mode"),
+        Binding("m", "cycle_mode", "Mode", show=False),
         Binding("M", "cycle_mode_back", "Mode", show=False),
         Binding(
             "left", "shift_earlier", "Shift earlier", show=False, priority=True
@@ -172,20 +173,31 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding(
             "right", "shift_later", "Shift later", show=False, priority=True
         ),
-        Binding("g", "snap_start", "Jump to log start", show=False),
-        Binding("G", "snap_end", "Jump to log end", show=False),
         Binding(
-            "less_than_sign",
-            "sort_prev_column",
-            "Sort column",
-            key_display="< >",
+            "shift+left",
+            "snap_start",
+            "Jump to log start",
+            key_display="⇧ ←",
+            show=False,
+            priority=True,
         ),
-        Binding("greater_than_sign", "sort_next_column", "", show=False),
-        Binding("i", "invert_sort", "Invert sort"),
-        Binding("f", "edit_filter", "Filter"),
+        Binding(
+            "shift+right",
+            "snap_end",
+            "Jump to log end",
+            key_display="⇧ →",
+            show=False,
+            priority=True,
+        ),
+        Binding("o", "sort_next_column", "Sort by next column", show=False),
+        Binding(
+            "O", "sort_prev_column", "Sort by previous column", show=False
+        ),
+        Binding("i", "invert_sort", "Invert sort", show=False),
+        Binding("f", "edit_filter", "Filter", show=False),
         Binding("F", "clear_filters", "Clear filters", show=False),
         Binding("r", "show_plot", "Resource plot", show=False),
-        Binding("R", "maximize_plot", "Zoom the plot", show=False),
+        Binding("z", "maximize_plot", "Zoom the plot", show=False),
         Binding("s", "show_sparql", "SPARQL", show=False),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
@@ -286,7 +298,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             refresh_interval=None,
             reload=self.reload_plot,
         )
-        yield Footer(show_command_palette=False)
+        yield Footer()
 
     def on_mount(self) -> None:
         """Focus the table so the header theme dropdown can't take it."""
@@ -822,10 +834,6 @@ class HistoricScreen(Screen, inherit_bindings=False):
     def on_mode_picker_selected(self, message: ModePicker.Selected) -> None:
         """Switch the match mode when a segment is clicked."""
         self.set_mode(message.mode)
-
-    def on_resize(self) -> None:
-        """Re-evaluate the conditional scroll bindings after a resize."""
-        self.call_after_refresh(self.refresh_bindings)
 
     def on_timeline_recentered(self, message: Timeline.Recentered) -> None:
         """Recenter the window on the clicked timeline position."""

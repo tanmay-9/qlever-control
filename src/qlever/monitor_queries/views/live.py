@@ -64,7 +64,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         Binding("tab", "app.swap_screen", "Historic>", priority=True),
         Binding("f", "toggle_freeze", "Freeze/Unfreeze", show=False),
         Binding("r", "show_plot", "Resource plot", show=False),
-        Binding("R", "maximize_plot", "Zoom the plot", show=False),
+        Binding("z", "maximize_plot", "Zoom the plot", show=False),
         Binding("s", "show_sparql", "SPARQL", show=False),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
@@ -409,10 +409,6 @@ class LiveScreen(Screen, inherit_bindings=False):
     def action_toggle_freeze(self) -> None:
         """Toggle the frozen state of the live view."""
         self.frozen = not self.frozen
-
-    def on_resize(self) -> None:
-        """Re-evaluate the conditional scroll bindings after a resize."""
-        self.call_after_refresh(self.refresh_bindings)
 
     def on_nav_pill_clicked(self, message: NavPill.Clicked) -> None:
         """Switch to the screen named by the clicked pill.

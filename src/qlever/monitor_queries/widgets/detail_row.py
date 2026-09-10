@@ -18,6 +18,7 @@ from qlever.monitor_queries.widgets.detail_switcher import (
     PLOT_ID,
     DetailSwitcher,
 )
+from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
 
 
 class GutterControl(NamedTuple):
@@ -155,7 +156,10 @@ class DetailRow(Horizontal):
         self.set_class(not showing_plot, "-sparql")
 
     def set_help_keys(self, key_for_action: Callable[[str], str]) -> None:
-        """Name the key that runs each control."""
+        """Name the key that runs each control, and the pane's own keys."""
         for control in PLOT_CONTROLS + SPARQL_CONTROLS:
             label = self.query_one(f"#{control.name}-key", Static)
             label.update(key_for_action(control.action))
+        self.query_one(SparqlPane).set_help_keys(
+            key_for_action("scroll_sparql_up")
+        )

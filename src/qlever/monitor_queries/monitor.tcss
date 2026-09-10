@@ -163,6 +163,14 @@ Timeline {
     padding: 0 1;
 }
 
+/* One width for every key label here, so a longer one cannot push its
+   arrow out of line with the arrow above it. Fits the widest, "⇧ →". */
+
+.-help .timeline-control .key-pill {
+    width: 5;
+    text-align: center;
+}
+
 .timeline-arrow:disabled {
     color: $text-disabled;
 }
@@ -356,6 +364,18 @@ SparqlPane {
 #sparql-header {
     height: 1;
     margin-bottom: 1;
+}
+
+#sparql-identity {
+    width: 1fr;
+    height: 1;
+}
+
+/* The scroll hint is given the key-pill class only while the query
+   overflows; without it this rule keeps the hint hidden. */
+
+.scroll-key {
+    display: none;
 }
 
 #sparql-scroll {

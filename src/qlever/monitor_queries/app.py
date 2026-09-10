@@ -6,7 +6,6 @@ from pathlib import Path
 from textual import work
 from textual.app import App
 from textual.binding import Binding
-from textual.css.query import NoMatches
 from textual.reactive import reactive
 from textual.widgets import Select
 from textual.worker import get_current_worker
@@ -58,14 +57,15 @@ class MonitorQueriesApp(App):
         ("q", "quit", "Quit/Exit"),
         ("question_mark", "toggle_help", "Help"),
         ("t", "open_theme_picker", "Theme"),
-        Binding("y", "copy_query", "Copy SPARQL", show=False),
+        Binding("c", "copy_query", "Copy SPARQL", show=False),
         Binding("p", "pretty_print", "Pretty print", show=False),
-        ("c", "clear_query", "Clear SPARQL"),
+        # One label for the pair: the pill beside the pane reads it.
         Binding(
             "shift+up",
             "scroll_sparql_up",
             "Scroll SPARQL",
             key_display="⇧ ↑↓",
+            show=False,
         ),
         Binding(
             "shift+down", "scroll_sparql_down", "Scroll SPARQL", show=False
@@ -271,11 +271,6 @@ class MonitorQueriesApp(App):
             return
         pane.pretty_text = result
 
-    def action_clear_query(self) -> None:
-        """Drop the displayed query, restoring the empty-state hint."""
-        pane = self.screen.query_one(SparqlPane)
-        pane.content = None
-
     def action_scroll_sparql_up(self) -> None:
         """Scroll the overflowing SPARQL pane up one line."""
         self.screen.query_one(SparqlScroll).scroll_up()
@@ -283,22 +278,6 @@ class MonitorQueriesApp(App):
     def action_scroll_sparql_down(self) -> None:
         """Scroll the overflowing SPARQL pane down one line."""
         self.screen.query_one(SparqlScroll).scroll_down()
-
-    def check_action(
-        self, action: str, parameters: tuple[object, ...]
-    ) -> bool | None:
-        """Show the scroll bindings only when the query overflows the pane.
-
-        Returns False (hidden) rather than None (grayed) so the footer
-        entry disappears entirely until there is something to scroll.
-        """
-        if action in ("scroll_sparql_up", "scroll_sparql_down"):
-            try:
-                scroll = self.screen.query_one(SparqlScroll)
-            except NoMatches:
-                return False
-            return scroll.max_scroll_y > 0
-        return True
 
     def action_open_theme_picker(self) -> None:
         """Open the header theme dropdown on the active screen."""
