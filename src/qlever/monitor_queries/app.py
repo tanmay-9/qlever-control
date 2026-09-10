@@ -206,7 +206,7 @@ class MonitorQueriesApp(App):
         itself the signal to fall back to the terminal's own OSC 52.
         """
         result = copy_text(text)
-        if result is True:
+        if result:
             self.notify("Copied to clipboard")
             return
 
@@ -214,8 +214,8 @@ class MonitorQueriesApp(App):
         if result is None:
             detail = (
                 f"No clipboard tool found; copied via the terminal (OSC 52). "
-                f"{clipboard_install_hint()} for a reliable copy, or check "
-                "your terminal supports OSC 52."
+                f"{clipboard_install_hint().capitalize()} for a reliable copy, "
+                "or check if your terminal supports OSC 52."
             )
         else:
             detail = (
