@@ -403,7 +403,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         """Update the status line and name the way out on the button."""
         self.refresh_table_status()
         self.query_one("#freeze", Button).label = (
-            "Unfreeze" if frozen else "Freeze"
+            "Resume" if frozen else "Freeze"
         )
 
     def action_toggle_freeze(self) -> None:

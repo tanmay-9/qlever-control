@@ -200,18 +200,13 @@ HistoricScreen MetricsRow {
 }
 
 /* The buttons parked at the right end of a row, in one rule so they
-   cannot drift apart. Freeze is given the width of its longer label,
-   so the swap between Freeze and Unfreeze moves nothing. */
+   cannot drift apart. */
 
 #edit-filter, #freeze, #clear-filters {
     min-width: 0;
     padding: 0 2;
     margin-right: 2;
     text-style: bold;
-}
-
-#freeze {
-    width: 12;
 }
 
 #edit-filter:hover, #freeze:hover, #clear-filters:hover {
