@@ -35,15 +35,11 @@ class Capacity:
     """What the machine has, so the bars and axes have a full scale.
 
     Read once at startup, since it cannot change while we run. `cores`
-    is None when the count could not be read. `read_write_min_max_mbs`
-    is not measured but set by the user (the `--read-write-min-max-mbs`
-    option): the bounds of the disk read/write axis; None means that
-    axis scales freely to its data.
+    is None when the count could not be read.
     """
 
     ram_gb: float
     cores: float | None
-    read_write_min_max_mbs: tuple[float, float] | None = None
 
 
 class Column(NamedTuple):
@@ -54,12 +50,7 @@ class Column(NamedTuple):
     `scale` divides a raw reading into display units. `reduce` says how
     several readings in one time bucket collapse into a point.
     `capacity` names the `Capacity` attribute that gives an axis its
-    full height, and is None for a column with no ceiling. `floor` is
-    the least full height the column's axis gets, so that readings
-    which are small in absolute terms also look small; the axis still
-    grows past it with the data. `bounds` names the `Capacity`
-    attribute holding user-set (min, max) axis bounds, which replace
-    the floor when they are set.
+    full height, and is None for a column with no ceiling.
     """
 
     key: str
@@ -68,8 +59,6 @@ class Column(NamedTuple):
     scale: float
     reduce: str
     capacity: str | None
-    floor: float = 0.0
-    bounds: str | None = None
 
 
 # One row per column, in the log's order. Everything that turns
@@ -99,7 +88,6 @@ COLUMNS = (
         scale=1e6,
         reduce="mean",
         capacity=None,
-        bounds="read_write_min_max_mbs",
     ),
     Column(
         key="write_bytes_per_s",
@@ -108,12 +96,7 @@ COLUMNS = (
         scale=1e6,
         reduce="mean",
         capacity=None,
-        bounds="read_write_min_max_mbs",
     ),
-    # An I/O stall below 20% of the time is routine on a busy server,
-    # so the floor keeps such readings low in the plot instead of
-    # letting the axis magnify them; sustained values beyond that mean
-    # real pressure and rise above.
     Column(
         key="io_stall_percent",
         label="io stall",
@@ -121,7 +104,6 @@ COLUMNS = (
         scale=1,
         reduce="mean",
         capacity=None,
-        floor=20.0,
     ),
 )
 
@@ -191,8 +173,6 @@ def series_for_column(
     by every column, so the series all line up with the window's
     `times_s`.
     """
-    bounds = getattr(capacity, column.bounds) if column.bounds else None
-    axis_min, axis_max = bounds if bounds is not None else (column.floor, None)
     return ResourceSeries(
         key=column.key,
         label=column.label,
@@ -202,8 +182,6 @@ def series_for_column(
             for index in filled
         ),
         total=getattr(capacity, column.capacity) if column.capacity else None,
-        axis_min=axis_min,
-        axis_max=axis_max,
     )
 
 
