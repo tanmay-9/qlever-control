@@ -207,6 +207,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("f", "edit_filter", "Filter", show=False),
         Binding("F", "clear_filters", "Clear filters", show=False),
         Binding("r", "show_plot", "Resource plots", show=False),
+        Binding("R", "show_plot(-1)", "Resource plots", show=False),
         Binding("z", "maximize_plot", "Zoom the plot", show=False),
         Binding("s", "show_sparql", "SPARQL", show=False),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
@@ -554,14 +555,14 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.resource_window = resource_window
         self.app.push_resource_window(resource_window)
 
-    def action_show_plot(self) -> None:
-        """Show the resource plot, or step to the next one.
+    def action_show_plot(self, step: int = 1) -> None:
+        """Show the resource plot, or step to the next or previous one.
 
         Showing the hidden pane resizes it from zero, so its on_resize
         redraws it; no explicit replot here.
         """
         offered = available_plots(log_has_new_columns(self.app.resource_log))
-        self.query_one(DetailSwitcher).show_plot(offered)
+        self.query_one(DetailSwitcher).show_plot(offered, step)
 
     def action_maximize_plot(self) -> None:
         """Open the resource plot as a full-screen modal.

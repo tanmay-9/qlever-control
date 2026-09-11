@@ -37,27 +37,24 @@ class GutterControl(NamedTuple):
 
 # The gutter's controls, one list per pane, each top to bottom.
 PLOT_CONTROLS = [
-    # Placeholders until there is more than one plot to cycle through.
     GutterControl(
         name="to-sparql",
         glyph="≡",
         hint="Show the selected query",
         action="show_sparql",
     ),
-    # GutterControl(
-    #     name="prev-plot",
-    #     glyph="◄",
-    #     hint="Previous plot",
-    #     action="bell",
-    #     target="app",
-    # ),
-    # GutterControl(
-    #     name="next-plot",
-    #     glyph="►",
-    #     hint="Next plot",
-    #     action="bell",
-    #     target="app",
-    # ),
+    GutterControl(
+        name="prev-plot",
+        glyph="◄",
+        hint="Previous plot",
+        action="show_plot(-1)",
+    ),
+    GutterControl(
+        name="next-plot",
+        glyph="►",
+        hint="Next plot",
+        action="show_plot",
+    ),
     GutterControl(
         name="zoom",
         glyph="⤢",

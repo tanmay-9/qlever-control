@@ -67,6 +67,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         Binding("tab", "app.swap_screen", "Historic>", priority=True),
         Binding("f", "toggle_freeze", "Freeze/Unfreeze", show=False),
         Binding("r", "show_plot", "Resource plots", show=False),
+        Binding("R", "show_plot(-1)", "Resource plots", show=False),
         Binding("z", "maximize_plot", "Zoom the plot", show=False),
         Binding("s", "show_sparql", "SPARQL", show=False),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
@@ -380,14 +381,14 @@ class LiveScreen(Screen, inherit_bindings=False):
             self.resource_samples.size,
         )
 
-    def action_show_plot(self) -> None:
-        """Show the resource plot, or step to the next one.
+    def action_show_plot(self, step: int = 1) -> None:
+        """Show the resource plot, or step to the next or previous one.
 
         The log's format is read now rather than at startup, since the
         server may have begun writing it after this screen opened.
         """
         offered = available_plots(log_has_new_columns(self.app.resource_log))
-        self.query_one(DetailSwitcher).show_plot(offered)
+        self.query_one(DetailSwitcher).show_plot(offered, step)
         self.refresh_table_status()
 
     def action_maximize_plot(self) -> None:

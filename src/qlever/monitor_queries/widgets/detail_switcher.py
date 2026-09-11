@@ -39,19 +39,20 @@ class DetailSwitcher(ContentSwitcher):
         yield SparqlPane(id=SPARQL_ID)
         yield ResourcePlotPane(self.window, PLOTS[0], id=PLOT_ID)
 
-    def show_plot(self, offered: list[Plot]) -> None:
-        """Switch to the resource plot, or step to the next one.
+    def show_plot(self, offered: list[Plot], step: int) -> None:
+        """Switch to the resource plot, or step `step` plots along it.
 
         A hidden plot is shown as it was left, so the first press never
         moves it. `offered` is what this log can carry, and a plot no
-        longer in it steps back to the first.
+        longer in it steps back to the first. `step` is 1 for the next
+        plot and -1 for the previous one, and the list wraps either way.
         """
         if self.current != PLOT_ID:
             self.current = PLOT_ID
             return
         pane = self.query_one(ResourcePlotPane)
         place = offered.index(pane.plot) if pane.plot in offered else -1
-        pane.plot = offered[(place + 1) % len(offered)]
+        pane.plot = offered[(place + step) % len(offered)]
 
     def show_sparql(self) -> None:
         """Switch to the SPARQL pane."""
