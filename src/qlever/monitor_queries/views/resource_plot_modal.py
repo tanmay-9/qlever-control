@@ -9,7 +9,6 @@ screen that holds the readings can send a more detailed window.
 
 from __future__ import annotations
 
-from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -61,8 +60,3 @@ class ResourcePlotModal(ModalScreen):
         """Close the modal, unless a prior event already closed it."""
         if self.is_current:
             self.dismiss()
-
-    def on_click(self, event: events.Click) -> None:
-        """Close when the dimmed area outside the plot is clicked."""
-        if event.widget is self:
-            self.action_close()
