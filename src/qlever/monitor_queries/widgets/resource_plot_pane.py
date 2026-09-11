@@ -153,19 +153,21 @@ def axis_ticks(
     return axis_max, positions, [str(pos) for pos in positions]
 
 
-def axis_top(window: ResourceWindow, keys: tuple[str, ...]) -> float:
+def axis_top(window: ResourceWindow, axis: Axis) -> float:
     """Highest value one axis has to show, over all its series.
 
     A column with a capacity is measured against it, so a light load
     stays low instead of filling the plot. A column without a capacity
     is measured against its largest reading, skipping the buckets where
-    it reported nothing. Zero when the window holds none of the keys.
+    it reported nothing. Zero when the window holds none of the axis's
+    columns, which is how a plot knows that side has nothing to draw,
+    so `min_top` only applies to a side that has readings.
     """
-    top = 0.0
-    for key in keys:
-        series = window.series.get(key)
-        if series is None:
-            continue
+    drawn = series_for_keys(window, axis.keys)
+    if not drawn:
+        return 0.0
+    top = axis.min_top
+    for series in drawn:
         if series.total is not None:
             top = max(top, series.total)
         else:
@@ -184,8 +186,8 @@ def label_width(window: ResourceWindow, plots: list[Plot]) -> int:
     """
     width = 0
     for plot in plots:
-        for keys in (plot.left, plot.right):
-            highest = axis_top(window, keys)
+        for axis in (plot.left, plot.right):
+            highest = axis_top(window, axis)
             width = max(width, len(str(round(highest))))
     return width
 
@@ -272,26 +274,41 @@ def series_for_keys(
     return [window.series[key] for key in keys if key in window.series]
 
 
-class Plot(NamedTuple):
-    """What one plot draws: a name, and the columns on each axis.
+class Axis(NamedTuple):
+    """One y-axis of a plot: the columns on it share a unit.
 
-    `left` and `right` hold log column keys, drawn against the left and
-    the right y-axis. A side's keys share a unit, because one axis
-    carries one unit label.
+    The axis scales to its readings, but never below `min_top`.
+    """
+
+    keys: tuple[str, ...]
+    min_top: float = 0.0
+
+
+class Plot(NamedTuple):
+    """What one plot draws: a name, and an axis down each side.
+
+    `left` and `right` are drawn against the left and right y-axis.
     """
 
     name: str
-    left: tuple[str, ...]
-    right: tuple[str, ...]
+    left: Axis
+    right: Axis
 
 
 # One row per plot, in the order they are offered.
 PLOTS = (
-    Plot(name="Memory and CPU", left=("rss",), right=("cpu_percent",)),
+    Plot(
+        name="Memory and CPU",
+        left=Axis(keys=("rss",)),
+        right=Axis(keys=("cpu_percent",)),
+    ),
     Plot(
         name="Disk I/O",
-        left=("read_bytes_per_s", "write_bytes_per_s"),
-        right=("io_stall_percent",),
+        left=Axis(keys=("read_bytes_per_s", "write_bytes_per_s")),
+        # A stall under a fifth of the time is routine on a busy
+        # server. Without the bound the axis would magnify a 2% stall
+        # into a plot full of spikes.
+        right=Axis(keys=("io_stall_percent",), min_top=20.0),
     ),
 )
 
@@ -320,7 +337,9 @@ def available_plots(log_has_new_columns: bool) -> list[Plot]:
     return [
         plot
         for plot in PLOTS
-        if all(key in REQUIRED_COLUMNS for key in plot.left + plot.right)
+        if all(
+            key in REQUIRED_COLUMNS for key in plot.left.keys + plot.right.keys
+        )
     ]
 
 
@@ -483,12 +502,13 @@ class ResourcePlotPane(PlotextPlot):
         plt = self.plt
         usable_cols = max(1, self.size.width - Y_AXIS_CHROME)
         left_labels = [
-            axis_label(series) for series in series_for_keys(window, plot.left)
+            axis_label(series)
+            for series in series_for_keys(window, plot.left.keys)
         ]
         right_labels = (
             [
                 axis_label(series)
-                for series in series_for_keys(window, plot.right)
+                for series in series_for_keys(window, plot.right.keys)
             ]
             if right_axis_max is not None
             else []
@@ -553,7 +573,10 @@ class ResourcePlotPane(PlotextPlot):
         # color, so it is taken before the empty ones are dropped.
         lines = [
             (side, index, series)
-            for side, keys in (("left", plot.left), ("right", plot.right))
+            for side, keys in (
+                ("left", plot.left.keys),
+                ("right", plot.right.keys),
+            )
             for index, series in enumerate(series_for_keys(window, keys))
             if series.values
         ]

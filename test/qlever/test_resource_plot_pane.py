@@ -9,6 +9,7 @@ labels. Drawing itself is left to the widget.
 from qlever.monitor_queries.models import ResourceSeries, ResourceWindow
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     PLOTS,
+    Axis,
     Plot,
     available_plots,
     axis_top,
@@ -39,24 +40,29 @@ def window(*all_series):
     )
 
 
+def axis(*keys, min_top=0.0):
+    """An axis over the given columns, unbounded unless asked."""
+    return Axis(keys=keys, min_top=min_top)
+
+
 def test_axis_top_uses_the_capacity_over_the_readings():
     win = window(series("rss", (7.0, 8.0), total=32.9))
-    assert axis_top(win, ("rss",)) == 32.9
+    assert axis_top(win, axis("rss")) == 32.9
 
 
 def test_axis_top_without_a_capacity_uses_the_largest_reading():
     win = window(series("read_bytes_per_s", (1.0, 4.5, 2.0)))
-    assert axis_top(win, ("read_bytes_per_s",)) == 4.5
+    assert axis_top(win, axis("read_bytes_per_s")) == 4.5
 
 
 def test_axis_top_skips_the_buckets_that_reported_nothing():
     win = window(series("read_bytes_per_s", (NAN, 3.0, NAN)))
-    assert axis_top(win, ("read_bytes_per_s",)) == 3.0
+    assert axis_top(win, axis("read_bytes_per_s")) == 3.0
 
 
 def test_axis_top_of_a_column_that_never_reported_is_zero():
     win = window(series("read_bytes_per_s", (NAN, NAN)))
-    assert axis_top(win, ("read_bytes_per_s",)) == 0.0
+    assert axis_top(win, axis("read_bytes_per_s")) == 0.0
 
 
 def test_axis_top_spans_every_series_on_the_side():
@@ -64,19 +70,47 @@ def test_axis_top_spans_every_series_on_the_side():
         series("read_bytes_per_s", (1.0, 2.0)),
         series("write_bytes_per_s", (0.5, 6.0)),
     )
-    keys = ("read_bytes_per_s", "write_bytes_per_s")
-    assert axis_top(win, keys) == 6.0
+    both = axis("read_bytes_per_s", "write_bytes_per_s")
+    assert axis_top(win, both) == 6.0
 
 
 def test_axis_top_ignores_a_key_the_window_does_not_have():
     win = window(series("read_bytes_per_s", (1.0, 2.0)))
-    keys = ("read_bytes_per_s", "io_stall_percent")
-    assert axis_top(win, keys) == 2.0
+    both = axis("read_bytes_per_s", "io_stall_percent")
+    assert axis_top(win, both) == 2.0
 
 
 def test_axis_top_of_an_absent_side_is_zero():
     win = window(series("rss", (1.0,), total=32.9))
-    assert axis_top(win, ("io_stall_percent",)) == 0.0
+    assert axis_top(win, axis("io_stall_percent")) == 0.0
+
+
+def test_axis_top_never_scales_below_the_min_top():
+    win = window(series("io_stall_percent", (1.0, 2.0)))
+    bounded = axis("io_stall_percent", min_top=20.0)
+    assert axis_top(win, bounded) == 20.0
+
+
+def test_axis_top_grows_past_the_min_top_with_the_readings():
+    win = window(series("io_stall_percent", (1.0, 65.0)))
+    bounded = axis("io_stall_percent", min_top=20.0)
+    assert axis_top(win, bounded) == 65.0
+
+
+def test_axis_top_of_an_absent_side_ignores_the_min_top():
+    # The zero is what tells the plot this side has nothing to draw, so
+    # a bound must not raise an axis for a column the log never has.
+    win = window(series("rss", (1.0,), total=32.9))
+    bounded = axis("io_stall_percent", min_top=20.0)
+    assert axis_top(win, bounded) == 0.0
+
+
+def test_the_disk_plot_bounds_a_small_io_stall():
+    win = window(
+        series("read_bytes_per_s", (1.0,)),
+        series("io_stall_percent", (2.0,)),
+    )
+    assert axis_top(win, PLOTS[1].right) == 20.0
 
 
 def test_series_for_keys_keeps_the_plot_order():
@@ -128,9 +162,11 @@ def test_label_width_takes_the_longest_number_in_the_stack():
         series("write_bytes_per_s", (6000.0,)),
     )
     stack = [
-        Plot(name="A", left=("rss",), right=("cpu_percent",)),
+        Plot(name="A", left=axis("rss"), right=axis("cpu_percent")),
         Plot(
-            name="B", left=("read_bytes_per_s", "write_bytes_per_s"), right=()
+            name="B",
+            left=axis("read_bytes_per_s", "write_bytes_per_s"),
+            right=axis(),
         ),
     ]
     # 33, 16 and 2 are two digits or fewer; 6000 is four.
@@ -147,7 +183,7 @@ def test_label_width_of_one_plot_is_its_own_longest():
 
 def test_label_width_counts_the_zero_of_a_side_with_no_series():
     win = window(series("rss", (7.0,), total=32.9))
-    only_absent = Plot(name="A", left=("io_stall_percent",), right=())
+    only_absent = Plot(name="A", left=axis("io_stall_percent"), right=axis())
     assert label_width(win, [only_absent]) == 1
 
 
