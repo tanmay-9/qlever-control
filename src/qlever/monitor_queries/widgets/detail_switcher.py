@@ -24,9 +24,9 @@ PLOT_ID = "resource-plot"
 class DetailSwitcher(ContentSwitcher):
     """Bottom detail pane showing either the SPARQL or the resource plot.
 
-    Holds both panes and shows one at a time. The screen's r/s bindings
-    drive the switch; the footer names the keys, so there is no header
-    and nothing here is focusable.
+    Holds both panes and shows one at a time. The gutter beside it and
+    the r/s keys drive the switch, so there is no header here and
+    nothing is focusable.
     """
 
     can_focus = False

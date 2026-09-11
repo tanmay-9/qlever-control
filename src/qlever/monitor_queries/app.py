@@ -7,7 +7,7 @@ import psutil
 from textual import work
 from textual.app import App
 from textual.binding import Binding
-from textual.css.query import NoMatches
+from textual.reactive import reactive
 from textual.widgets import Select
 from textual.worker import get_current_worker
 
@@ -54,21 +54,26 @@ class MonitorQueriesApp(App):
     SCREENS = {"live": LiveScreen, "historic": HistoricScreen}
 
     BINDINGS = [
-        ("q", "quit", "Quit/Exit"),
+        ("q", "quit", "Quit"),
+        ("question_mark", "toggle_help", "Help"),
         ("t", "open_theme_picker", "Theme"),
-        ("y", "copy_query", "Copy SPARQL"),
-        ("p", "pretty_print", "Pretty print"),
-        ("c", "clear_query", "Clear SPARQL"),
+        Binding("c", "copy_query", "Copy SPARQL", show=False),
+        Binding("p", "pretty_print", "Pretty print", show=False),
+        # One label for the pair: the pill beside the pane reads it.
         Binding(
             "shift+up",
             "scroll_sparql_up",
             "Scroll SPARQL",
             key_display="⇧ ↑↓",
+            show=False,
         ),
         Binding(
             "shift+down", "scroll_sparql_down", "Scroll SPARQL", show=False
         ),
     ]
+
+    # Lives on the app, not the screens, so help stays on across a swap.
+    help_mode = reactive(False, init=False)
 
     def __init__(
         self,
@@ -210,6 +215,18 @@ class MonitorQueriesApp(App):
                 return
         self.switch_screen(target)
 
+    def action_toggle_help(self) -> None:
+        """Show or hide the on-screen help annotations."""
+        self.help_mode = not self.help_mode
+
+    def watch_help_mode(self, help_mode: bool) -> None:
+        """Flip the class the help annotations hang off.
+
+        It sits on the app so it covers both screens and never has to
+        be re-applied.
+        """
+        self.set_class(help_mode, "-help")
+
     def copy_to_clipboard(self, text: str) -> None:
         """Copy text to the clipboard, native tool first, OSC 52 fallback.
 
@@ -218,7 +235,7 @@ class MonitorQueriesApp(App):
         itself the signal to fall back to the terminal's own OSC 52.
         """
         result = copy_text(text)
-        if result is True:
+        if result:
             self.notify("Copied to clipboard")
             return
 
@@ -226,8 +243,8 @@ class MonitorQueriesApp(App):
         if result is None:
             detail = (
                 f"No clipboard tool found; copied via the terminal (OSC 52). "
-                f"{clipboard_install_hint()} for a reliable copy, or check "
-                "your terminal supports OSC 52."
+                f"{clipboard_install_hint().capitalize()} for a reliable copy, "
+                "or check if your terminal supports OSC 52."
             )
         else:
             detail = (
@@ -283,11 +300,6 @@ class MonitorQueriesApp(App):
             return
         pane.pretty_text = result
 
-    def action_clear_query(self) -> None:
-        """Drop the displayed query, restoring the empty-state hint."""
-        pane = self.screen.query_one(SparqlPane)
-        pane.content = None
-
     def action_scroll_sparql_up(self) -> None:
         """Scroll the overflowing SPARQL pane up one line."""
         self.screen.query_one(SparqlScroll).scroll_up()
@@ -295,22 +307,6 @@ class MonitorQueriesApp(App):
     def action_scroll_sparql_down(self) -> None:
         """Scroll the overflowing SPARQL pane down one line."""
         self.screen.query_one(SparqlScroll).scroll_down()
-
-    def check_action(
-        self, action: str, parameters: tuple[object, ...]
-    ) -> bool | None:
-        """Show the scroll bindings only when the query overflows the pane.
-
-        Returns False (hidden) rather than None (grayed) so the footer
-        entry disappears entirely until there is something to scroll.
-        """
-        if action in ("scroll_sparql_up", "scroll_sparql_down"):
-            try:
-                scroll = self.screen.query_one(SparqlScroll)
-            except NoMatches:
-                return False
-            return scroll.max_scroll_y > 0
-        return True
 
     def action_open_theme_picker(self) -> None:
         """Open the header theme dropdown on the active screen."""

@@ -362,6 +362,10 @@ class ResourcePlotPane(PlotextPlot):
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
+        # Draw no background of its own, so the plot sits on the page
+        # rather than in a lighter block. The line colors are passed to
+        # each plot call, so this theme's own colors never apply.
+        self.theme = "textual-clear"
         self.set_reactive(ResourcePlotPane.window, window)
         self.set_reactive(ResourcePlotPane.plot, plot)
         # Stacked plots share one clock row, printed under the last of

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import time
+from functools import partial
 
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.containers import Horizontal
 from textual.reactive import reactive
 from textual.screen import Screen
-from textual.widgets import Static
+from textual.widgets import Button, Static
 from textual.worker import get_current_worker
 
 from qlever.monitor_queries.live_data import (
@@ -35,9 +37,11 @@ from qlever.monitor_queries.resource_reader import (
     SampleTail,
     log_has_new_columns,
 )
+from qlever.monitor_queries.util import action_key
 from qlever.monitor_queries.views.resource_plot_modal import (
     ResourcePlotModal,
 )
+from qlever.monitor_queries.widgets.detail_row import DetailRow
 from qlever.monitor_queries.widgets.detail_switcher import (
     PLOT_ID,
     DetailSwitcher,
@@ -61,12 +65,10 @@ class LiveScreen(Screen, inherit_bindings=False):
 
     BINDINGS = [
         Binding("tab", "app.swap_screen", "Historic>", priority=True),
-        Binding("f", "toggle_freeze", "Freeze/Unfreeze"),
-        # One footer entry for both: r shows the pane and steps through
-        # the plots, R opens the modal.
-        Binding("r", "show_plot", "Resource plots", key_display="r/R"),
-        Binding("R", "maximize_plot", "Maximize plot", show=False),
-        Binding("s", "show_sparql", "SPARQL"),
+        Binding("f", "toggle_freeze", "Freeze/Unfreeze", show=False),
+        Binding("r", "show_plot", "Resource plots", show=False),
+        Binding("z", "maximize_plot", "Zoom the plot", show=False),
+        Binding("s", "show_sparql", "SPARQL", show=False),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
 
@@ -112,13 +114,28 @@ class LiveScreen(Screen, inherit_bindings=False):
             ),
             resource_window,
         )
-        yield MetricsRow(
-            get_live_metrics(state, slow_ms, current_ms()),
-            self.app.slow_threshold,
+        freeze_button = Button(
+            "Freeze",
+            variant="primary",
+            id="freeze",
+            compact=True,
+            action="screen.toggle_freeze",
+            tooltip="Stop the table and metrics from updating.",
+        )
+        # Clicking it must not take focus off the table.
+        freeze_button.can_focus = False
+        yield Horizontal(
+            MetricsRow(
+                get_live_metrics(state, slow_ms, current_ms()),
+                self.app.slow_threshold,
+            ),
+            Static("", id="freeze-key", classes="key-pill"),
+            freeze_button,
+            id="metrics-freeze-row",
         )
         yield LiveQueryTable(rows)
         yield Static("", id="table-status")
-        yield DetailSwitcher(resource_window)
+        yield DetailRow(resource_window)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -133,6 +150,12 @@ class LiveScreen(Screen, inherit_bindings=False):
         # A worker, not a paused-on-suspend timer: it keeps reading the
         # log regardless of the active tab so the history never gaps.
         self.tail_resource_log()
+        # Label the gutter controls with the keys that run them; CSS
+        # decides when the labels show.
+        self.query_one(DetailRow).set_help_keys(partial(action_key, self))
+        self.query_one("#freeze-key", Static).update(
+            action_key(self, "toggle_freeze")
+        )
         if self.liveness == "checking":
             self.start_pinging(initial=True)
         # Focus the table so the header theme dropdown can't take it.
@@ -409,16 +432,15 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.query_one("#table-status", Static).update(" · ".join(hints))
 
     def watch_frozen(self, frozen: bool) -> None:
-        """Refresh the status line to reflect the frozen state."""
+        """Update the status line and name the way out on the button."""
         self.refresh_table_status()
+        self.query_one("#freeze", Button).label = (
+            "Resume" if frozen else "Freeze"
+        )
 
     def action_toggle_freeze(self) -> None:
         """Toggle the frozen state of the live view."""
         self.frozen = not self.frozen
-
-    def on_resize(self) -> None:
-        """Re-evaluate the conditional scroll bindings after a resize."""
-        self.call_after_refresh(self.refresh_bindings)
 
     def on_nav_pill_clicked(self, message: NavPill.Clicked) -> None:
         """Switch to the screen named by the clicked pill.
