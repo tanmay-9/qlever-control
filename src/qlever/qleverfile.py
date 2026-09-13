@@ -545,10 +545,13 @@ class Qleverfile:
             "--restart-policy",
             type=str,
             choices=["no", "always", "unless-stopped", "on-failure"],
-            default="unless-stopped",
-            help="Restart policy for the server container"
-            " (only applies when running in a container)"
-            " (default: unless-stopped)",
+            default=None,
+            help="Restart policy for the server, that is, whether it is "
+            "restarted automatically after a crash. Applies to a server in "
+            "a container and, on Linux, to a native server, which then runs "
+            "as a systemd user service (where `unless-stopped` means "
+            "`always`). On a system without systemd, `start` fails if the "
+            "policy was set explicitly (default: unless-stopped)",
         )
         runtime_args["seccomp_profile"] = arg(
             "--seccomp-profile",

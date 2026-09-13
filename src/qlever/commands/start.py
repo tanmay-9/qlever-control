@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import contextlib
+import os
+import platform
 import shlex
+import shutil
 import subprocess
 import time
 from collections.abc import Callable
@@ -23,13 +26,20 @@ from qlever.util import (
     binary_help_command,
     is_qlever_server_alive,
     run_command,
+    stop_systemd_unit,
     stop_tailing,
+    systemd_linger_status,
+    systemd_unit_is_active,
+    systemd_unit_name,
+    systemd_user_env,
     tail_log_file,
 )
 
 
-# Construct the command line based on the config file.
-def construct_command(args) -> str:
+# Construct the command line based on the config file. With `use_systemd`,
+# the command has no redirect of its output, because the systemd unit takes
+# care of the log (see `wrap_command_in_systemd_unit`).
+def construct_command(args, use_systemd: bool = False) -> str:
     start_cmd = (
         f"{args.server_binary}"
         f" -i {args.name}"
@@ -102,6 +112,8 @@ def construct_command(args) -> str:
             f" {shlex.quote(view_name)}"
             for view_name in preload_materialized_views
         )
+    if use_systemd:
+        return start_cmd
     if args.server_log_mode == "no-log":
         # No log file is written. In the foreground, the server output
         # goes to the terminal; in the background, it is discarded.
@@ -116,7 +128,7 @@ def construct_command(args) -> str:
 # Kill existing server on the same port. Trust that StopCommand() works?
 # Maybe return StopCommand().execute(args) and handle it with a try except?
 def kill_existing_server(args) -> bool:
-    args.cmdline_regex = f"^qlever-server.* -p {args.port}"
+    args.cmdline_regex = rf"^(\S*/)?qlever-server.* -p {args.port}"
     args.no_containers = True
     if not StopCommand().execute(args):
         log.error("Stopping the existing server failed")
@@ -144,6 +156,64 @@ def wrap_command_in_container(args, start_cmd) -> str:
         seccomp_profile=args.seccomp_profile,
     )
     return start_cmd
+
+
+# Run the command as a transient systemd user service. Like a container with
+# a restart policy, the service restarts the server after a crash, and it has
+# to be stopped via `systemctl` (which `stop` does). Unlike a container, the
+# server runs natively, in the current directory.
+def wrap_command_in_systemd_unit(args, start_cmd) -> str:
+    # Outside of a login session (cron), point `systemd-run` to the user's
+    # systemd instance (see `systemd_user_env`).
+    env = systemd_user_env()
+    prefix = "".join(
+        f"{var}={env[var]} "
+        for var in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
+        if var not in os.environ
+    )
+    # For systemd, a server killed with `SIGTERM` (as `earlyoom` does it) has
+    # exited cleanly, so only `always` also covers that case. The start limit
+    # ends a crash loop (a server that dies right after each start).
+    restart = (
+        "always"
+        if args.restart_policy == "unless-stopped"
+        else args.restart_policy
+    )
+    unit_cmd = (
+        f"{prefix}systemd-run --user"
+        f" --unit {shlex.quote(systemd_unit_name(args.name))}"
+        ' --working-directory "$(pwd)"'
+        f" -p Restart={restart} -p RestartSec=5"
+        " -p StartLimitIntervalSec=1h -p StartLimitBurst=5"
+        " -p Delegate=yes"
+    )
+    # The server log is appended by the unit, so that a restart after a crash
+    # does not truncate the log of the crashed run. The rotation or removal
+    # of an existing log according to `--server-log-mode` still happens in
+    # `execute`, before the unit is created.
+    if args.server_log_mode == "no-log":
+        unit_cmd += " -p StandardOutput=null"
+    else:
+        # The path has to be absolute.
+        unit_cmd += (
+            ' -p StandardOutput=append:"$(pwd)"/'
+            f"{shlex.quote(args.name + '.server-log.txt')}"
+        )
+    unit_cmd += " -p StandardError=inherit"
+    return f"{unit_cmd} {start_cmd}"
+
+
+# Whether a native server can run as a systemd user service that restarts it
+# after a crash. Returns "ok", "no-systemd" (not Linux, no `systemd-run`, or no
+# user instance of systemd), or "no-linger" (lingering is not enabled for the
+# user, so the service would end together with the login session).
+def check_systemd_for_restarts() -> str:
+    if platform.system() != "Linux" or shutil.which("systemd-run") is None:
+        return "no-systemd"
+    linger = systemd_linger_status()
+    if linger is None:
+        return "no-systemd"
+    return "ok" if linger == "yes" else "no-linger"
 
 
 def server_supports_description_options(args) -> bool:
@@ -239,17 +309,23 @@ def show_log_follow_info(log_name: str, run_in_foreground: bool) -> None:
 
 
 def make_server_liveness_check(
-    args, process: subprocess.Popen | None, pid: int | None
+    args,
+    process: subprocess.Popen | None,
+    pid: int | None,
+    use_systemd: bool = False,
 ) -> Callable[[], bool]:
     """
     Build a check that tells whether the server is still running: via the
-    container runtime, via the `Popen` handle (foreground), or via the
-    `pid` of the process started with `nohup`.
+    container runtime, via systemd, via the `Popen` handle (foreground), or
+    via the `pid` of the process started with `nohup`.
     """
     if args.system in Containerize.supported_systems():
         return lambda: Containerize.is_running(
             args.system, args.server_container
         )
+    if use_systemd:
+        unit = systemd_unit_name(args.name)
+        return lambda: systemd_unit_is_active(unit)
     if args.run_in_foreground:
         return lambda: process.poll() is None
     if pid is not None:
@@ -385,12 +461,19 @@ class StartCommand(QleverCommand):
         # Set the endpoint URL.
         args.endpoint_url = f"http://{args.host_name}:{args.port}"
 
+        # The restart policy has no default in the Qleverfile, so that an
+        # explicitly set policy can be told apart from the default (which
+        # only applies where automatic restarts are possible, see below).
+        restart_policy_is_explicit = args.restart_policy is not None
+        if not restart_policy_is_explicit:
+            args.restart_policy = "unless-stopped"
+
         # Kill existing server with the same name if so desired.
         #
         # TODO: This is currently disabled because I never used it once over
         # the past weeks and it is not clear to me what the use case is.
         if False:  # or args.kill_existing_with_same_name:
-            args.cmdline_regex = f"^qlever-server.* -i {args.name}"
+            args.cmdline_regex = rf"^(\S*/)?qlever-server.* -i {args.name}"
             args.no_containers = True
             StopCommand().execute(args)
             log.info("")
@@ -423,14 +506,52 @@ class StartCommand(QleverCommand):
             args.description = None
             args.text_description = None
 
-        # Construct the command line based on the config file.
-        start_cmd = construct_command(args)
+        # A native server with a restart policy runs as a systemd user service
+        # (see `wrap_command_in_systemd_unit`), if that is possible. If not,
+        # an explicitly set policy is an error, the default just falls back
+        # to `nohup`.
+        use_systemd = False
+        if (
+            args.system == "native"
+            and not args.run_in_foreground
+            and args.restart_policy != "no"
+        ):
+            status = check_systemd_for_restarts()
+            if status == "ok":
+                use_systemd = True
+            elif status == "no-systemd":
+                message = (
+                    "Automatic restarts of the server (see "
+                    "`--restart-policy`) are not available on this system, "
+                    "they need systemd"
+                )
+                if restart_policy_is_explicit:
+                    log.error(message)
+                    return False
+                log.info(f"{message}, starting without them")
+                log.info("")
+            else:
+                log.warning(
+                    "Automatic restarts of the server (see "
+                    "`--restart-policy`) need lingering to be enabled for "
+                    "your user, so that the server survives the end of your "
+                    "login session. Enable it once with `loginctl "
+                    "enable-linger`. Until then, the server starts without "
+                    "automatic restarts"
+                )
+                log.info("")
 
-        # Run the command in a container (if so desired). Otherwise run with
-        # `nohup` so that it keeps running after the shell is closed. With
-        # `--run-in-foreground`, run the server in the foreground.
+        # Construct the command line based on the config file.
+        start_cmd = construct_command(args, use_systemd)
+
+        # Run the command in a container or as a systemd service (see above).
+        # Otherwise run with `nohup` so that it keeps running after the shell
+        # is closed. With `--run-in-foreground`, run the server in the
+        # foreground.
         if args.system in Containerize.supported_systems():
             start_cmd = wrap_command_in_container(args, start_cmd)
+        elif use_systemd:
+            start_cmd = wrap_command_in_systemd_unit(args, start_cmd)
         elif args.run_in_foreground:
             start_cmd = f"{start_cmd}"
         else:
@@ -461,10 +582,18 @@ class StartCommand(QleverCommand):
             )
 
             # Show output of status command.
-            args.cmdline_regex = f"^qlever-server.* -p *{args.port}"
+            args.cmdline_regex = rf"^(\S*/)?qlever-server.* -p *{args.port}"
             log.info("")
             StatusCommand().execute(args)
             return False
+
+        # A leftover unit from a previous start (for example, one that hit
+        # the start limit after a crash loop) would prevent the new one.
+        if use_systemd:
+            unit = systemd_unit_name(args.name)
+            if stop_systemd_unit(unit):
+                log.info(f'Removed the leftover systemd unit "{unit}"')
+                log.info("")
 
         # Remove already existing container.
         if (
@@ -505,6 +634,7 @@ class StartCommand(QleverCommand):
         capture_pid = (
             not args.run_in_foreground
             and args.system not in Containerize.supported_systems()
+            and not use_systemd
         )
         pid = None
         try:
@@ -562,11 +692,13 @@ class StartCommand(QleverCommand):
                 else "The server is ready",
             )
             if tail_proc is None:
+                if use_systemd:
+                    stop_systemd_unit(systemd_unit_name(args.name))
                 return False
         try:
             server_ready = wait_until_server_ready(
                 lambda: is_qlever_server_alive(args.endpoint_url),
-                make_server_liveness_check(args, process, pid),
+                make_server_liveness_check(args, process, pid, use_systemd),
             )
         except KeyboardInterrupt:
             # The tail runs in a session of its own (see `tail_log_file`), so
@@ -577,6 +709,12 @@ class StartCommand(QleverCommand):
         if not server_ready:
             if tail_proc is not None:
                 stop_tailing(tail_proc)
+            # A server that dies before it is ready has a problem with its
+            # configuration or its index, which restarting does not solve. So
+            # stop the unit right away, instead of letting it restart the
+            # server every few seconds until the start limit is reached.
+            if use_systemd:
+                stop_systemd_unit(systemd_unit_name(args.name))
             return False
 
         # Stop following the log.
