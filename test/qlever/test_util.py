@@ -15,6 +15,8 @@ from qlever.util import (
     systemd_unit_is_loaded,
     systemd_unit_name,
     systemd_unit_of_process,
+    systemd_unit_property,
+    systemd_unit_restarts,
     systemd_user_env,
     tail_log_file,
     update_ini_values,
@@ -307,6 +309,8 @@ def test_systemd_helpers(monkeypatch):
         result = MagicMock()
         if cmd[0] == "loginctl":
             result.stdout = "yes\n"
+        elif "NRestarts" in cmd:
+            result.stdout = "2\n"
         elif "show" in cmd:
             result.stdout = "loaded\n" if fake_run.loaded else "not-found\n"
         result.returncode = 0 if fake_run.ok else 3
@@ -324,8 +328,12 @@ def test_systemd_helpers(monkeypatch):
     )
 
     assert systemd_linger_status() == "yes"
+    assert systemd_unit_property("qlever.server.olympics", "LoadState") == (
+        "loaded"
+    )
     assert systemd_unit_is_loaded("qlever.server.olympics")
     assert systemd_unit_is_active("qlever.server.olympics")
+    assert systemd_unit_restarts("qlever.server.olympics") == 2
     assert stop_systemd_unit("qlever.server.olympics")
     assert calls[-2][:4] == [
         "systemctl",
@@ -344,7 +352,9 @@ def test_systemd_helpers(monkeypatch):
     fake_run.loaded = False
     fake_run.ok = False
     assert systemd_linger_status() is None
+    assert systemd_unit_property("qlever.server.olympics", "LoadState") is None
     assert not systemd_unit_is_active("qlever.server.olympics")
+    assert systemd_unit_restarts("qlever.server.olympics") == 0
     assert not stop_systemd_unit("qlever.server.olympics")
 
     # Without `systemctl` and `loginctl`, systemd is not usable at all.
@@ -353,6 +363,7 @@ def test_systemd_helpers(monkeypatch):
     monkeypatch.setattr("qlever.util.shutil.which", lambda _: None)
     assert not systemd_unit_is_loaded("qlever.server.olympics")
     assert not systemd_unit_is_active("qlever.server.olympics")
+    assert systemd_unit_restarts("qlever.server.olympics") == 0
     assert systemd_linger_status() is None
 
 

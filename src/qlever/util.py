@@ -470,21 +470,30 @@ def systemd_linger_status() -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def systemd_unit_is_loaded(unit: str) -> bool:
+def systemd_unit_property(unit: str, name: str) -> str | None:
     """
-    Whether the systemd user service `unit` currently exists (active,
-    restarting, or failed). `False` if there is no `systemctl`.
+    The value of the property `name` of the systemd user service `unit`, as
+    `systemctl show` prints it. `None` if there is no `systemctl` or it
+    fails (for example, without a user instance of systemd).
     """
     if shutil.which("systemctl") is None:
-        return False
+        return None
     result = subprocess.run(
-        ["systemctl", "--user", "show", unit, "-p", "LoadState", "--value"],
+        ["systemctl", "--user", "show", unit, "-p", name, "--value"],
         capture_output=True,
         text=True,
         check=False,
         env=systemd_user_env(),
     )
-    return result.stdout.strip() == "loaded"
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def systemd_unit_is_loaded(unit: str) -> bool:
+    """
+    Whether the systemd user service `unit` currently exists (active,
+    restarting, or failed). `False` if there is no `systemctl`.
+    """
+    return systemd_unit_property(unit, "LoadState") == "loaded"
 
 
 def systemd_unit_is_active(unit: str) -> bool:
@@ -517,6 +526,16 @@ def systemd_unit_of_process(pid: int) -> str | None:
         return None
     match = re.search(r"/(qlever\.server\.[^/]+)\.service", cgroup)
     return match.group(1) if match else None
+
+
+def systemd_unit_restarts(unit: str) -> int:
+    """
+    How often systemd has restarted the server of the systemd user service
+    `unit` since the unit was created. `0` if there is no `systemctl` or no
+    such unit.
+    """
+    restarts = systemd_unit_property(unit, "NRestarts")
+    return int(restarts) if restarts and restarts.isdigit() else 0
 
 
 def stop_systemd_unit(unit: str) -> bool:

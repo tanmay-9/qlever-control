@@ -169,6 +169,9 @@ def test_wrap_command_in_systemd_unit():
     args = MagicMock()
     args.name = "TestName"
     args.restart_policy = "unless-stopped"
+    args.restart_delay = "0"
+    args.restart_limit = 10
+    args.restart_limit_interval = "1h"
     args.server_log_mode = "rotate"
 
     result = qlever.commands.start.wrap_command_in_systemd_unit(
@@ -178,25 +181,33 @@ def test_wrap_command_in_systemd_unit():
         "systemd-run --user --unit qlever.server.TestName"
         ' --working-directory "$(pwd)"' in result
     )
-    assert " -p Restart=always -p RestartSec=5" in result
+    assert " -p Restart=always -p RestartSec=0" in result
+    assert " -p StartLimitIntervalSec=1h -p StartLimitBurst=10 " in result
     assert (
         ' -p StandardOutput=append:"$(pwd)"/TestName.server-log.txt' in result
     )
     assert result.endswith(" -p StandardError=inherit Test_start_cmd")
 
     args.restart_policy = "on-failure"
+    args.restart_delay = "5s"
+    args.restart_limit = 3
+    args.restart_limit_interval = "10min"
     args.server_log_mode = "no-log"
     result = qlever.commands.start.wrap_command_in_systemd_unit(
         args, "Test_start_cmd"
     )
-    assert " -p Restart=on-failure " in result
+    assert " -p Restart=on-failure -p RestartSec=5s" in result
+    assert " -p StartLimitIntervalSec=10min -p StartLimitBurst=3 " in result
     assert " -p StandardOutput=null " in result
 
 
 # For a server run as a systemd unit, the command line has no shell redirect
 # (the unit writes the log), and the liveness check asks systemd.
+@patch("qlever.commands.start.systemd_unit_restarts")
 @patch("qlever.commands.start.systemd_unit_is_active")
-def test_construct_command_and_liveness_check_systemd(mock_is_active):
+def test_construct_command_and_liveness_check_systemd(
+    mock_is_active, mock_restarts
+):
     args = MagicMock()
     args.name = "TestName"
     args.system = "native"
@@ -222,11 +233,18 @@ def test_construct_command_and_liveness_check_systemd(mock_is_active):
     assert not result.endswith("2>&1")
 
     mock_is_active.return_value = True
+    mock_restarts.return_value = 0
     is_still_running = qlever.commands.start.make_server_liveness_check(
         args, None, None, use_systemd=True
     )
     assert is_still_running()
     mock_is_active.assert_called_once_with("qlever.server.TestName")
+    mock_restarts.assert_called_once_with("qlever.server.TestName")
+
+    # A server that died during the start and was restarted by systemd
+    # counts as exited before becoming ready, even if the unit is active.
+    mock_restarts.return_value = 1
+    assert not is_still_running()
 
 
 # Tests `check_systemd_for_restarts`: systemd on Linux with lingering is
@@ -795,6 +813,7 @@ class TestStartCommand(unittest.TestCase):
     @patch("time.sleep")
     @patch("qlever.commands.start.Path")
     @patch("qlever.commands.start.systemd_unit_is_active", return_value=True)
+    @patch("qlever.commands.start.systemd_unit_restarts", return_value=0)
     @patch("qlever.commands.start.stop_systemd_unit", return_value=True)
     @patch("qlever.commands.start.check_systemd_for_restarts")
     @patch("qlever.commands.start.stop_tailing")
@@ -803,6 +822,7 @@ class TestStartCommand(unittest.TestCase):
         mock_stop_tailing,
         mock_check,
         mock_stop_systemd_unit,
+        mock_unit_restarts,
         mock_unit_is_active,
         mock_path_cls,
         mock_sleep,
@@ -815,6 +835,9 @@ class TestStartCommand(unittest.TestCase):
     ):
         args = MagicMock()
         args.restart_policy = None
+        args.restart_delay = "0"
+        args.restart_limit = 10
+        args.restart_limit_interval = "1h"
         args.description = None
         args.text_description = None
         args.kill_existing_with_same_port = False

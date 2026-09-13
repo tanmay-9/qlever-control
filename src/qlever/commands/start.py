@@ -31,6 +31,7 @@ from qlever.util import (
     systemd_linger_status,
     systemd_unit_is_active,
     systemd_unit_name,
+    systemd_unit_restarts,
     systemd_user_env,
     tail_log_file,
 )
@@ -172,8 +173,11 @@ def wrap_command_in_systemd_unit(args, start_cmd) -> str:
         if var not in os.environ
     )
     # For systemd, a server killed with `SIGTERM` (as `earlyoom` does it) has
-    # exited cleanly, so only `always` also covers that case. The start limit
-    # ends a crash loop (a server that dies right after each start).
+    # exited cleanly, so only `always` also covers that case. By default, the
+    # server is restarted at once (it can rebind its port right away), and
+    # the start limit ends a crash loop (a server that dies right after each
+    # start); see `--restart-delay`, `--restart-limit` and
+    # `--restart-limit-interval`.
     restart = (
         "always"
         if args.restart_policy == "unless-stopped"
@@ -183,8 +187,10 @@ def wrap_command_in_systemd_unit(args, start_cmd) -> str:
         f"{prefix}systemd-run --user"
         f" --unit {shlex.quote(systemd_unit_name(args.name))}"
         ' --working-directory "$(pwd)"'
-        f" -p Restart={restart} -p RestartSec=5"
-        " -p StartLimitIntervalSec=1h -p StartLimitBurst=5"
+        f" -p Restart={restart}"
+        f" -p RestartSec={shlex.quote(args.restart_delay)}"
+        f" -p StartLimitIntervalSec={shlex.quote(args.restart_limit_interval)}"
+        f" -p StartLimitBurst={args.restart_limit}"
         " -p Delegate=yes"
     )
     # The server log is appended by the unit, so that a restart after a crash
@@ -324,8 +330,15 @@ def make_server_liveness_check(
             args.system, args.server_container
         )
     if use_systemd:
+        # A server that dies during the start is restarted by systemd, with
+        # no delay by default, so the unit can already be active again when
+        # it is checked. The unit is new (`execute` removes a leftover one
+        # before the start), so any restart counted on it means that the
+        # server has died.
         unit = systemd_unit_name(args.name)
-        return lambda: systemd_unit_is_active(unit)
+        return lambda: (
+            systemd_unit_is_active(unit) and systemd_unit_restarts(unit) == 0
+        )
     if args.run_in_foreground:
         return lambda: process.poll() is None
     if pid is not None:
@@ -422,6 +435,9 @@ class StartCommand(QleverCommand):
                 "image",
                 "server_container",
                 "restart_policy",
+                "restart_delay",
+                "restart_limit",
+                "restart_limit_interval",
                 "seccomp_profile",
             ],
         }
@@ -712,7 +728,7 @@ class StartCommand(QleverCommand):
             # A server that dies before it is ready has a problem with its
             # configuration or its index, which restarting does not solve. So
             # stop the unit right away, instead of letting it restart the
-            # server every few seconds until the start limit is reached.
+            # server again and again until the start limit is reached.
             if use_systemd:
                 stop_systemd_unit(systemd_unit_name(args.name))
             return False
