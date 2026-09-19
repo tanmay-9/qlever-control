@@ -312,8 +312,15 @@ QueryTable.stale > .datatable--header {
 .pane-gutter {
     width: 3;
     height: 1fr;
-    margin-left: 1;
     align-vertical: middle;
+}
+
+.pane-gutter.-left {
+    margin-right: 1;
+}
+
+.pane-gutter.-right {
+    margin-left: 1;
 }
 
 /* A control owns its glyph's row and its key label's row, with a blank

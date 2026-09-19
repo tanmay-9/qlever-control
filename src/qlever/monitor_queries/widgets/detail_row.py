@@ -35,19 +35,36 @@ class GutterControl(NamedTuple):
     target: str = "screen"
 
 
-# The gutter's controls, one list per pane, each top to bottom.
-PLOT_CONTROLS = [
+# The gutter's controls, one list per column, each top to bottom. The
+# scale pair is on the left, beside the left axis, which is the only
+# side a plot declares adjustable. The plot arrows are in the middle
+# row, level with the middle of the pane.
+PLOT_LEFT_CONTROLS = [
     GutterControl(
-        name="to-sparql",
-        glyph="≡",
-        hint="Show the selected query",
-        action="show_sparql",
+        name="raise-top",
+        glyph="⇡",
+        hint="Raise the left axis top",
+        action="step_top",
     ),
     GutterControl(
         name="prev-plot",
         glyph="◄",
         hint="Previous plot",
         action="show_plot(-1)",
+    ),
+    GutterControl(
+        name="lower-top",
+        glyph="⇣",
+        hint="Lower the left axis top",
+        action="step_top(-1)",
+    ),
+]
+PLOT_RIGHT_CONTROLS = [
+    GutterControl(
+        name="to-sparql",
+        glyph="≡",
+        hint="Show the selected query",
+        action="show_sparql",
     ),
     GutterControl(
         name="next-plot",
@@ -110,7 +127,7 @@ def gutter_control(control: GutterControl, pane: str) -> Vertical:
 
 
 class DetailRow(Horizontal):
-    """The detail pane with a gutter of controls down its right."""
+    """The detail pane with a gutter of controls down either side."""
 
     can_focus = False
 
@@ -120,14 +137,24 @@ class DetailRow(Horizontal):
         self.window = window
 
     def compose(self) -> ComposeResult:
+        yield Vertical(
+            *(
+                gutter_control(control, "-plot")
+                for control in PLOT_LEFT_CONTROLS
+            ),
+            classes="pane-gutter -left -plot",
+        )
         yield DetailSwitcher(self.window)
         yield Vertical(
-            *(gutter_control(control, "-plot") for control in PLOT_CONTROLS),
+            *(
+                gutter_control(control, "-plot")
+                for control in PLOT_RIGHT_CONTROLS
+            ),
             *(
                 gutter_control(control, "-sparql")
                 for control in SPARQL_CONTROLS
             ),
-            classes="pane-gutter",
+            classes="pane-gutter -right",
         )
 
     def on_mount(self) -> None:
@@ -147,7 +174,9 @@ class DetailRow(Horizontal):
 
     def set_help_keys(self, key_for_action: Callable[[str], str]) -> None:
         """Name the key that runs each control, and the pane's own keys."""
-        for control in PLOT_CONTROLS + SPARQL_CONTROLS:
+        for control in (
+            PLOT_LEFT_CONTROLS + PLOT_RIGHT_CONTROLS + SPARQL_CONTROLS
+        ):
             label = self.query_one(f"#{control.name}-key", Static)
             label.update(key_for_action(control.action))
         self.query_one(SparqlPane).set_help_keys(
