@@ -208,6 +208,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("F", "clear_filters", "Clear filters", show=False),
         Binding("r", "show_plot", "Resource plots", show=False),
         Binding("R", "show_plot(-1)", "Resource plots", show=False),
+        Binding("minus", "step_top(-1)", "Plot scale", show=False),
+        Binding("plus", "step_top", "Plot scale", show=False),
         Binding("z", "maximize_plot", "Zoom the plot", show=False),
         Binding("s", "show_sparql", "SPARQL", show=False),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
@@ -563,6 +565,10 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """
         offered = available_plots(log_has_new_columns(self.app.resource_log))
         self.query_one(DetailSwitcher).show_plot(offered, step)
+
+    def action_step_top(self, direction: int = 1) -> None:
+        """Raise or lower the top of the plot's adjustable axis."""
+        self.query_one(DetailSwitcher).step_top(direction)
 
     def action_maximize_plot(self) -> None:
         """Open the resource plot as a full-screen modal.

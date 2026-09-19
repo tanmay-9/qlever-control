@@ -337,6 +337,15 @@ class Plot(NamedTuple):
     left: Axis
     right: Axis
 
+    @property
+    def adjustable(self) -> bool:
+        """Whether either side lets the reader step its top.
+
+        One side at most: the reader steps a single top, so two
+        adjustable sides would move together under one control.
+        """
+        return self.left.adjustable or self.right.adjustable
+
 
 # One row per plot, in the order they are offered.
 PLOTS = (

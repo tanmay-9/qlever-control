@@ -117,6 +117,11 @@ def test_the_disk_plot_bounds_a_small_io_stall():
     assert axis_top(win, PLOTS[1].right) == 20.0
 
 
+def test_only_the_disk_plot_offers_the_step():
+    assert PLOTS[1].adjustable
+    assert not PLOTS[0].adjustable
+
+
 def test_percentile_of_a_hundred_is_the_largest_reading():
     assert percentile([3.0, 1.0, 2.0], 100) == 3.0
 
