@@ -210,7 +210,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("R", "show_plot(-1)", "Resource plots", show=False),
         Binding("minus", "step_top(-1)", "Plot scale", show=False),
         Binding("plus", "step_top", "Plot scale", show=False),
-        Binding("z", "maximize_plot", "Zoom the plot", show=False),
+        Binding("z", "maximize_plot", "Full screen", show=False),
         Binding("s", "show_sparql", "SPARQL", show=False),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]

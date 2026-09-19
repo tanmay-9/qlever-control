@@ -593,6 +593,21 @@ class ResourcePlotPane(PlotextPlot):
                 alignment="left",
             )
             next_col += len(label) + LABEL_GAP
+        # A stepped axis leaves its tallest readings clamped onto the
+        # top, so say what they really reached. It shares the label
+        # row, which is already spent, rather than taking a data row.
+        if plot.left.adjustable and self.top_step > 0:
+            chip = f" ⇡ peak {round(axis_top(window, plot.left))} "
+            plt.text(
+                chip,
+                window.start_s + next_col * seconds_per_col,
+                left_axis_max,
+                yside="left",
+                background="default",
+                style="inverted",
+                alignment="left",
+            )
+            next_col += len(chip) + LABEL_GAP
         for index, label in enumerate(right_labels):
             plt.text(
                 label,
