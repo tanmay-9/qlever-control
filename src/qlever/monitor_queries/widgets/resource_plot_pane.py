@@ -156,7 +156,7 @@ def axis_ticks(
 # The tops an adjustable axis steps through, starting at the plain
 # maximum. Each rung leaves out more of the highest readings, so the
 # rest of the data fills more of the plot.
-TOP_PERCENTILES = (100, 99, 95, 90, 75)
+TOP_PERCENTILES = (100, 95, 90, 75)
 
 
 def percentile(values: list[float], percent: float) -> float:

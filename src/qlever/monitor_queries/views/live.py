@@ -51,7 +51,10 @@ from qlever.monitor_queries.widgets.header_row import HeaderRow
 from qlever.monitor_queries.widgets.metrics_row import MetricsRow
 from qlever.monitor_queries.widgets.nav_pill import NavPill
 from qlever.monitor_queries.widgets.query_table import LiveQueryTable
-from qlever.monitor_queries.widgets.resource_plot_pane import available_plots
+from qlever.monitor_queries.widgets.resource_plot_pane import (
+    ResourcePlotPane,
+    available_plots,
+)
 from qlever.monitor_queries.widgets.resource_row import ResourceRow
 from qlever.monitor_queries.widgets.resource_sparkline import ResourceSparkline
 from qlever.monitor_queries.widgets.sparql_pane import SELECT_ROW_HINT
@@ -408,6 +411,7 @@ class LiveScreen(Screen, inherit_bindings=False):
             ResourcePlotModal(
                 self.live_resource_window(),
                 available_plots(log_has_new_columns(self.app.resource_log)),
+                self.query_one(ResourcePlotPane).top_step,
             )
         )
 

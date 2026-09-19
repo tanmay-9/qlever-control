@@ -433,15 +433,22 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.refresh_data(rescan=False)
 
     def schedule_rescan(self) -> None:
-        """Collapse a fast window scrub into one scan of where the user lands."""
+        """Collapse a fast window scrub into one scan of where the user lands.
+
+        The pane is measured when the timer fires, not when it is set:
+        on the first scan the screen is not laid out yet and the pane
+        still has no width.
+        """
         if self.rescan_timer is not None:
             self.rescan_timer.stop()
-        buckets = buckets_for_width(
-            self.query_one(ResourcePlotPane).size.width
-        )
         self.rescan_timer = self.set_timer(
             RESCAN_DEBOUNCE_S,
-            lambda: self.refresh_data(rescan=True, buckets=buckets),
+            lambda: self.refresh_data(
+                rescan=True,
+                buckets=buckets_for_width(
+                    self.query_one(ResourcePlotPane).size.width
+                ),
+            ),
         )
 
     @work(thread=True, exclusive=True, group="refresh_data")
@@ -582,6 +589,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             ResourcePlotModal(
                 self.resource_window,
                 available_plots(log_has_new_columns(self.app.resource_log)),
+                self.query_one(ResourcePlotPane).top_step,
             )
         )
 

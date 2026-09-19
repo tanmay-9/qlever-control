@@ -26,7 +26,8 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
 class ResourcePlotModal(ModalScreen):
     """Shows the plots this log can carry, stacked, full screen.
 
-    Opens on the window the inline pane is showing. After that the
+    Opens on the window and the axis top the inline pane is showing,
+    so what the reader set is what the modal draws. After that the
     screen keeps every pane up to date: Historic sends the window it
     re-reads at this size, and Live sends fresh readings on its timer.
     """
@@ -39,20 +40,24 @@ class ResourcePlotModal(ModalScreen):
         Binding("q", "app.quit", "Quit"),
     ]
 
-    def __init__(self, window: ResourceWindow, plots: list[Plot]) -> None:
+    def __init__(
+        self, window: ResourceWindow, plots: list[Plot], top_step: int
+    ) -> None:
         super().__init__()
         self.window = window
         self.plots = plots
+        self.top_step = top_step
 
     def compose(self) -> ComposeResult:
         # One width for the whole stack, since a pane only knows its own
         # numbers and the gutters have to come out the same size.
-        width = label_width(self.window, self.plots)
+        width = label_width(self.window, self.plots, self.top_step)
         with Vertical(id="resource-plot-modal"):
             for plot in self.plots:
                 yield ResourcePlotPane(
                     self.window,
                     plot,
+                    top_step=self.top_step,
                     time_labels=plot is self.plots[-1],
                     label_width=width,
                 )

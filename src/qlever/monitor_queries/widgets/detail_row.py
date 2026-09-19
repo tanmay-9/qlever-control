@@ -18,6 +18,10 @@ from qlever.monitor_queries.widgets.detail_switcher import (
     PLOT_ID,
     DetailSwitcher,
 )
+from qlever.monitor_queries.widgets.resource_plot_pane import (
+    TOP_PERCENTILES,
+    ResourcePlotPane,
+)
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
 
 
@@ -113,6 +117,7 @@ def gutter_control(control: GutterControl, pane: str) -> Vertical:
         control.glyph,
         variant="primary",
         compact=True,
+        id=f"{control.name}-glyph",
         action=f"{control.target}.{control.action}",
         tooltip=control.hint,
         classes="gutter-glyph",
@@ -165,12 +170,25 @@ class DetailRow(Horizontal):
         """
         self.watch(self.query_one(DetailSwitcher), "current", self.sync_pane)
         self.sync_pane()
+        pane = self.query_one(ResourcePlotPane)
+        self.watch(pane, "plot", self.sync_scale_arrows)
+        self.watch(pane, "top_step", self.sync_scale_arrows)
+        self.sync_scale_arrows()
 
     def sync_pane(self) -> None:
         """Mark which pane is showing, so CSS draws only its controls."""
         showing_plot = self.query_one(DetailSwitcher).current == PLOT_ID
         self.set_class(showing_plot, "-plot")
         self.set_class(not showing_plot, "-sparql")
+
+    def sync_scale_arrows(self) -> None:
+        """Grey out a scale arrow with nowhere left to go."""
+        pane = self.query_one(ResourcePlotPane)
+        adjustable = pane.plot.adjustable
+        can_raise = adjustable and pane.top_step > 0
+        can_lower = adjustable and pane.top_step < len(TOP_PERCENTILES) - 1
+        self.query_one("#raise-top-glyph", Button).disabled = not can_raise
+        self.query_one("#lower-top-glyph", Button).disabled = not can_lower
 
     def set_help_keys(self, key_for_action: Callable[[str], str]) -> None:
         """Name the key that runs each control, and the pane's own keys."""

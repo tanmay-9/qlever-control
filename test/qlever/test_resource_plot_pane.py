@@ -139,7 +139,7 @@ def test_axis_top_steps_down_past_a_spike():
     win = window(series("read_bytes_per_s", readings))
     stepped = axis("read_bytes_per_s", adjustable=True)
     assert axis_top(win, stepped) == 100.0
-    assert axis_top(win, stepped, step=3) == 9.0
+    assert axis_top(win, stepped, step=2) == 9.0
 
 
 def test_axis_top_ignores_the_step_on_a_fixed_axis():
@@ -159,13 +159,13 @@ def test_axis_top_gives_each_series_its_own_percentile():
         series("write_bytes_per_s", (1.0,) * 10),
     )
     both = axis("read_bytes_per_s", "write_bytes_per_s", adjustable=True)
-    assert axis_top(win, both, step=3) == 90.0
+    assert axis_top(win, both, step=2) == 90.0
 
 
 def test_the_disk_plot_steps_its_rate_axis():
     readings = tuple(float(step) for step in range(1, 10)) + (100.0,)
     win = window(series("read_bytes_per_s", readings))
-    assert axis_top(win, PLOTS[1].left, step=3) == 9.0
+    assert axis_top(win, PLOTS[1].left, step=2) == 9.0
 
 
 def test_clamp_pulls_a_reading_above_the_ceiling_onto_it():
@@ -266,7 +266,7 @@ def test_label_width_follows_the_axis_down_a_step():
         )
     ]
     assert label_width(win, stepped) == 3
-    assert label_width(win, stepped, step=3) == 1
+    assert label_width(win, stepped, step=2) == 1
 
 
 def test_label_width_counts_the_zero_of_a_side_with_no_series():
