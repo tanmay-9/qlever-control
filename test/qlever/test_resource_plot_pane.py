@@ -6,6 +6,8 @@ is drawn in, which plots a log can carry, and how wide a stack pads its
 labels. Drawing itself is left to the widget.
 """
 
+from math import isnan
+
 from qlever.monitor_queries.models import ResourceSeries, ResourceWindow
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     PLOTS,
@@ -13,6 +15,7 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
     Plot,
     available_plots,
     axis_top,
+    clamp,
     empty_note,
     label_width,
     line_color,
@@ -158,6 +161,25 @@ def test_the_disk_plot_steps_its_rate_axis():
     readings = tuple(float(step) for step in range(1, 10)) + (100.0,)
     win = window(series("read_bytes_per_s", readings))
     assert axis_top(win, PLOTS[1].left, step=3) == 9.0
+
+
+def test_clamp_pulls_a_reading_above_the_ceiling_onto_it():
+    assert clamp((1.0, 9.0, 2.0), 5.0) == (1.0, 5.0, 2.0)
+
+
+def test_clamp_leaves_the_readings_under_the_ceiling_alone():
+    assert clamp((1.0, 5.0), 5.0) == (1.0, 5.0)
+
+
+def test_clamp_keeps_the_buckets_that_reported_nothing_empty():
+    # A gap means the server was down, so clamping must not fill it.
+    clamped = clamp((NAN, 9.0), 5.0)
+    assert isnan(clamped[0])
+    assert clamped[1] == 5.0
+
+
+def test_clamp_without_a_ceiling_changes_nothing():
+    assert clamp((1.0, 9.0), None) == (1.0, 9.0)
 
 
 def test_series_for_keys_keeps_the_plot_order():

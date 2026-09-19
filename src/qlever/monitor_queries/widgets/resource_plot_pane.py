@@ -264,6 +264,25 @@ def break_at_restarts(
     return out_times, out_values
 
 
+def clamp(
+    values: tuple[float, ...], ceiling: float | None
+) -> tuple[float, ...]:
+    """Pull the readings above the ceiling down onto it.
+
+    plotext draws nothing at all for a point above the axis, which
+    would look like the gap left by a restart. A flat line along the
+    top says the reading ran past it instead. The buckets that
+    reported nothing stay empty, and a side with no axis of its own
+    has no ceiling to pull to.
+    """
+    if ceiling is None:
+        return values
+    return tuple(
+        value if isnan(value) or value <= ceiling else ceiling
+        for value in values
+    )
+
+
 def color_markup(color: RgbColor) -> str:
     """A Rich color tag for an RGB triplet."""
     return "rgb({}, {}, {})".format(*color)
@@ -475,7 +494,7 @@ class ResourcePlotPane(PlotextPlot):
         self.plt.xlim(window.start_s, window.end_s)
         left_axis_max, right_axis_max = self.draw_axes(window, plot)
         self.draw_labels(window, plot, left_axis_max, right_axis_max)
-        self.draw_series(window, plot, left_axis_max)
+        self.draw_series(window, plot, left_axis_max, right_axis_max)
         self.refresh()
 
     def padded(self, labels: list[str]) -> list[str]:
@@ -596,10 +615,16 @@ class ResourcePlotPane(PlotextPlot):
             )
 
     def draw_series(
-        self, window: ResourceWindow, plot: Plot, left_axis_max: float
+        self,
+        window: ResourceWindow,
+        plot: Plot,
+        left_axis_max: float,
+        right_axis_max: float | None,
     ) -> None:
         """Plot this plot's lines, or a note when it has none to draw.
 
+        A reading above its axis is clamped onto the top, so an axis
+        stepped down past a spike shows a flat line rather than a hole.
         The lines are broken across each restart's downtime. Vlines mark
         the server going down and coming back, and an index rebuild
         starting and ending.
@@ -617,9 +642,12 @@ class ResourcePlotPane(PlotextPlot):
             for index, series in enumerate(series_for_keys(window, keys))
             if series.values
         ]
+        ceilings = {"left": left_axis_max, "right": right_axis_max}
         for side, index, series in lines:
             times, values = break_at_restarts(
-                window.times_s, series.values, window.events
+                window.times_s,
+                clamp(series.values, ceilings[side]),
+                window.events,
             )
             plt.plot(
                 times,
