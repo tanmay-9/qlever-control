@@ -195,7 +195,9 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
     return top
 
 
-def label_width(window: ResourceWindow, plots: list[Plot]) -> int:
+def label_width(
+    window: ResourceWindow, plots: list[Plot], step: int = 0
+) -> int:
     """Digits in the longest y label these plots print for this window.
 
     plotext sizes its gutters from the longest label it has, so stacked
@@ -206,7 +208,7 @@ def label_width(window: ResourceWindow, plots: list[Plot]) -> int:
     width = 0
     for plot in plots:
         for axis in (plot.left, plot.right):
-            highest = axis_top(window, axis)
+            highest = axis_top(window, axis, step)
             width = max(width, len(str(round(highest))))
     return width
 
@@ -397,11 +399,15 @@ class ResourcePlotPane(PlotextPlot):
 
     window = Reactive(None, init=False)
     plot = Reactive(None, init=False)
+    # An index into `TOP_PERCENTILES`, not a percentage. Carried
+    # across plots, and ignored by an axis that is not adjustable.
+    top_step = Reactive(0, init=False)
 
     def __init__(
         self,
         window: ResourceWindow,
         plot: Plot,
+        top_step: int = 0,
         time_labels: bool = True,
         label_width: int = 0,
         **kwargs,
@@ -413,6 +419,7 @@ class ResourcePlotPane(PlotextPlot):
         self.theme = "textual-clear"
         self.set_reactive(ResourcePlotPane.window, window)
         self.set_reactive(ResourcePlotPane.plot, plot)
+        self.set_reactive(ResourcePlotPane.top_step, top_step)
         # Stacked plots share one clock row, printed under the last of
         # them, so the ones above give their row back to the data.
         self.time_labels = time_labels
@@ -434,6 +441,10 @@ class ResourcePlotPane(PlotextPlot):
 
     def watch_plot(self) -> None:
         """Redraw the same window as the plot it was just switched to."""
+        self.replot()
+
+    def watch_top_step(self) -> None:
+        """Redraw the same plot against the top just stepped to."""
         self.replot()
 
     def on_resize(self) -> None:
@@ -482,8 +493,8 @@ class ResourcePlotPane(PlotextPlot):
         which lines a stack's gutters up and is zero on its own.
         """
         plt = self.plt
-        left_top = axis_top(window, plot.left)
-        right_top = axis_top(window, plot.right)
+        left_top = axis_top(window, plot.left, self.top_step)
+        right_top = axis_top(window, plot.right, self.top_step)
         # Cap the shared tick count by the smaller axis so its labels stay
         # distinct.
         smaller_top = min(left_top, right_top) if right_top > 0 else left_top

@@ -228,6 +228,20 @@ def test_label_width_of_one_plot_is_its_own_longest():
     assert label_width(win, [PLOTS[0]]) == 2
 
 
+def test_label_width_follows_the_axis_down_a_step():
+    readings = tuple(float(value) for value in range(1, 10)) + (100.0,)
+    win = window(series("read_bytes_per_s", readings))
+    stepped = [
+        Plot(
+            name="A",
+            left=axis("read_bytes_per_s", adjustable=True),
+            right=axis(),
+        )
+    ]
+    assert label_width(win, stepped) == 3
+    assert label_width(win, stepped, step=3) == 1
+
+
 def test_label_width_counts_the_zero_of_a_side_with_no_series():
     win = window(series("rss", (7.0,), total=32.9))
     only_absent = Plot(name="A", left=axis("io_stall_percent"), right=axis())
