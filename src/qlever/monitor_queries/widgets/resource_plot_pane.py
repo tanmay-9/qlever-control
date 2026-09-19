@@ -153,26 +153,45 @@ def axis_ticks(
     return axis_max, positions, [str(pos) for pos in positions]
 
 
-def axis_top(window: ResourceWindow, axis: Axis) -> float:
+# The tops an adjustable axis steps through, starting at the plain
+# maximum. Each rung leaves out more of the highest readings, so the
+# rest of the data fills more of the plot.
+TOP_PERCENTILES = (100, 99, 95, 90, 75)
+
+
+def percentile(values: list[float], percent: float) -> float:
+    """The reading `percent` of the way up the sorted values.
+
+    Picks the nearest reading instead of interpolating between two, so
+    100 gives the largest one.
+    """
+    ordered = sorted(values)
+    return ordered[round(percent / 100 * (len(ordered) - 1))]
+
+
+def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
     """Highest value one axis has to show, over all its series.
 
-    A column with a capacity is measured against it, so a light load
-    stays low instead of filling the plot. A column without a capacity
-    is measured against its largest reading, skipping the buckets where
-    it reported nothing. Zero when the window holds none of the axis's
-    columns, which is how a plot knows that side has nothing to draw,
-    so `min_top` only applies to a side that has readings.
+    A column with a capacity uses it, so a light load stays low
+    instead of filling the plot. A column without one uses its own
+    readings, cut down to the `TOP_PERCENTILES` entry that `step`
+    picks. Zero when the window has none of the axis's columns, which
+    tells the plot that side has nothing to draw.
     """
     drawn = series_for_keys(window, axis.keys)
     if not drawn:
         return 0.0
+    percent = TOP_PERCENTILES[step] if axis.adjustable else 100
     top = axis.min_top
     for series in drawn:
         if series.total is not None:
             top = max(top, series.total)
         else:
             readings = [value for value in series.values if not isnan(value)]
-            top = max([top, *readings])
+            # Each series keeps its own percentile, so the taller line
+            # is not pulled down by the shorter one's low readings.
+            if readings:
+                top = max(top, percentile(readings, percent))
     return top
 
 
@@ -277,11 +296,14 @@ def series_for_keys(
 class Axis(NamedTuple):
     """One y-axis of a plot: the columns on it share a unit.
 
-    The axis scales to its readings, but never below `min_top`.
+    The axis scales to its readings, but never below `min_top`. An
+    `adjustable` axis also lets the reader step its top down through
+    `TOP_PERCENTILES`, so one spike stops squashing the rest of it.
     """
 
     keys: tuple[str, ...]
     min_top: float = 0.0
+    adjustable: bool = False
 
 
 class Plot(NamedTuple):
@@ -304,7 +326,11 @@ PLOTS = (
     ),
     Plot(
         name="Disk I/O",
-        left=Axis(keys=("read_bytes_per_s", "write_bytes_per_s")),
+        # Rates have no capacity to hold the axis steady, so one burst
+        # can leave every other reading flat along the bottom.
+        left=Axis(
+            keys=("read_bytes_per_s", "write_bytes_per_s"), adjustable=True
+        ),
         # A stall under a fifth of the time is routine on a busy
         # server. Without the bound the axis would magnify a 2% stall
         # into a plot full of spikes.

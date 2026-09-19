@@ -16,6 +16,7 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
     empty_note,
     label_width,
     line_color,
+    percentile,
     series_for_keys,
 )
 
@@ -40,9 +41,9 @@ def window(*all_series):
     )
 
 
-def axis(*keys, min_top=0.0):
+def axis(*keys, min_top=0.0, adjustable=False):
     """An axis over the given columns, unbounded unless asked."""
-    return Axis(keys=keys, min_top=min_top)
+    return Axis(keys=keys, min_top=min_top, adjustable=adjustable)
 
 
 def test_axis_top_uses_the_capacity_over_the_readings():
@@ -111,6 +112,52 @@ def test_the_disk_plot_bounds_a_small_io_stall():
         series("io_stall_percent", (2.0,)),
     )
     assert axis_top(win, PLOTS[1].right) == 20.0
+
+
+def test_percentile_of_a_hundred_is_the_largest_reading():
+    assert percentile([3.0, 1.0, 2.0], 100) == 3.0
+
+
+def test_percentile_leaves_out_the_readings_above_it():
+    assert percentile([float(step) for step in range(1, 11)], 75) == 8.0
+
+
+def test_percentile_of_one_reading_is_that_reading():
+    assert percentile([4.0], 90) == 4.0
+
+
+def test_axis_top_steps_down_past_a_spike():
+    readings = tuple(float(step) for step in range(1, 10)) + (100.0,)
+    win = window(series("read_bytes_per_s", readings))
+    stepped = axis("read_bytes_per_s", adjustable=True)
+    assert axis_top(win, stepped) == 100.0
+    assert axis_top(win, stepped, step=3) == 9.0
+
+
+def test_axis_top_ignores_the_step_on_a_fixed_axis():
+    readings = tuple(float(step) for step in range(1, 10)) + (100.0,)
+    win = window(series("read_bytes_per_s", readings))
+    assert axis_top(win, axis("read_bytes_per_s"), step=3) == 100.0
+
+
+def test_axis_top_gives_each_series_its_own_percentile():
+    # Pooling the two would answer 80, because the low write readings
+    # push the taller read line's own cut-off down the sorted list.
+    win = window(
+        series(
+            "read_bytes_per_s",
+            tuple(float(step * 10) for step in range(1, 11)),
+        ),
+        series("write_bytes_per_s", (1.0,) * 10),
+    )
+    both = axis("read_bytes_per_s", "write_bytes_per_s", adjustable=True)
+    assert axis_top(win, both, step=3) == 90.0
+
+
+def test_the_disk_plot_steps_its_rate_axis():
+    readings = tuple(float(step) for step in range(1, 10)) + (100.0,)
+    win = window(series("read_bytes_per_s", readings))
+    assert axis_top(win, PLOTS[1].left, step=3) == 9.0
 
 
 def test_series_for_keys_keeps_the_plot_order():
