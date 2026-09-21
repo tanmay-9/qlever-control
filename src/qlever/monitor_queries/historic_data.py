@@ -98,7 +98,7 @@ def read_window(
             )
         log_is_fresh = now_ms - log_end_ms <= pad_ms
         running_cutoff_ms = log_end_ms - pad_ms
-        for start_ms, start_line_offset in still_open.values():
+        for start_ms, start_line_offset, op_type in still_open.values():
             if start_ms > window_end_ms:
                 continue
             status = (

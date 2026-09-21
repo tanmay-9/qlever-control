@@ -168,7 +168,7 @@ def find_active_queries(
         events = scan_range(buf, lo_offset, file_size)
         _, still_open = pair_start_end_events(events)
 
-        for qid, (start_ms, start_line_offset) in still_open.items():
+        for qid, (start_ms, start_line_offset, op_type) in still_open.items():
             _, client_ip, sparql = load_sparql_at(buf, start_line_offset)
             state.active[qid] = ActiveQuery(
                 start_ms=start_ms,
