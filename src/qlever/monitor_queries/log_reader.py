@@ -236,6 +236,40 @@ def read_first_timestamp(buf: LogBuffer) -> int | None:
     return peek_ts_ms(buf[:HEAD_BYTES])
 
 
+# Bytes of the log's tail searched for a start line. Big enough to hold
+# many lines, small enough that the search costs nothing.
+TYPE_PROBE_BYTES = 1024 * 1024
+
+START_EVENT = b'"event":"start"'
+
+
+def log_has_operation_types(path: Path) -> bool:
+    """Whether the server records the operation type on its start lines.
+
+    Answered from the last start line rather than the first, because a
+    log spanning a server upgrade holds both kinds and only the recent
+    lines say what it writes now. A missing or empty log, or a tail
+    holding no start line, reports no.
+    """
+    try:
+        with open_log_buffer(path) as buf:
+            if buf is None:
+                return False
+            tail = max(0, len(buf) - TYPE_PROBE_BYTES)
+            start_event_at = buf.rfind(START_EVENT, tail)
+            if start_event_at == -1:
+                return False
+            line_end = buf.find(b"\n", start_event_at)
+            if line_end == -1:
+                line_end = len(buf)
+            # The type sits a few fields after the event and well
+            # before the query, so the search never enters the blob.
+            limit = min(line_end, start_event_at + HEAD_BYTES)
+            return buf.find(OP_TYPE_KEY, start_event_at, limit) != -1
+    except OSError:
+        return False
+
+
 def read_last_timestamp(buf: LogBuffer) -> int | None:
     """Return the timestamp of the last whole line, or None.
 

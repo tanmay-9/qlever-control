@@ -134,6 +134,10 @@ OPERATION_COLUMNS = {
 # Every series a window can hold, whichever log it came from.
 ALL_COLUMNS = COLUMNS + tuple(OPERATION_COLUMNS.values())
 
+# The series that come from the metrics log, so a plot needing one is
+# gated on that log and not on the resource log's format.
+OPERATION_KEYS = frozenset(column.key for column in OPERATION_COLUMNS.values())
+
 
 def buffer_size(sample_interval_s: int) -> int:
     """Samples the live window holds at this logging interval."""

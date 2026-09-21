@@ -44,7 +44,6 @@ from qlever.monitor_queries.resource_data import (
     read_resource_window,
     window_for_samples,
 )
-from qlever.monitor_queries.resource_reader import log_has_new_columns
 from qlever.monitor_queries.util import (
     action_key,
     help_text,
@@ -70,7 +69,6 @@ from qlever.monitor_queries.widgets.query_table import HistoricQueryTable
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     MIN_BUCKETS,
     ResourcePlotPane,
-    available_plots,
     buckets_for_width,
 )
 from qlever.monitor_queries.widgets.selected_window import SelectedWindow
@@ -575,8 +573,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Showing the hidden pane resizes it from zero, so its on_resize
         redraws it; no explicit replot here.
         """
-        offered = available_plots(log_has_new_columns(self.app.resource_log))
-        self.query_one(DetailSwitcher).show_plot(offered, step)
+        self.query_one(DetailSwitcher).show_plot(
+            self.app.offered_plots(), step
+        )
 
     def action_step_top(self, direction: int = 1) -> None:
         """Raise or lower the top of the plot's adjustable axis."""
@@ -593,7 +592,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.app.push_screen(
             ResourcePlotModal(
                 self.resource_window,
-                available_plots(log_has_new_columns(self.app.resource_log)),
+                self.app.offered_plots(),
                 self.query_one(ResourcePlotPane).top_step,
             )
         )

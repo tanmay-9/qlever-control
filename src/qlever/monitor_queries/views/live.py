@@ -35,7 +35,6 @@ from qlever.monitor_queries.resource_data import (
 from qlever.monitor_queries.resource_reader import (
     Sample,
     SampleTail,
-    log_has_new_columns,
 )
 from qlever.monitor_queries.util import action_key
 from qlever.monitor_queries.views.resource_plot_modal import (
@@ -53,7 +52,6 @@ from qlever.monitor_queries.widgets.nav_pill import NavPill
 from qlever.monitor_queries.widgets.query_table import LiveQueryTable
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     ResourcePlotPane,
-    available_plots,
 )
 from qlever.monitor_queries.widgets.resource_row import ResourceRow
 from qlever.monitor_queries.widgets.resource_sparkline import ResourceSparkline
@@ -393,8 +391,9 @@ class LiveScreen(Screen, inherit_bindings=False):
         The log's format is read now rather than at startup, since the
         server may have begun writing it after this screen opened.
         """
-        offered = available_plots(log_has_new_columns(self.app.resource_log))
-        self.query_one(DetailSwitcher).show_plot(offered, step)
+        self.query_one(DetailSwitcher).show_plot(
+            self.app.offered_plots(), step
+        )
         self.refresh_table_status()
 
     def action_step_top(self, direction: int = 1) -> None:
@@ -411,7 +410,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.app.push_screen(
             ResourcePlotModal(
                 self.live_resource_window(),
-                available_plots(log_has_new_columns(self.app.resource_log)),
+                self.app.offered_plots(),
                 self.query_one(ResourcePlotPane).top_step,
             )
         )

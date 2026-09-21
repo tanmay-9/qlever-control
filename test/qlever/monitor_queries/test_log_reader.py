@@ -9,6 +9,7 @@ from qlever.monitor_queries.log_reader import (
     line_query_contains,
     load_sparql_at,
     load_sparql_snippet_at,
+    log_has_operation_types,
     next_whole_line,
     offset_for_ts,
     open_log_buffer,
@@ -686,6 +687,55 @@ def test_read_last_timestamp_handles_a_long_last_line():
         b'"query":"' + long_query + b'"}\n'
     )
     assert read_last_timestamp(line) == 1000
+
+
+def write_metrics_log(tmp_path, text):
+    """Write a metrics log to a temp file and return its path."""
+    path = tmp_path / "metrics.jsonl"
+    path.write_bytes(text)
+    return path
+
+
+def test_log_has_operation_types_last_start_line_has_one(tmp_path):
+    path = write_metrics_log(tmp_path, START + b"\n" + END + b"\n")
+    assert log_has_operation_types(path) is True
+
+
+def test_log_has_operation_types_last_start_line_has_none(tmp_path):
+    path = write_metrics_log(tmp_path, START_NO_TYPE + b"\n" + END + b"\n")
+    assert log_has_operation_types(path) is False
+
+
+def test_log_has_operation_types_reads_the_last_start_not_the_first(tmp_path):
+    # A log spanning a server upgrade holds both kinds. What the server
+    # writes now is what decides whether the plot is worth offering.
+    path = write_metrics_log(
+        tmp_path, START_NO_TYPE + b"\n" + END + b"\n" + START + b"\n"
+    )
+    assert log_has_operation_types(path) is True
+
+
+def test_log_has_operation_types_ignores_a_long_query_after_it(tmp_path):
+    # The type sits before the query blob, so the search never has to
+    # enter it.
+    line = (
+        b'{"ts-ms":1,"event":"start","qid":"q1","type":"update",'
+        b'"query":"' + b"x" * (64 * 1024) + b'"}\n'
+    )
+    assert log_has_operation_types(write_metrics_log(tmp_path, line)) is True
+
+
+def test_log_has_operation_types_no_start_line_at_all(tmp_path):
+    path = write_metrics_log(tmp_path, END + b"\n")
+    assert log_has_operation_types(path) is False
+
+
+def test_log_has_operation_types_empty_file(tmp_path):
+    assert log_has_operation_types(write_metrics_log(tmp_path, b"")) is False
+
+
+def test_log_has_operation_types_missing_file(tmp_path):
+    assert log_has_operation_types(tmp_path / "nope.jsonl") is False
 
 
 def test_read_first_timestamp_returns_first_complete_line_ts():
