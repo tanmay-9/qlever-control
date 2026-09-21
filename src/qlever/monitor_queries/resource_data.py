@@ -1,9 +1,8 @@
-"""Data layer for the server's resource-usage log.
+"""Builds one window of readings for the sparklines and the plot.
 
-Live tails the log into a rolling buffer; Historic reads a past window
-straight off disk. Both turn samples into the immutable render models the
-sparklines and the plot draw, so no widget does unit math of its own.
-Getting the rows out of the file is `resource_reader.py`'s job.
+Resource samples and finished operations land on the same time grid, so
+one plot can read them against each other. Getting the rows out of the
+resource log is `resource_reader.py`'s job.
 """
 
 from collections import deque
@@ -12,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
+from qlever.monitor_queries.log_reader import CompletedQuery
 from qlever.monitor_queries.models import (
     ResourceEvent,
     ResourceSeries,
@@ -43,10 +43,11 @@ class Capacity:
 
 
 class Column(NamedTuple):
-    """One column of the resource log, and how to present it.
+    """One series the plot can draw, and how to present it.
 
-    `key` is the field on `Sample` and the key the series is stored
-    under, so the log's own column name is the only name in play.
+    `key` is the key the series is stored under, and for a resource
+    column it is also the field on `Sample`, so the log's own column
+    name is the only name in play.
     `scale` divides a raw reading into display units. `reduce` says how
     several readings in one time bucket collapse into a point.
     `capacity` names the `Capacity` attribute that gives an axis its
@@ -106,6 +107,32 @@ COLUMNS = (
         capacity=None,
     ),
 )
+
+# One row per operation type, keyed by the `type` the metrics log
+# writes. An operation with no type, or one this table does not know,
+# misses the lookup and is left out. The log already reports
+# milliseconds, so nothing is scaled.
+OPERATION_COLUMNS = {
+    "query": Column(
+        key="query_mean_ms",
+        label="query mean",
+        unit="ms",
+        scale=1,
+        reduce="mean",
+        capacity=None,
+    ),
+    "update": Column(
+        key="update_mean_ms",
+        label="update mean",
+        unit="ms",
+        scale=1,
+        reduce="mean",
+        capacity=None,
+    ),
+}
+
+# Every series a window can hold, whichever log it came from.
+ALL_COLUMNS = COLUMNS + tuple(OPERATION_COLUMNS.values())
 
 
 def buffer_size(sample_interval_s: int) -> int:
@@ -229,35 +256,50 @@ class EventTracker:
             self.events.append(ResourceEvent(kind=kind, time_s=ts_ms / 1000))
 
 
+def bucket_index(
+    ts_ms: int, start_ms: int, bucket_span_ms: float, buckets: int
+) -> int:
+    """Which bucket a timestamp inside the window falls in.
+
+    A timestamp landing exactly on the window's end would index one
+    past the last bucket, so it is pulled back into it.
+    """
+    index = int((ts_ms - start_ms) / bucket_span_ms)
+    return min(index, buckets - 1)
+
+
 def window_for_samples(
     samples: Iterable[Sample],
+    operations: Iterable[CompletedQuery],
     capacity: Capacity,
     start_ms: int,
     end_ms: int,
     buckets: int,
 ) -> ResourceWindow:
-    """Bucket samples by time into one window the widgets can draw.
+    """Bucket samples and operations into one window the widgets draw.
 
     Samples arrive oldest first and may fall outside the window: those
     count towards events, so a restart just off the edge is not lost,
-    but they get no bucket. Only the buckets are kept, so memory
-    follows `buckets` and not the number of samples.
+    but they get no bucket. An operation goes in the bucket its end
+    time falls in, and one landing where no sample did is left out,
+    since that bucket is not on the time grid. Only the buckets are
+    kept, so memory follows `buckets` and not the number of readings.
     """
     buckets = max(1, buckets)
     bucket_span_ms = (end_ms - start_ms) / buckets
     if bucket_span_ms <= 0:
         bucket_span_ms = 1
     bucket_ts = [None] * buckets
-    running = {column.key: [0.0] * buckets for column in COLUMNS}
-    counts = {column.key: [0] * buckets for column in COLUMNS}
+    running = {column.key: [0.0] * buckets for column in ALL_COLUMNS}
+    counts = {column.key: [0] * buckets for column in ALL_COLUMNS}
     tracker = EventTracker(start_ms, end_ms)
 
     for sample in samples:
         tracker.track(sample)
         if start_ms <= sample.ts_ms <= end_ms:
-            index = int((sample.ts_ms - start_ms) / bucket_span_ms)
-            if index >= buckets:
-                index = buckets - 1
+            index = bucket_index(
+                sample.ts_ms, start_ms, bucket_span_ms, buckets
+            )
             if bucket_ts[index] is None:
                 bucket_ts[index] = sample.ts_ms
             for column in COLUMNS:
@@ -271,11 +313,22 @@ def window_for_samples(
                         running[column.key][index] += raw
                     counts[column.key][index] += 1
 
+    # After the samples, so every bucket that has one is on the grid.
+    for operation in operations:
+        column = OPERATION_COLUMNS.get(operation.op_type)
+        if column is not None and start_ms <= operation.end_ms <= end_ms:
+            index = bucket_index(
+                operation.end_ms, start_ms, bucket_span_ms, buckets
+            )
+            if bucket_ts[index] is not None:
+                running[column.key][index] += operation.duration_ms
+                counts[column.key][index] += 1
+
     filled = [
         index for index in range(buckets) if bucket_ts[index] is not None
     ]
     series = {}
-    for column in COLUMNS:
+    for column in ALL_COLUMNS:
         # The required columns are in every version of the log, so
         # their series exists even before a sample arrives. An optional
         # column appears only once one is actually seen.
@@ -298,20 +351,28 @@ def window_for_samples(
 
 def read_resource_window(
     path: Path,
+    operations: Iterable[CompletedQuery],
     capacity: Capacity,
     start_ms: int,
     end_ms: int,
     buckets: int,
     should_cancel: Callable[[], bool] | None = None,
 ) -> ResourceWindow:
-    """Read a past window off disk, straight into the buckets."""
+    """Read a past window off disk, straight into the buckets.
+
+    The caller has already read the operations, so only the resource
+    log is read here.
+    """
     # No log yet: the server has not started, or resource logging is
     # off. Frame the window empty rather than fail the read.
     if not path.exists():
-        return window_for_samples([], capacity, start_ms, end_ms, buckets)
+        return window_for_samples(
+            [], operations, capacity, start_ms, end_ms, buckets
+        )
     with open(path, "rb") as stream:
         return window_for_samples(
             iter_samples(stream, start_ms, end_ms, should_cancel),
+            operations,
             capacity,
             start_ms,
             end_ms,

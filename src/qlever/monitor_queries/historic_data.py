@@ -8,7 +8,7 @@ reuses the scanned list.
 """
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
@@ -37,20 +37,22 @@ DURATION_UNKNOWN = -1
 
 
 class LoggedQuery(NamedTuple):
-    """One SPARQL query observed in the log over the current window.
+    """One SPARQL operation observed in the log over the current window.
 
     `end_ms` is `None` when the query started but has not ended yet,
     either because it is still running or the server crashed before
     writing the end event. `status` carries the raw end status, or
     `"running"` for a still-open survivor. `start_line_offset` is the
     byte offset of the start line, used to read the query's text only
-    once it is about to be displayed.
+    once it is about to be displayed. `op_type` is None on a log
+    written before the server recorded it.
     """
 
     start_ms: int
     end_ms: int | None
     status: str
     start_line_offset: int
+    op_type: str | None = None
 
 
 def read_window(
@@ -94,6 +96,7 @@ def read_window(
                     end_ms=pair.end_ms,
                     status=pair.status,
                     start_line_offset=pair.start_line_offset,
+                    op_type=pair.op_type,
                 )
             )
         log_is_fresh = now_ms - log_end_ms <= pad_ms
@@ -112,6 +115,7 @@ def read_window(
                     end_ms=None,
                     status=status,
                     start_line_offset=start_line_offset,
+                    op_type=op_type,
                 )
             )
 
@@ -181,29 +185,39 @@ def materialize_rows(
     ]
 
 
+def completed_operations(
+    queries: Iterable[LoggedQuery],
+) -> Iterator[CompletedQuery]:
+    """The finished operations among the given rows.
+
+    Running and orphaned rows (`end_ms is None`) never finished, so
+    they have no duration and no real status. Yielded one at a time,
+    so no second list is retained.
+    """
+    for query in queries:
+        if query.end_ms is not None:
+            yield CompletedQuery(
+                start_ms=query.start_ms,
+                end_ms=query.end_ms,
+                duration_ms=query.end_ms - query.start_ms,
+                status=query.status,
+                start_line_offset=query.start_line_offset,
+                op_type=query.op_type,
+            )
+
+
 def window_metrics(
     selected: list[LoggedQuery], slow_threshold_ms: int, label: str
 ) -> MetricsCounts:
     """Tally metrics over the completed queries in the selected set.
 
-    The completed queries are fed to `metrics_for_queries` through a
-    generator, so no per-query list is retained. Running and orphaned
-    queries (`end_ms is None`) carry no real status and are excluded,
-    so the counts match the completed rows on screen. Labelled with
-    the current window size.
+    Running and orphaned queries carry no real status and are left
+    out, so the counts match the completed rows on screen. Labelled
+    with the current window size.
     """
-    completed = (
-        CompletedQuery(
-            start_ms=query.start_ms,
-            end_ms=query.end_ms,
-            duration_ms=query.end_ms - query.start_ms,
-            status=query.status,
-            start_line_offset=query.start_line_offset,
-        )
-        for query in selected
-        if query.end_ms is not None
+    snapshot = metrics_for_queries(
+        completed_operations(selected), slow_threshold_ms
     )
-    snapshot = metrics_for_queries(completed, slow_threshold_ms)
     return MetricsCounts(label=label, **snapshot._asdict())
 
 

@@ -379,11 +379,12 @@ class LiveScreen(Screen, inherit_bindings=False):
         """
         now_ms = current_ms()
         return window_for_samples(
-            self.resource_samples.samples,
-            self.capacity,
-            now_ms - LIVE_RESOURCE_WINDOW_MS,
-            now_ms,
-            self.resource_samples.size,
+            samples=self.resource_samples.samples,
+            operations=[],
+            capacity=self.capacity,
+            start_ms=now_ms - LIVE_RESOURCE_WINDOW_MS,
+            end_ms=now_ms,
+            buckets=self.resource_samples.size,
         )
 
     def action_show_plot(self, step: int = 1) -> None:
