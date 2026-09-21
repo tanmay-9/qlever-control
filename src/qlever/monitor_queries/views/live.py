@@ -19,6 +19,7 @@ from qlever.monitor_queries.live_data import (
     discard_finished_backlog,
     get_live_metrics,
     get_live_query_rows,
+    get_recent_operations,
     is_log_fresh,
 )
 from qlever.monitor_queries.models import (
@@ -376,11 +377,12 @@ class LiveScreen(Screen, inherit_bindings=False):
         the window's start and end are the same instant.
         """
         now_ms = current_ms()
+        start_ms = now_ms - LIVE_RESOURCE_WINDOW_MS
         return window_for_samples(
             samples=self.resource_samples.samples,
-            operations=[],
+            operations=get_recent_operations(self.app.live_state, start_ms),
             capacity=self.capacity,
-            start_ms=now_ms - LIVE_RESOURCE_WINDOW_MS,
+            start_ms=start_ms,
             end_ms=now_ms,
             buckets=self.resource_samples.size,
         )
