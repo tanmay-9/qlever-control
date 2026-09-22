@@ -234,6 +234,10 @@ class ResourcePlotPane(PlotextPlot):
 
     def __init__(self, window: ResourceWindow, **kwargs) -> None:
         super().__init__(**kwargs)
+        # Draw no background of its own, so the plot sits on the page
+        # rather than in a lighter block. The series colors are passed
+        # to each plot call, so this theme's own colors never apply.
+        self.theme = "textual-clear"
         self.set_reactive(ResourcePlotPane.window, window)
         self.last_buckets = None
 
