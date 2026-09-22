@@ -28,7 +28,7 @@ from qlever.monitor_queries.resource_reader import (
 
 HEADER = "\t".join(LOG_COLUMNS) + "\n"
 OLD_HEADER = "\t".join(REQUIRED_COLUMNS) + "\n"
-TOTALS = Capacity(ram_gb=134.0, cores=64.0)
+CAPACITY = Capacity(ram_gb=134.0, cores=64.0)
 
 # One full new-format row. Tests override only the cells they are about
 # and leave the rest at these values.
@@ -280,7 +280,7 @@ def events_of(window):
 def test_read_window_returns_rows_in_range(tmp_path):
     rows = [{"timestamp_ms": ts} for ts in range(1000, 3100, 100)]
     path = write_log(tmp_path, rows)
-    window = read_resource_window(path, TOTALS, 1500, 2500, 500)
+    window = read_resource_window(path, CAPACITY, 1500, 2500, 500)
     assert window.times_s[0] == pytest.approx(1.5)
     assert window.times_s[-1] == pytest.approx(2.5)
     assert all(1.5 <= time_s <= 2.5 for time_s in window.times_s)
@@ -288,7 +288,7 @@ def test_read_window_returns_rows_in_range(tmp_path):
 
 def test_read_window_carries_capacity_and_edges(tmp_path):
     path = write_log(tmp_path, [{}])
-    window = read_resource_window(path, TOTALS, 500, 1500, 500)
+    window = read_resource_window(path, CAPACITY, 500, 1500, 500)
     assert window.series["rss"].total == 134.0
     assert window.series["cpu_percent"].total == 64.0
     assert window.start_s == pytest.approx(0.5)
@@ -303,7 +303,7 @@ def test_read_window_buckets_keep_peaks(tmp_path):
         {"timestamp_ms": 1950, "rss": 9_000_000_000},
     ]
     path = write_log(tmp_path, rows)
-    window = read_resource_window(path, TOTALS, 1000, 2000, 5)
+    window = read_resource_window(path, CAPACITY, 1000, 2000, 5)
     assert window.times_s == pytest.approx((1.05, 1.3, 1.95))
     assert window.series["rss"].values == pytest.approx((5.0, 4.0, 9.0))
 
@@ -311,7 +311,7 @@ def test_read_window_buckets_keep_peaks(tmp_path):
 def test_read_window_never_exceeds_the_bucket_count(tmp_path):
     rows = [{"timestamp_ms": 1000 + row_index} for row_index in range(1000)]
     path = write_log(tmp_path, rows)
-    window = read_resource_window(path, TOTALS, 1000, 2000, 50)
+    window = read_resource_window(path, CAPACITY, 1000, 2000, 50)
     assert len(window.times_s) <= 50
 
 
@@ -327,14 +327,14 @@ RESTART_ROWS = [
 def test_read_window_detects_restart_with_both_edges(tmp_path):
     # Stop and start both in the window: both lines show.
     path = write_log(tmp_path, RESTART_ROWS)
-    window = read_resource_window(path, TOTALS, 0, 5000, 500)
+    window = read_resource_window(path, CAPACITY, 0, 5000, 500)
     assert events_of(window) == [("server_down", 2.0), ("server_up", 3.0)]
 
 
 def test_read_window_start_across_window_start(tmp_path):
     # Stop is before the window, start inside it: only the start shows.
     path = write_log(tmp_path, RESTART_ROWS)
-    window = read_resource_window(path, TOTALS, 2500, 5000, 500)
+    window = read_resource_window(path, CAPACITY, 2500, 5000, 500)
     assert events_of(window) == [("server_up", 3.0)]
 
 
@@ -342,21 +342,21 @@ def test_read_window_stop_across_window_end(tmp_path):
     # Stop inside the window, start just past its end: the row read past
     # the window still records the stop; the start is off-screen.
     path = write_log(tmp_path, RESTART_ROWS)
-    window = read_resource_window(path, TOTALS, 0, 2500, 500)
+    window = read_resource_window(path, CAPACITY, 0, 2500, 500)
     assert events_of(window) == [("server_down", 2.0)]
 
 
 def test_read_window_empty_log_yields_an_empty_window(tmp_path):
     path = tmp_path / "empty.tsv"
     path.write_text(HEADER)
-    window = read_resource_window(path, TOTALS, 0, 5000, 500)
+    window = read_resource_window(path, CAPACITY, 0, 5000, 500)
     assert window.times_s == ()
     assert window.events == ()
 
 
 def test_read_window_missing_file_frames_the_time_range(tmp_path):
     window = read_resource_window(
-        tmp_path / "does-not-exist.tsv", TOTALS, 0, 5000, 500
+        tmp_path / "does-not-exist.tsv", CAPACITY, 0, 5000, 500
     )
     assert window.times_s == ()
     assert window.start_s == pytest.approx(0.0)
@@ -483,7 +483,7 @@ REBUILD_ROWS = [
 
 def test_read_window_detects_rebuild_with_both_edges(tmp_path):
     path = write_log(tmp_path, REBUILD_ROWS)
-    window = read_resource_window(path, TOTALS, 0, 5000, 500)
+    window = read_resource_window(path, CAPACITY, 0, 5000, 500)
     assert events_of(window) == [
         ("rebuild_start", 2.0),
         ("rebuild_end", 3.0),
@@ -495,7 +495,7 @@ def test_read_window_rebuild_end_across_window_end(tmp_path):
     # row read past the window is tracked, so its end lands on the last
     # in-window sample.
     path = write_log(tmp_path, REBUILD_ROWS)
-    window = read_resource_window(path, TOTALS, 0, 3500, 500)
+    window = read_resource_window(path, CAPACITY, 0, 3500, 500)
     assert events_of(window) == [
         ("rebuild_start", 2.0),
         ("rebuild_end", 3.0),
@@ -505,7 +505,7 @@ def test_read_window_rebuild_end_across_window_end(tmp_path):
 def test_read_window_rebuild_start_across_window_start(tmp_path):
     # The rebuild began before the window, so only its end shows.
     path = write_log(tmp_path, REBUILD_ROWS)
-    window = read_resource_window(path, TOTALS, 2500, 5000, 500)
+    window = read_resource_window(path, CAPACITY, 2500, 5000, 500)
     assert events_of(window) == [("rebuild_end", 3.0)]
 
 
@@ -513,7 +513,7 @@ def test_read_window_old_format_log_has_no_rebuilds(tmp_path):
     # No rebuild column at all, so the markers degrade to nothing with no
     # format check anywhere in the read path.
     path = write_log(tmp_path, REBUILD_ROWS, columns=REQUIRED_COLUMNS)
-    window = read_resource_window(path, TOTALS, 0, 5000, 500)
+    window = read_resource_window(path, CAPACITY, 0, 5000, 500)
     assert events_of(window) == []
 
 
@@ -522,7 +522,7 @@ def test_window_peak_column_keeps_the_bucket_maximum():
         sample(ts_ms=1100, rss=3_000_000_000),
         sample(ts_ms=1600, rss=5_000_000_000),
     ]
-    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    window = window_for_samples(samples, CAPACITY, 1000, 5000, 4)
     assert window.series["rss"].values == pytest.approx((5.0,))
 
 
@@ -531,31 +531,31 @@ def test_window_mean_column_averages_the_bucket():
         sample(ts_ms=1100, read_bytes_per_s=1e6),
         sample(ts_ms=1600, read_bytes_per_s=3e6),
     ]
-    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    window = window_for_samples(samples, CAPACITY, 1000, 5000, 4)
     assert window.series["read_bytes_per_s"].values == pytest.approx((2.0,))
 
 
 def test_window_skips_buckets_with_no_sample():
     samples = [sample(ts_ms=1100), sample(ts_ms=3200)]
-    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    window = window_for_samples(samples, CAPACITY, 1000, 5000, 4)
     assert window.times_s == pytest.approx((1.1, 3.2))
 
 
 def test_window_every_series_is_as_long_as_times_s():
     samples = [sample(ts_ms=ts, read_bytes_per_s=1e6) for ts in (1100, 3200)]
-    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    window = window_for_samples(samples, CAPACITY, 1000, 5000, 4)
     for series in window.series.values():
         assert len(series.values) == len(window.times_s)
 
 
 def test_window_omits_a_column_that_never_reported():
-    window = window_for_samples([sample(ts_ms=1100)], TOTALS, 1000, 5000, 4)
+    window = window_for_samples([sample(ts_ms=1100)], CAPACITY, 1000, 5000, 4)
     assert "read_bytes_per_s" not in window.series
     assert "io_stall_percent" not in window.series
 
 
 def test_window_keeps_the_required_columns_with_no_samples():
-    window = window_for_samples([], TOTALS, 1000, 5000, 4)
+    window = window_for_samples([], CAPACITY, 1000, 5000, 4)
     assert window.series["rss"].values == ()
     assert window.series["cpu_percent"].label == "CPU"
 
@@ -566,7 +566,7 @@ def test_window_zero_where_a_column_reported_nothing():
         sample(ts_ms=1100),
         sample(ts_ms=3200, read_bytes_per_s=2e6),
     ]
-    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    window = window_for_samples(samples, CAPACITY, 1000, 5000, 4)
     assert window.series["read_bytes_per_s"].values == pytest.approx(
         (0.0, 2.0)
     )
@@ -574,7 +574,7 @@ def test_window_zero_where_a_column_reported_nothing():
 
 def test_window_rate_columns_have_no_capacity():
     samples = [sample(ts_ms=1100, read_bytes_per_s=1e6)]
-    window = window_for_samples(samples, TOTALS, 1000, 5000, 4)
+    window = window_for_samples(samples, CAPACITY, 1000, 5000, 4)
     assert window.series["read_bytes_per_s"].total is None
 
 
@@ -587,7 +587,7 @@ def test_window_unknown_core_count_leaves_the_cpu_capacity_none():
 
 
 def test_window_frames_the_edges_with_no_samples():
-    window = window_for_samples([], TOTALS, 1000, 5000, 4)
+    window = window_for_samples([], CAPACITY, 1000, 5000, 4)
     assert window.start_s == pytest.approx(1.0)
     assert window.end_s == pytest.approx(5.0)
     assert window.times_s == ()
@@ -595,7 +595,7 @@ def test_window_frames_the_edges_with_no_samples():
 
 def test_window_never_exceeds_the_bucket_count():
     samples = [sample(ts_ms=1000 + index) for index in range(1000)]
-    window = window_for_samples(samples, TOTALS, 1000, 2000, 50)
+    window = window_for_samples(samples, CAPACITY, 1000, 2000, 50)
     assert len(window.times_s) <= 50
 
 

@@ -326,12 +326,16 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Collapse a fast window scrub into one scan of where the user lands."""
         if self.rescan_timer is not None:
             self.rescan_timer.stop()
-        buckets = buckets_for_width(
-            self.query_one(ResourcePlotPane).size.width
-        )
+        # The width is read when the timer fires, not now: on the first
+        # resume the pane is not laid out yet and would report width 0.
         self.rescan_timer = self.set_timer(
             RESCAN_DEBOUNCE_S,
-            lambda: self.refresh_data(rescan=True, buckets=buckets),
+            lambda: self.refresh_data(
+                rescan=True,
+                buckets=buckets_for_width(
+                    self.query_one(ResourcePlotPane).size.width
+                ),
+            ),
         )
 
     @work(thread=True, exclusive=True, group="refresh_data")
