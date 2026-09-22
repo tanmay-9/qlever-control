@@ -11,7 +11,7 @@ def format_selected_window(state: ControlsState) -> str:
     """Read-only summary of the current window's range and width."""
     start = format_clock(state.start_ms)
     end = format_clock(state.end_ms)
-    return f"[b]SELECTED[/b]  {start} → {end}  ([b]{state.window_size}[/b])"
+    return f"[b]SELECTED[/b]  {start} → {end}"
 
 
 class SelectedWindow(Static):

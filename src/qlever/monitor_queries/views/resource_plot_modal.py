@@ -26,7 +26,13 @@ class ResourcePlotModal(ModalScreen):
     this size, and Live sends fresh readings on its timer.
     """
 
-    BINDINGS = [Binding("escape", "close", "Close")]
+    BINDINGS = [
+        # One footer entry for the pair: the key that opened it closes it.
+        Binding("escape", "close", "Close", key_display="esc/z"),
+        Binding("z", "close", "Close", show=False),
+        # A modal cuts the app's bindings, so quit is repeated here.
+        Binding("q", "app.quit", "Quit"),
+    ]
 
     def __init__(self, window: ResourceWindow) -> None:
         super().__init__()

@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import heapq
 from collections.abc import Callable
+from functools import partial
 
 from rich.markup import escape
 from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.containers import Horizontal
 from textual.screen import Screen
-from textual.widgets import Static
+from textual.widgets import Button, Static
 from textual.worker import get_current_worker
 
 from qlever.monitor_queries.historic_data import (
@@ -41,7 +43,12 @@ from qlever.monitor_queries.resource_data import (
     read_resource_window,
     window_for_samples,
 )
-from qlever.monitor_queries.util import oneline, truncate
+from qlever.monitor_queries.util import (
+    action_key,
+    help_text,
+    oneline,
+    truncate,
+)
 from qlever.monitor_queries.views.filter_modal import (
     FILTER_STATUSES,
     FilterModal,
@@ -50,6 +57,7 @@ from qlever.monitor_queries.views.resource_plot_modal import (
     ResourcePlotModal,
 )
 from qlever.monitor_queries.widgets.controls_row import HistoricControlsRow
+from qlever.monitor_queries.widgets.detail_row import DetailRow
 from qlever.monitor_queries.widgets.detail_switcher import DetailSwitcher
 from qlever.monitor_queries.widgets.footer import Footer
 from qlever.monitor_queries.widgets.header_row import HeaderRow
@@ -64,6 +72,7 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
 )
 from qlever.monitor_queries.widgets.selected_window import SelectedWindow
 from qlever.monitor_queries.widgets.timeline import Timeline
+from qlever.monitor_queries.widgets.timeline_row import TimelineRow
 from qlever.monitor_queries.widgets.window_stepper import (
     WindowStepper,
     available_presets,
@@ -116,6 +125,13 @@ RESCAN_DEBOUNCE_S = 0.1
 # SPARQL substring keeps the row on one line.
 CHIP_SUBSTR_LIMIT = 20
 
+# Actions the help row above the table lists, in reading order.
+TABLE_HELP_ACTIONS = [
+    "sort_prev_column",
+    "sort_next_column",
+    "invert_sort",
+]
+
 
 def filter_summary(filters: FilterState) -> str:
     """Markup readout of the active filters: bold labels, colored values."""
@@ -147,34 +163,50 @@ class HistoricScreen(Screen, inherit_bindings=False):
 
     BINDINGS = [
         Binding("tab", "app.swap_screen", "<Live", priority=True),
-        Binding("w", "cycle_window", "Window size"),
-        Binding("m", "cycle_mode", "Mode"),
+        Binding("w", "cycle_window", "Window size", show=False),
+        Binding("W", "cycle_window_back", "Window size", show=False),
+        Binding("m", "cycle_mode", "Mode", show=False),
+        Binding("M", "cycle_mode_back", "Mode", show=False),
         Binding(
-            "left",
-            "shift_earlier",
-            "Shift window",
-            key_display="←→",
+            "left", "shift_earlier", "Shift earlier", show=False, priority=True
+        ),
+        Binding(
+            "right", "shift_later", "Shift later", show=False, priority=True
+        ),
+        Binding(
+            "shift+left",
+            "snap_start",
+            "Jump to log start",
+            key_display="⇧ ←",
+            show=False,
             priority=True,
         ),
         Binding(
-            "right", "shift_later", "Shift window", show=False, priority=True
+            "shift+right",
+            "snap_end",
+            "Jump to log end",
+            key_display="⇧ →",
+            show=False,
+            priority=True,
         ),
-        Binding("g", "snap_start", "Window start/end", key_display="g/G"),
-        Binding("G", "snap_end", "Window end", show=False),
         Binding(
             "less_than_sign",
             "sort_prev_column",
-            "Sort column",
-            key_display="< >",
+            "Sort by previous column",
+            show=False,
         ),
-        Binding("greater_than_sign", "sort_next_column", "", show=False),
-        Binding("i", "invert_sort", "Invert sort"),
-        Binding("f", "edit_filter", "Filter"),
-        Binding("F", "clear_filters", "Clear filters"),
-        # One footer entry for both: r shows the pane, R the modal.
-        Binding("r", "show_plot", "Resource plot", key_display="r/R"),
-        Binding("R", "maximize_plot", "Maximize plot", show=False),
-        Binding("s", "show_sparql", "SPARQL"),
+        Binding(
+            "greater_than_sign",
+            "sort_next_column",
+            "Sort by next column",
+            show=False,
+        ),
+        Binding("i", "invert_sort", "Invert sort", show=False),
+        Binding("f", "edit_filter", "Filter", show=False),
+        Binding("F", "clear_filters", "Clear filters", show=False),
+        Binding("r", "show_plot", "Resource plot", show=False),
+        Binding("z", "maximize_plot", "Zoom the plot", show=False),
+        Binding("s", "show_sparql", "SPARQL", show=False),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
 
@@ -239,20 +271,91 @@ class HistoricScreen(Screen, inherit_bindings=False):
             center=Static(TITLE),
         )
         yield HistoricControlsRow(controls)
-        yield Timeline(bounds)
-        yield MetricsRow(
-            [MetricsCounts(label=self.window_size, **EMPTY_FIELDS)],
-            self.app.slow_threshold,
+        yield TimelineRow(bounds)
+        filter_button = Button(
+            "Filter",
+            variant="primary",
+            id="edit-filter",
+            compact=True,
+            action="screen.edit_filter",
+            tooltip="Filter the queries shown for this window.",
         )
-        yield Static("", id="filter-row")
+        # Clicking it must not take focus off the table.
+        filter_button.can_focus = False
+        yield Horizontal(
+            MetricsRow(
+                [MetricsCounts(label=self.window_size, **EMPTY_FIELDS)],
+                self.app.slow_threshold,
+            ),
+            Static("", id="edit-filter-key", classes="key-pill"),
+            filter_button,
+            id="metrics-filter-row",
+        )
+        clear_button = Button(
+            "Clear all",
+            variant="primary",
+            id="clear-filters",
+            compact=True,
+            action="screen.clear_filters",
+            tooltip="Drop every filter and show the whole window.",
+        )
+        # Clicking it must not take focus off the table.
+        clear_button.can_focus = False
+        yield Horizontal(
+            Static("", id="filter-summary"),
+            Static("", id="clear-filters-key", classes="key-pill"),
+            clear_button,
+            id="filter-row",
+        )
+        yield Static("", id="table-help")
         yield HistoricQueryTable([])
         yield Static("", id="table-status")
-        yield DetailSwitcher(self.resource_window)
-        yield Footer(show_command_palette=False)
+        yield DetailRow(self.resource_window)
+        yield Footer()
 
     def on_mount(self) -> None:
         """Focus the table so the header theme dropdown can't take it."""
         self.query_one(HistoricQueryTable).focus()
+        # The app fills the shared pane row; this screen owns the rest.
+        self.watch(self.app, "help_mode", self.refresh_help)
+        # Label the controls with the keys that step them; CSS decides
+        # when the labels show.
+        self.query_one(WindowStepper).set_help_keys(
+            action_key(self, "cycle_window_back"),
+            action_key(self, "cycle_window"),
+        )
+        self.query_one(ModePicker).set_help_keys(
+            action_key(self, "cycle_mode_back"),
+            action_key(self, "cycle_mode"),
+        )
+        self.query_one("#edit-filter-key", Static).update(
+            action_key(self, "edit_filter")
+        )
+        self.query_one(TimelineRow).set_help_keys(
+            shift=(
+                action_key(self, "shift_earlier"),
+                action_key(self, "shift_later"),
+            ),
+            jump=(
+                action_key(self, "snap_start"),
+                action_key(self, "snap_end"),
+            ),
+        )
+        self.query_one(DetailRow).set_help_keys(partial(action_key, self))
+
+    def refresh_help(self) -> None:
+        """Refill the help row above the table; CSS reveals it.
+
+        Rebuilt on each call, so an action that has since been disabled
+        drops out of the row.
+        """
+        text = help_text(
+            self.active_bindings,
+            TABLE_HELP_ACTIONS,
+            self.app.get_key_display,
+        )
+        # Naming the key that opened the row marks it as help.
+        self.query_one("#table-help", Static).update(f"[b]?[/b] help │ {text}")
 
     def on_screen_resume(self) -> None:
         """Catch up on log growth, then push state and rescan.
@@ -271,6 +374,8 @@ class HistoricScreen(Screen, inherit_bindings=False):
         else:
             self.clamp_window()
             self.refresh_view(rescan=True)
+        # Help mode may have been switched on while the other screen showed.
+        self.refresh_help()
 
     def read_log_end(self) -> int:
         """Return the freshest log timestamp the tailer has seen."""
@@ -307,7 +412,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.query_one(WindowStepper).window_size = self.window_size
         self.query_one(ModePicker).selected = self.mode
         self.query_one(SelectedWindow).state = controls
-        self.query_one(Timeline).bounds = bounds
+        self.query_one(TimelineRow).bounds = bounds
         if rescan:
             if (
                 self.window_start_ms,
@@ -575,10 +680,22 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Step to the next window-size preset (wraps)."""
         self.step_window(1)
 
+    def action_cycle_window_back(self) -> None:
+        """Step to the previous window-size preset (wraps)."""
+        self.step_window(-1)
+
+    def cycle_mode(self, direction: int) -> None:
+        """Move the match mode one step in `direction` (wraps)."""
+        index = MODES.index(self.mode)
+        self.set_mode(MODES[(index + direction) % len(MODES)])
+
     def action_cycle_mode(self) -> None:
         """Step to the next match mode (wraps)."""
-        index = MODES.index(self.mode)
-        self.set_mode(MODES[(index + 1) % len(MODES)])
+        self.cycle_mode(1)
+
+    def action_cycle_mode_back(self) -> None:
+        """Step to the previous match mode (wraps)."""
+        self.cycle_mode(-1)
 
     def cycle_sort_column(self, direction: int) -> None:
         """Move the sort one column in `direction` (wraps)."""
@@ -617,14 +734,22 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.refresh_data(rescan=False)
 
     def sync_filter_ui(self) -> None:
-        """Show the active filters above the table, or hide the row if none."""
-        row = self.query_one("#filter-row", Static)
+        """Show the active filters above the table, or hide the row if none.
+
+        The key label is filled here rather than at mount: the binding
+        only exists while a filter is active.
+        """
+        row = self.query_one("#filter-row", Horizontal)
         if self.filters.is_empty():
             row.display = False
-        else:
-            row.update(filter_summary(self.filters))
-            row.display = True
-        self.refresh_bindings()
+            return
+        self.query_one("#filter-summary", Static).update(
+            filter_summary(self.filters)
+        )
+        self.query_one("#clear-filters-key", Static).update(
+            action_key(self, "clear_filters")
+        )
+        row.display = True
 
     def action_clear_filters(self) -> None:
         """Drop all filters and re-render (no rescan)."""
@@ -690,13 +815,20 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Switch the match mode when a segment is clicked."""
         self.set_mode(message.mode)
 
-    def on_resize(self) -> None:
-        """Re-evaluate the conditional scroll bindings after a resize."""
-        self.call_after_refresh(self.refresh_bindings)
-
     def on_timeline_recentered(self, message: Timeline.Recentered) -> None:
         """Recenter the window on the clicked timeline position."""
         self.center_window_at(message.center_ms)
+
+    def on_timeline_row_shifted(self, message: TimelineRow.Shifted) -> None:
+        """Shift the window when a timeline arrow is clicked."""
+        self.shift_window(message.direction)
+
+    def on_timeline_row_jumped(self, message: TimelineRow.Jumped) -> None:
+        """Jump to a log edge when a jump arrow is clicked."""
+        if message.direction < 0:
+            self.action_snap_start()
+        else:
+            self.action_snap_end()
 
     def on_data_table_header_selected(
         self, message: HistoricQueryTable.HeaderSelected

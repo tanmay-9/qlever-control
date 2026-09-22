@@ -62,13 +62,20 @@ class WindowStepper(Horizontal):
             "Press w or click the arrows to resize."
         )
         yield caption
+        yield Static("", id="window-prev-key", classes="key-pill")
         yield Static("◄", id="window-prev", classes="stepper-arrow")
         yield Static(self.window_size, id="window-size")
         yield Static("►", id="window-next", classes="stepper-arrow")
+        yield Static("", id="window-next-key", classes="key-pill")
 
     def watch_window_size(self, value: str) -> None:
         """Repaint the size label when the window size changes."""
         self.query_one("#window-size", Static).update(value)
+
+    def set_help_keys(self, prev_key: str, next_key: str) -> None:
+        """Name the key on each arrow, so position tells the direction."""
+        self.query_one("#window-prev-key", Static).update(prev_key)
+        self.query_one("#window-next-key", Static).update(next_key)
 
     def on_click(self, event: events.Click) -> None:
         """Translate an arrow click into a Stepped message."""
