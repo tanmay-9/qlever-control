@@ -130,89 +130,50 @@ class FilterState:
 
 
 @dataclass(frozen=True)
-class ResourceSample:
-    """One reading of server resource usage, as the log wrote it
-
-    elapsed_s: seconds the server has been running, resets on restart
-    ts_ms: wall-clock time of the sample
-    rss: memory in bytes
-    cpu_percent: CPU use, above 100 when several cores are busy
-    read_bytes_per_s, write_bytes_per_s: this server's disk I/O
-    io_stall_percent: share of time anything on the machine waited on disk,
-      so machine-wide and not just this server
-    index_rebuild_id: which index rebuild was running, counted from 1. None
-      when no rebuild in progress.
-    """
-
-    elapsed_s: float
-    ts_ms: int
-    rss: int
-    cpu_percent: float
-    read_bytes_per_s: float | None = None
-    write_bytes_per_s: float | None = None
-    io_stall_percent: float | None = None
-    index_rebuild_id: int | None = None
-
-
-@dataclass(frozen=True)
-class ResourceTotals:
-    """Host capacities the gauges and plot axes scale against.
-
-    Read once at startup and fixed for the machine's lifetime. cores is
-    None when the count could not be read.
-    """
-
-    ram_gb: float
-    cores: float | None
-
-
-@dataclass(frozen=True)
 class ResourceSeries:
-    """One sparkline's data, already in display units.
+    """One log column's readings over a window, in display units.
 
-    values is the recent series the sparkline draws, total the capacity
-    it scales against, both in unit. total is None when the capacity is
-    unknown (e.g. the core count could not be read). The widget renders
-    this as-is and does no math of its own.
+    `key` is the log's column name, which is also the key this series
+    is stored under. `total` is the capacity the bars and the axis
+    scale against, in the same `unit` as `values`. It is None when that
+    capacity could not be read, as happens with the core count, or when
+    the column has no ceiling at all.
     """
 
+    key: str
     label: str
+    unit: str
     values: tuple[float, ...]
     total: float | None
-    unit: str
 
 
 @dataclass(frozen=True)
-class ResourceUsage:
-    """The two resource sparklines shown in the Live header, as one unit."""
+class ResourceEvent:
+    """A moment the plot marks with a vertical line.
 
-    rss: ResourceSeries
-    cpu: ResourceSeries
-
-
-@dataclass(frozen=True)
-class ResourcePlot:
-    """Points and frame for the dual-axis resource plot modal.
-
-    times_s: shared x-axis, in epoch seconds
-    rss_gb, cpu_cores: the two y-series, in display units
-    rss_total, cpu_total: axis capacities, cpu_total None if unknown
-    start_s, end_s: window edges the x-axis frames, often wider than
-      the samples that fall inside them
-    start_times_s: first sample after it came back up
-    stop_times_s: last sample before the server went down
-    rebuild_start_times_s: first sample of an index rebuild
-    rebuild_end_times_s: last sample of index rebuild, finished or failed
+    `kind` is one of `server_down`, `server_up`, `rebuild_start` or
+    `rebuild_end`, and the widget looks up the line's colour and label
+    from it.
     """
 
-    times_s: tuple[float, ...]
-    rss_gb: tuple[float, ...]
-    cpu_cores: tuple[float, ...]
-    rss_total: float
-    cpu_total: float | None
+    kind: str
+    time_s: float
+
+
+@dataclass(frozen=True)
+class ResourceWindow:
+    """One time window of resource readings, in display units.
+
+    `times_s` holds one time per bucket that had a sample, and every
+    series has one value per entry, so they all line up. `series` is
+    keyed by the log's column name, and a column with no reading
+    anywhere in the window is absent, which is how a plot knows it
+    cannot be drawn. `start_s` and `end_s` frame the time axis and are
+    often wider than the samples that fall inside them.
+    """
+
     start_s: float
     end_s: float
-    start_times_s: tuple[float, ...]
-    stop_times_s: tuple[float, ...]
-    rebuild_start_times_s: tuple[float, ...]
-    rebuild_end_times_s: tuple[float, ...]
+    times_s: tuple[float, ...]
+    series: dict[str, ResourceSeries]
+    events: tuple[ResourceEvent, ...]
