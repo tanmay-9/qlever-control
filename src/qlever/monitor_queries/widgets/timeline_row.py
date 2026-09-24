@@ -1,3 +1,7 @@
+"""The Historic timeline with the arrows that shift the window and jump
+to the log edges, plus the key labels help mode shows beside them.
+"""
+
 from __future__ import annotations
 
 from textual import events
