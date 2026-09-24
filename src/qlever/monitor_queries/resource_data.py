@@ -9,7 +9,7 @@ from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from qlever.monitor_queries.log_reader import CompletedQuery
 from qlever.monitor_queries.models import (
@@ -58,7 +58,7 @@ class Column(NamedTuple):
     label: str
     unit: str
     scale: float
-    reduce: str
+    reduce: Literal["peak", "mean"]
     capacity: str | None
 
 

@@ -31,7 +31,7 @@ from qlever.monitor_queries.resource_reader import (
 
 HEADER = "\t".join(LOG_COLUMNS) + "\n"
 OLD_HEADER = "\t".join(REQUIRED_COLUMNS) + "\n"
-TOTALS = Capacity(ram_gb=134.0, cores=64.0)
+CAPACITY = Capacity(ram_gb=134.0, cores=64.0)
 
 # One full new-format row. Tests override only the cells they are about
 # and leave the rest at these values.
@@ -88,7 +88,7 @@ def operation(end_ms, duration_ms, op_type="query"):
 
 
 def build_window(
-    samples, start_ms, end_ms, buckets, operations=(), capacity=TOTALS
+    samples, start_ms, end_ms, buckets, operations=(), capacity=CAPACITY
 ):
     """Bucket samples into one window, with no operations by default."""
     return window_for_samples(
@@ -106,7 +106,7 @@ def window_from_log(path, start_ms, end_ms, buckets, operations=()):
     return read_resource_window(
         path=path,
         operations=operations,
-        capacity=TOTALS,
+        capacity=CAPACITY,
         start_ms=start_ms,
         end_ms=end_ms,
         buckets=buckets,
