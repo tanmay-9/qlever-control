@@ -28,9 +28,11 @@ from qlever.monitor_queries.models import (
     SparqlContent,
 )
 from qlever.monitor_queries.resource_data import (
+    LIVE_RESOURCE_BUFFER_MS,
     LIVE_RESOURCE_WINDOW_MS,
     SampleBuffer,
     is_sample_fresh,
+    sample_count,
     window_for_samples,
 )
 from qlever.monitor_queries.resource_reader import (
@@ -89,6 +91,8 @@ class LiveScreen(Screen, inherit_bindings=False):
         super().__init__()
         self.consecutive_ping_fails = 0
         self.ping_timer = None
+        # How much of the buffer the sparklines and the plot draw.
+        self.resource_window_ms = LIVE_RESOURCE_WINDOW_MS
 
     def compose(self) -> ComposeResult:
         yield HeaderRow(
@@ -349,7 +353,7 @@ class LiveScreen(Screen, inherit_bindings=False):
             return
         with self.app.resource_log.open("rb") as stream:
             seeded = self.resource_log_tail.seed(
-                stream, current_ms() - LIVE_RESOURCE_WINDOW_MS
+                stream, current_ms() - LIVE_RESOURCE_BUFFER_MS
             )
             self.app.call_from_thread(self.apply_resource_samples, seeded)
             while not worker.is_cancelled:
@@ -370,21 +374,23 @@ class LiveScreen(Screen, inherit_bindings=False):
             self.resource_samples.add(sample)
 
     def live_resource_window(self) -> ResourceWindow:
-        """Snapshot the buffer as the rolling 5-minute window.
+        """Snapshot the buffer as the rolling window the screen shows.
 
         One bucket per sampling interval, so the sparklines and the plot
-        keep every reading the buffer holds. The clock is read once, so
+        keep every reading the window covers. The clock is read once, so
         the window's start and end are the same instant.
         """
         now_ms = current_ms()
-        start_ms = now_ms - LIVE_RESOURCE_WINDOW_MS
+        start_ms = now_ms - self.resource_window_ms
         return window_for_samples(
             samples=self.resource_samples.samples,
             operations=get_recent_operations(self.app.live_state, start_ms),
             capacity=self.capacity,
             start_ms=start_ms,
             end_ms=now_ms,
-            buckets=self.resource_samples.size,
+            buckets=sample_count(
+                self.resource_window_ms, self.app.sample_interval_s
+            ),
         )
 
     def action_show_plot(self, step: int = 1) -> None:

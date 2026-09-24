@@ -23,6 +23,9 @@ from qlever.monitor_queries.resource_reader import (
     iter_samples,
 )
 
+# Live keeps an hour of samples, matching the metrics history, and
+# draws the last five minutes of it at startup.
+LIVE_RESOURCE_BUFFER_MS = 3_600_000
 LIVE_RESOURCE_WINDOW_MS = 300_000
 
 # Intervals without a sample before the server counts as gone. Three, so
@@ -139,22 +142,22 @@ ALL_COLUMNS = COLUMNS + tuple(OPERATION_COLUMNS.values())
 OPERATION_KEYS = frozenset(column.key for column in OPERATION_COLUMNS.values())
 
 
-def buffer_size(sample_interval_s: int) -> int:
-    """Samples the live window holds at this logging interval."""
-    return max(1, LIVE_RESOURCE_WINDOW_MS // (sample_interval_s * 1000))
+def sample_count(span_ms: int, sample_interval_s: int) -> int:
+    """Number of samples logged over `span_ms` at this interval."""
+    return max(1, span_ms // (sample_interval_s * 1000))
 
 
 class SampleBuffer:
     """Rolling buffer of the most recent resource samples.
 
     `maxlen` drops the oldest sample when a new one arrives, so the
-    buffer always holds the last `LIVE_RESOURCE_WINDOW_MS` of readings.
-    Its size follows the log's sampling interval, so the window stays
-    five minutes whatever interval the server was started with.
+    buffer always holds the last `LIVE_RESOURCE_BUFFER_MS` of readings.
+    Its size follows the log's sampling interval, so the buffer holds
+    that hour whatever interval the server was started with.
     """
 
     def __init__(self, sample_interval_s: int) -> None:
-        self.size = buffer_size(sample_interval_s)
+        self.size = sample_count(LIVE_RESOURCE_BUFFER_MS, sample_interval_s)
         self.samples = deque(maxlen=self.size)
 
     def add(self, sample: Sample) -> None:
