@@ -29,7 +29,6 @@ from qlever.monitor_queries.models import (
 )
 from qlever.monitor_queries.resource_data import (
     LIVE_RESOURCE_BUFFER_MS,
-    LIVE_RESOURCE_WINDOW_MS,
     SampleBuffer,
     is_sample_fresh,
     sample_count,
@@ -59,9 +58,16 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
 from qlever.monitor_queries.widgets.resource_row import ResourceRow
 from qlever.monitor_queries.widgets.resource_sparkline import ResourceSparkline
 from qlever.monitor_queries.widgets.sparql_pane import SELECT_ROW_HINT
+from qlever.monitor_queries.widgets.window_stepper import (
+    WindowStepper,
+    preset_ms,
+)
 from qlever.util import is_qlever_server_alive
 
 TITLE = "QLever monitor-queries: Live"
+
+# The window sizes Live offers, none reaching past what the buffer holds.
+WINDOW_PRESETS = ("5m", "15m", "30m", "1h")
 
 
 class LiveScreen(Screen, inherit_bindings=False):
@@ -70,6 +76,8 @@ class LiveScreen(Screen, inherit_bindings=False):
     BINDINGS = [
         Binding("tab", "app.swap_screen", "Historic>", priority=True),
         Binding("f", "toggle_freeze", "Freeze/Unfreeze", show=False),
+        Binding("w", "cycle_window", "Window size", show=False),
+        Binding("W", "cycle_window_back", "Window size", show=False),
         Binding("r", "show_plot", "Resource plots", show=False),
         Binding("R", "show_plot(-1)", "Resource plots", show=False),
         Binding("minus", "step_top(-1)", "Plot scale", show=False),
@@ -92,7 +100,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.consecutive_ping_fails = 0
         self.ping_timer = None
         # How much of the buffer the sparklines and the plot draw.
-        self.resource_window_ms = LIVE_RESOURCE_WINDOW_MS
+        self.window_size = WINDOW_PRESETS[0]
 
     def compose(self) -> ComposeResult:
         yield HeaderRow(
@@ -122,6 +130,7 @@ class LiveScreen(Screen, inherit_bindings=False):
                 n_active=len(rows),
             ),
             resource_window,
+            self.window_size,
         )
         freeze_button = Button(
             "Freeze",
@@ -162,6 +171,10 @@ class LiveScreen(Screen, inherit_bindings=False):
         # Label the gutter controls with the keys that run them; CSS
         # decides when the labels show.
         self.query_one(DetailRow).set_help_keys(partial(action_key, self))
+        self.query_one(WindowStepper).set_help_keys(
+            action_key(self, "cycle_window_back"),
+            action_key(self, "cycle_window"),
+        )
         self.query_one("#freeze-key", Static).update(
             action_key(self, "toggle_freeze")
         )
@@ -381,17 +394,33 @@ class LiveScreen(Screen, inherit_bindings=False):
         the window's start and end are the same instant.
         """
         now_ms = current_ms()
-        start_ms = now_ms - self.resource_window_ms
+        window_ms = preset_ms(self.window_size)
+        start_ms = now_ms - window_ms
         return window_for_samples(
             samples=self.resource_samples.samples,
             operations=get_recent_operations(self.app.live_state, start_ms),
             capacity=self.capacity,
             start_ms=start_ms,
             end_ms=now_ms,
-            buckets=sample_count(
-                self.resource_window_ms, self.app.sample_interval_s
-            ),
+            buckets=sample_count(window_ms, self.app.sample_interval_s),
         )
+
+    def step_window(self, direction: int) -> None:
+        """Move the window size one preset in `direction` (wraps)."""
+        index = WINDOW_PRESETS.index(self.window_size)
+        self.window_size = WINDOW_PRESETS[
+            (index + direction) % len(WINDOW_PRESETS)
+        ]
+        self.query_one(WindowStepper).window_size = self.window_size
+        self.refresh_resource_window()
+
+    def action_cycle_window(self) -> None:
+        """Step to the next window-size preset (wraps)."""
+        self.step_window(1)
+
+    def action_cycle_window_back(self) -> None:
+        """Step to the previous window-size preset (wraps)."""
+        self.step_window(-1)
 
     def action_show_plot(self, step: int = 1) -> None:
         """Show the resource plot, or step to the next or previous one.
@@ -427,6 +456,12 @@ class LiveScreen(Screen, inherit_bindings=False):
         """Switch the detail pane to the SPARQL query."""
         self.query_one(DetailSwitcher).show_sparql()
         self.refresh_table_status()
+
+    def on_window_stepper_stepped(
+        self, message: WindowStepper.Stepped
+    ) -> None:
+        """Resize the window when a stepper arrow is clicked."""
+        self.step_window(message.direction)
 
     def on_resource_sparkline_clicked(
         self, message: ResourceSparkline.Clicked

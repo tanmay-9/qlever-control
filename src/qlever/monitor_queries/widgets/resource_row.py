@@ -7,12 +7,13 @@ pinned so the centered text never jumps as its wording changes.
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.reactive import Reactive
 from textual.widgets import Static
 
 from qlever.monitor_queries.models import LiveSubtitle, ResourceWindow
 from qlever.monitor_queries.widgets.resource_sparkline import ResourceSparkline
+from qlever.monitor_queries.widgets.window_stepper import WindowStepper
 
 
 def format_subtitle(subtitle: LiveSubtitle) -> str:
@@ -42,9 +43,9 @@ def subtitle_width(endpoint: str) -> int:
 class ResourceRow(Horizontal):
     """A Resource usage and server reachability row under Live view's header.
 
-    Holds a bordered RSS bar gauge on the left, server reachability status
-    and number of active queries in the middle, and a bordered CPU bar
-    gauge on the right.
+    Holds a bordered RSS bar gauge on the left, the window stepper over
+    server reachability status and number of active queries in the
+    middle, and a bordered CPU bar gauge on the right.
     """
 
     can_focus = False
@@ -54,17 +55,31 @@ class ResourceRow(Horizontal):
     stale = Reactive(False, init=False)
 
     def __init__(
-        self, server_subtitle: LiveSubtitle, window: ResourceWindow
+        self,
+        server_subtitle: LiveSubtitle,
+        window: ResourceWindow,
+        window_size: str,
     ) -> None:
         super().__init__()
+        self.window_size = window_size
         self.set_reactive(ResourceRow.subtitle, server_subtitle)
         self.set_reactive(ResourceRow.window, window)
 
     def compose(self) -> ComposeResult:
         self.rss_spark = ResourceSparkline(self.window, "rss", self.stale)
         yield self.rss_spark
-        center = Static(
-            format_subtitle(self.subtitle), classes="resource-center"
+        center = Vertical(
+            WindowStepper(
+                self.window_size,
+                caption="USAGE OVER",
+                tooltip=(
+                    "How far back the resource usage bars either side "
+                    "and the plot below go. Press w or click the arrows "
+                    "to change it."
+                ),
+            ),
+            Static(format_subtitle(self.subtitle), classes="resource-status"),
+            classes="resource-center",
         )
         center.styles.width = subtitle_width(self.subtitle.endpoint)
         yield center
@@ -74,7 +89,7 @@ class ResourceRow(Horizontal):
         yield self.cpu_spark
 
     def watch_subtitle(self, subtitle: LiveSubtitle) -> None:
-        static = self.query_one(".resource-center", Static)
+        static = self.query_one(".resource-status", Static)
         static.update(format_subtitle(subtitle))
 
     def watch_window(self, window: ResourceWindow) -> None:

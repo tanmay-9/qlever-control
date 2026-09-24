@@ -24,9 +24,8 @@ from qlever.monitor_queries.resource_reader import (
 )
 
 # Live keeps an hour of samples, matching the metrics history, and
-# draws the last five minutes of it at startup.
+# draws whichever part of it the window stepper asks for.
 LIVE_RESOURCE_BUFFER_MS = 3_600_000
-LIVE_RESOURCE_WINDOW_MS = 300_000
 
 # Intervals without a sample before the server counts as gone. Three, so
 # a single missed sample still counts as live.

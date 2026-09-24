@@ -24,6 +24,13 @@ class HistoricControlsRow(Horizontal):
         self.state = state
 
     def compose(self) -> ComposeResult:
-        yield WindowStepper(self.state.window_size)
+        yield WindowStepper(
+            self.state.window_size,
+            caption="WINDOW",
+            tooltip=(
+                "Width of the log time window whose queries are shown. "
+                "Press w or click the arrows to resize."
+            ),
+        )
         yield ModePicker(self.state.mode)
         yield SelectedWindow(self.state)

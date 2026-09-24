@@ -9,11 +9,13 @@ import pytest
 from qlever.monitor_queries.log_reader import CompletedQuery
 from qlever.monitor_queries.resource_data import (
     COLUMNS,
+    LIVE_RESOURCE_BUFFER_MS,
     Capacity,
     Column,
     EventTracker,
     bucket_value,
     read_resource_window,
+    sample_count,
     window_for_samples,
 )
 from qlever.monitor_queries.resource_reader import (
@@ -28,6 +30,8 @@ from qlever.monitor_queries.resource_reader import (
     parse_tsv_row,
     seek_to_window_start,
 )
+from qlever.monitor_queries.views.live import WINDOW_PRESETS
+from qlever.monitor_queries.widgets.window_stepper import preset_ms
 
 HEADER = "\t".join(LOG_COLUMNS) + "\n"
 OLD_HEADER = "\t".join(REQUIRED_COLUMNS) + "\n"
@@ -727,3 +731,18 @@ def test_bucket_value_rejects_an_unknown_reducer():
     )
     with pytest.raises(ValueError):
         bucket_value(column, 5.0, 1)
+
+
+def test_sample_count_follows_the_interval():
+    assert sample_count(300_000, 1) == 300
+    assert sample_count(300_000, 5) == 60
+
+
+def test_sample_count_of_a_span_below_one_interval_is_one():
+    assert sample_count(2_000, 5) == 1
+
+
+def test_live_window_presets_stay_within_the_buffer():
+    widths = [preset_ms(preset) for preset in WINDOW_PRESETS]
+    assert max(widths) == LIVE_RESOURCE_BUFFER_MS
+    assert widths == sorted(widths)

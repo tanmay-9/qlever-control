@@ -30,10 +30,11 @@ def available_presets(span_ms: int) -> tuple[str, ...]:
 
 
 class WindowStepper(Horizontal):
-    """Window-size stepper: WINDOW ◄ 15m ►.
+    """Window-size stepper: a caption, then ◄ 15m ►.
 
-    The arrows are separate Statics so each can be made independently
-    clickable without restructuring the widget.
+    The caption is given, because each screen steps the window of
+    something different. The arrows are separate Statics so each can be
+    made independently clickable without restructuring the widget.
     """
 
     can_focus = False
@@ -50,18 +51,15 @@ class WindowStepper(Horizontal):
             super().__init__()
             self.direction = direction
 
-    def __init__(self, window_size: str) -> None:
-        """Hold the current window size to paint once mounted."""
+    def __init__(self, window_size: str, caption: str, tooltip: str) -> None:
+        """Hold the window size and its wording to paint once mounted."""
         super().__init__()
+        self.caption = caption
+        self.tooltip = tooltip
         self.set_reactive(WindowStepper.window_size, window_size)
 
     def compose(self) -> ComposeResult:
-        caption = Static("WINDOW", classes="stepper-caption")
-        caption.tooltip = (
-            "Width of the log time window whose queries are shown. "
-            "Press w or click the arrows to resize."
-        )
-        yield caption
+        yield Static(self.caption, classes="stepper-caption")
         yield Static("", id="window-prev-key", classes="key-pill")
         yield Static("◄", id="window-prev", classes="stepper-arrow")
         yield Static(self.window_size, id="window-size")

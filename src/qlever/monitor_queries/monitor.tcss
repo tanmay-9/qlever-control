@@ -109,7 +109,18 @@ ResourceRow .resource-center {
     box-sizing: content-box;
     height: 3;
     padding: 0 4;
-    content-align: center bottom;
+}
+
+/* The stepper takes the row the sparkline titles sit on, so it names
+   the span the bars either side of it cover. */
+ResourceRow WindowStepper {
+    width: 100%;
+    height: 1;
+    align-horizontal: center;
+}
+
+ResourceRow .resource-status {
+    height: 2;
     text-align: center;
     text-style: italic;
     color: $text;

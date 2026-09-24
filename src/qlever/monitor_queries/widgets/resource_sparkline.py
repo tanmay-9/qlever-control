@@ -53,11 +53,11 @@ def column_values(
 
 
 def series_title(series: ResourceSeries, stale: bool) -> str:
-    """Border label: name, window, and the latest reading against capacity.
+    """Border label: name and the latest reading against capacity.
 
     When stale, no recent sample has arrived, so the bars are frozen old
-    history. The value is shown as a dash and the window note says so,
-    rather than claiming a live reading over the last 5 minutes.
+    history. The value is shown as a dash and a note says so, rather
+    than claiming a live reading.
     """
     capacity = "-" if series.total is None else f"{series.total:.1f}"
     if stale:
@@ -66,10 +66,7 @@ def series_title(series: ResourceSeries, stale: bool) -> str:
             f"- / {capacity} {series.unit} (no recent samples)"
         )
     latest = series.values[-1] if series.values else 0
-    return (
-        f"[b]{series.label}[/]: "
-        f"{latest:.1f} / {capacity} {series.unit} (last 5m)"
-    )
+    return f"[b]{series.label}[/]: {latest:.1f} / {capacity} {series.unit}"
 
 
 class ResourceSparkline(Static):
