@@ -52,12 +52,13 @@ def column_values(
     return columns
 
 
-def series_title(series: ResourceSeries, stale: bool) -> str:
+def series_title(series: ResourceSeries, stale: bool, note: str) -> str:
     """Border label: name and the latest reading against capacity.
 
     When stale, no recent sample has arrived, so the bars are frozen old
     history. The value is shown as a dash and a note says so, rather
-    than claiming a live reading.
+    than claiming a live reading. `note` says how far back the bars
+    reach when they do not fill the window.
     """
     capacity = "-" if series.total is None else f"{series.total:.1f}"
     if stale:
@@ -66,7 +67,8 @@ def series_title(series: ResourceSeries, stale: bool) -> str:
             f"- / {capacity} {series.unit} (no recent samples)"
         )
     latest = series.values[-1] if series.values else 0
-    return f"[b]{series.label}[/]: {latest:.1f} / {capacity} {series.unit}"
+    title = f"[b]{series.label}[/]: {latest:.1f} / {capacity} {series.unit}"
+    return f"{title} ({note})" if note else title
 
 
 class ResourceSparkline(Static):
@@ -85,13 +87,21 @@ class ResourceSparkline(Static):
 
     window = Reactive(None, init=False)
     stale = Reactive(False, init=False)
+    note = Reactive("", init=False)
 
-    def __init__(self, window: ResourceWindow, key: str, stale: bool) -> None:
+    def __init__(
+        self, window: ResourceWindow, key: str, stale: bool, note: str
+    ) -> None:
         super().__init__()
         self.key = key
         self.set_reactive(ResourceSparkline.window, window)
         self.set_reactive(ResourceSparkline.stale, stale)
-        self.border_title = series_title(self.series, stale)
+        self.set_reactive(ResourceSparkline.note, note)
+        self.paint_title()
+
+    def paint_title(self) -> None:
+        """Rebuild the border label from the window and the two flags."""
+        self.border_title = series_title(self.series, self.stale, self.note)
 
     @property
     def series(self) -> ResourceSeries:
@@ -99,10 +109,13 @@ class ResourceSparkline(Static):
         return self.window.series[self.key]
 
     def watch_window(self) -> None:
-        self.border_title = series_title(self.series, self.stale)
+        self.paint_title()
 
-    def watch_stale(self, stale: bool) -> None:
-        self.border_title = series_title(self.series, stale)
+    def watch_stale(self) -> None:
+        self.paint_title()
+
+    def watch_note(self) -> None:
+        self.paint_title()
 
     def on_click(self) -> None:
         self.post_message(self.Clicked())

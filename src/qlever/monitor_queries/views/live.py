@@ -30,6 +30,7 @@ from qlever.monitor_queries.models import (
 from qlever.monitor_queries.resource_data import (
     LIVE_RESOURCE_BUFFER_MS,
     SampleBuffer,
+    coverage_note,
     is_sample_fresh,
     window_for_samples,
 )
@@ -133,6 +134,7 @@ class LiveScreen(Screen, inherit_bindings=False):
             ),
             resource_window,
             self.window_size,
+            coverage_note(resource_window, self.app.sample_interval_s),
         )
         freeze_button = Button(
             "Freeze",
@@ -346,7 +348,9 @@ class LiveScreen(Screen, inherit_bindings=False):
         running, since the window is about the server and not the rows.
         """
         window = self.live_resource_window()
-        self.query_one(ResourceRow).window = window
+        row = self.query_one(ResourceRow)
+        row.note = coverage_note(window, self.app.sample_interval_s)
+        row.window = window
         self.app.push_resource_window(window)
 
     @work(thread=True, exclusive=True, group="tail_resource_log")

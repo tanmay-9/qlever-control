@@ -7,6 +7,7 @@ from math import isnan
 import pytest
 
 from qlever.monitor_queries.log_reader import CompletedQuery
+from qlever.monitor_queries.models import ResourceWindow
 from qlever.monitor_queries.resource_data import (
     COLUMNS,
     LIVE_RESOURCE_BUFFER_MS,
@@ -14,6 +15,7 @@ from qlever.monitor_queries.resource_data import (
     Column,
     EventTracker,
     bucket_value,
+    coverage_note,
     read_resource_window,
     sample_count,
     window_for_samples,
@@ -740,6 +742,52 @@ def test_sample_count_follows_the_interval():
 
 def test_sample_count_of_a_span_below_one_interval_is_one():
     assert sample_count(2_000, 5) == 1
+
+
+def window_reaching_back(gap_s: float, span_s: float = 3600.0):
+    """A window of `span_s` whose readings start `gap_s` after its start."""
+    return ResourceWindow(
+        start_s=0.0,
+        end_s=span_s,
+        times_s=(gap_s,),
+        series={},
+        events=(),
+    )
+
+
+def test_coverage_note_is_empty_when_readings_fill_the_window():
+    assert coverage_note(window_reaching_back(0.0), 1) == ""
+
+
+def test_coverage_note_is_empty_within_one_sampling_interval():
+    # No reading could land in a gap this short, so it is not a gap.
+    assert coverage_note(window_reaching_back(0.9), 1) == ""
+    assert coverage_note(window_reaching_back(4.0), 5) == ""
+
+
+def test_coverage_note_counts_minutes_from_the_oldest_reading():
+    assert coverage_note(window_reaching_back(3000.0), 1) == "10m of data"
+
+
+def test_coverage_note_counts_seconds_below_a_minute():
+    assert coverage_note(window_reaching_back(3555.0), 1) == "45s of data"
+
+
+def test_coverage_note_rounds_minutes_down():
+    # 10m 59s of readings never claims 11 minutes.
+    assert coverage_note(window_reaching_back(2941.0), 1) == "10m of data"
+
+
+def test_coverage_note_of_an_empty_window_is_empty():
+    assert (
+        coverage_note(
+            ResourceWindow(
+                start_s=0.0, end_s=300.0, times_s=(), series={}, events=()
+            ),
+            1,
+        )
+        == ""
+    )
 
 
 def test_live_window_presets_stay_within_the_buffer():

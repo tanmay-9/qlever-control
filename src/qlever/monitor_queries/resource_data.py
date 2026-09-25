@@ -177,6 +177,22 @@ def is_sample_fresh(
     return now_ms - last_ts_ms <= fresh_ms
 
 
+def coverage_note(window: ResourceWindow, sample_interval_s: int) -> str:
+    """How far back the readings reach, when they miss the window start.
+
+    Empty when they cover the window, so nothing is said in the common
+    case. A gap shorter than one sampling interval is no gap at all,
+    since no reading could have landed in it.
+    """
+    if not window.times_s:
+        return ""
+    if window.times_s[0] - window.start_s < sample_interval_s:
+        return ""
+    age_s = window.end_s - window.times_s[0]
+    age = f"{int(age_s)}s" if age_s < 60 else f"{int(age_s // 60)}m"
+    return f"{age} of data"
+
+
 def bucket_value(column: Column, running: float, count: int) -> float:
     """Collapse one bucket's readings into a single display value.
 

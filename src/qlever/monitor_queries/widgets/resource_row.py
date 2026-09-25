@@ -53,20 +53,25 @@ class ResourceRow(Horizontal):
     subtitle = Reactive(None, init=False)
     window = Reactive(None, init=False)
     stale = Reactive(False, init=False)
+    note = Reactive("", init=False)
 
     def __init__(
         self,
         server_subtitle: LiveSubtitle,
         window: ResourceWindow,
         window_size: str,
+        note: str,
     ) -> None:
         super().__init__()
         self.window_size = window_size
         self.set_reactive(ResourceRow.subtitle, server_subtitle)
         self.set_reactive(ResourceRow.window, window)
+        self.set_reactive(ResourceRow.note, note)
 
     def compose(self) -> ComposeResult:
-        self.rss_spark = ResourceSparkline(self.window, "rss", self.stale)
+        self.rss_spark = ResourceSparkline(
+            self.window, "rss", self.stale, self.note
+        )
         yield self.rss_spark
         center = Vertical(
             WindowStepper(
@@ -84,7 +89,7 @@ class ResourceRow(Horizontal):
         center.styles.width = subtitle_width(self.subtitle.endpoint)
         yield center
         self.cpu_spark = ResourceSparkline(
-            self.window, "cpu_percent", self.stale
+            self.window, "cpu_percent", self.stale, self.note
         )
         yield self.cpu_spark
 
@@ -95,6 +100,10 @@ class ResourceRow(Horizontal):
     def watch_window(self, window: ResourceWindow) -> None:
         self.rss_spark.window = window
         self.cpu_spark.window = window
+
+    def watch_note(self, note: str) -> None:
+        self.rss_spark.note = note
+        self.cpu_spark.note = note
 
     def watch_stale(self, stale: bool) -> None:
         self.set_class(stale, "stale")
