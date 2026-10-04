@@ -19,7 +19,6 @@ from qlever.monitor_queries.widgets.footer import Footer
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     Plot,
     ResourcePlotPane,
-    label_width,
 )
 
 
@@ -49,9 +48,6 @@ class ResourcePlotModal(ModalScreen):
         self.top_step = top_step
 
     def compose(self) -> ComposeResult:
-        # One width for the whole stack, since a pane only knows its own
-        # numbers and the gutters have to come out the same size.
-        width = label_width(self.window, self.plots, self.top_step)
         with Vertical(id="resource-plot-modal"):
             for plot in self.plots:
                 yield ResourcePlotPane(
@@ -59,7 +55,6 @@ class ResourcePlotModal(ModalScreen):
                     plot,
                     top_step=self.top_step,
                     time_labels=plot is self.plots[-1],
-                    label_width=width,
                 )
         yield Footer(show_command_palette=False)
 

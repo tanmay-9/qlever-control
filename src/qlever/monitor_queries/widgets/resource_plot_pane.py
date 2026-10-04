@@ -12,7 +12,7 @@ terminal pane.
 from __future__ import annotations
 
 from datetime import datetime
-from math import isnan
+from math import floor, isnan, log10
 from typing import NamedTuple
 
 from textual.message import Message
@@ -111,47 +111,83 @@ Y_PLOT_CHROME = 3
 MIN_ROWS_PER_TICK = 2
 MIN_Y_TICKS = 2
 MAX_Y_TICKS = 8
+# Use at least this many ticks whenever the pane is tall enough.
+PREFERRED_MIN_Y_TICKS = 4
 
 
-def tick_layout(height: int, max_ticks: int) -> tuple[int, int]:
+def tick_layout(height: int, tops: tuple[float, ...]) -> tuple[int, int]:
     """Pick the y-tick count and interior row gaps for a pane this tall.
 
-    Returns (count, gaps), shared by both axes so ticks line up. Picks the
-    most ticks whose leftover rows stay below one gap, so the space above
-    the top tick never exceeds a tick interval. max_ticks caps the count
-    so the smaller axis keeps distinct labels.
+    Returns (count, gaps), shared by both axes so ticks line up. Of the
+    counts that fit, picks the one whose worse axis leaves the least
+    empty space above its top, and the most ticks on a tie. Counts below
+    `PREFERRED_MIN_Y_TICKS` are tried only when it does not fit.
     """
     gaps = max(1, height - Y_PLOT_CHROME - 1)
-    cap = min(MAX_Y_TICKS, max_ticks)
+    if gaps // (PREFERRED_MIN_Y_TICKS - 1) >= MIN_ROWS_PER_TICK:
+        fewest = PREFERRED_MIN_Y_TICKS
+    else:
+        fewest = MIN_Y_TICKS
     count = MIN_Y_TICKS
-    for candidate in range(MIN_Y_TICKS, cap + 1):
-        step = gaps // (candidate - 1)
-        if step < MIN_ROWS_PER_TICK:
+    least_waste = float("inf")
+    for candidate in range(fewest, MAX_Y_TICKS + 1):
+        if gaps // (candidate - 1) < MIN_ROWS_PER_TICK:
             break
-        if gaps - step * (candidate - 1) < step:
-            count = candidate
+        # How far the axis reaches past its top, where 1.0 means not at
+        # all. A top of zero has no axis to draw.
+        waste = max(
+            (
+                axis_ticks(top, candidate, gaps)[0] / top
+                for top in tops
+                if top > 0
+            ),
+            default=1.0,
+        )
+        if waste <= least_waste:
+            count, least_waste = candidate, waste
     return count, gaps
+
+
+# The steps an axis may count up by, times a power of ten, so its labels
+# are round numbers that are easy to read.
+ROUND_STEPS = (1, 2, 2.5, 3, 4, 5, 6, 8)
+
+
+def round_step(least: float) -> float:
+    """The smallest step in `ROUND_STEPS` that is at least `least`.
+
+    Only whole steps are picked, so no label shows a fraction. That
+    leaves out 2.5 itself, and makes 1 the smallest step.
+    """
+    power = 10 ** max(0, floor(log10(least)))
+    for multiple in ROUND_STEPS:
+        step = multiple * power
+        if step >= least and step % 1 == 0:
+            return step
+    return 10 * power
+
+
+# Every y label is padded to this width, so stacked plots line up in
+# time. Six fits a query running into a 600 s timeout, in ms.
+Y_LABEL_WIDTH = 6
 
 
 def axis_ticks(
     top: float, count: int, gaps: int
-) -> tuple[float, list[int], list[str]]:
-    """Ticks by a constant integer step, ending near top.
+) -> tuple[float, list[float], list[str]]:
+    """Ticks that count up from 0 by a round step to at least `top`.
 
-    Labels rise by one whole-number step (0, s, 2s, ...) so the numbers
-    are as evenly spaced as the rows. The step is round(top / gaps
-    between ticks), so the last label is the closest step multiple to the
-    capacity. The axis maximum maps one label step onto the whole-row
-    step, keeping every gap equal. Returns (axis_max, positions, labels).
+    Each step spans the same number of rows, so the gaps look equal.
+    Returns the axis maximum, the tick positions and their labels.
     """
     if top <= 0:
         return 1.0, [0], ["0"]
     count = max(2, count)
     row_step = gaps // (count - 1)
-    value_step = max(1, round(top / (count - 1)))
+    value_step = round_step(top / (count - 1))
     axis_max = value_step * gaps / row_step
     positions = [value_step * index for index in range(count)]
-    return axis_max, positions, [str(pos) for pos in positions]
+    return axis_max, positions, [str(round(pos)) for pos in positions]
 
 
 # The tops an adjustable axis steps through, starting at the plain
@@ -194,24 +230,6 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
             if readings:
                 top = max(top, percentile(readings, percent))
     return top
-
-
-def label_width(
-    window: ResourceWindow, plots: list[Plot], step: int = 0
-) -> int:
-    """Digits in the longest y label these plots print for this window.
-
-    plotext sizes its gutters from the longest label it has, so stacked
-    plots whose numbers differ in length start their data at different
-    columns and the same moment does not line up down the stack.
-    Padding every label to this width lines them up.
-    """
-    width = 0
-    for plot in plots:
-        for axis in (plot.left, plot.right):
-            highest = axis_top(window, axis, step)
-            width = max(width, len(str(round(highest))))
-    return width
 
 
 def clock_ticks(
@@ -462,7 +480,6 @@ class ResourcePlotPane(PlotextPlot):
         plot: Plot,
         top_step: int = 0,
         time_labels: bool = True,
-        label_width: int = 0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -476,9 +493,6 @@ class ResourcePlotPane(PlotextPlot):
         # Stacked plots share one clock row, printed under the last of
         # them, so the ones above give their row back to the data.
         self.time_labels = time_labels
-        # Width to pad the y labels to, so a stack's gutters come out
-        # the same size. Zero for a plot drawn on its own.
-        self.label_width = label_width
         self.last_buckets = None
 
     def on_mount(self) -> None:
@@ -531,10 +545,6 @@ class ResourcePlotPane(PlotextPlot):
         self.draw_series(window, plot, left_axis_max, right_axis_max)
         self.refresh()
 
-    def padded(self, labels: list[str]) -> list[str]:
-        """Right-justify y labels so a stack's gutters match."""
-        return [label.rjust(self.label_width) for label in labels]
-
     def draw_axes(
         self, window: ResourceWindow, plot: Plot
     ) -> tuple[float, float | None]:
@@ -542,21 +552,22 @@ class ResourcePlotPane(PlotextPlot):
 
         Returns the two axis maximums the labels anchor to. The right
         one is None when the window has nothing to read against it, so
-        that axis gets no ticks. Labels are padded to `label_width`,
-        which lines a stack's gutters up and is zero on its own.
+        that axis gets no ticks. Labels are padded to `Y_LABEL_WIDTH` on
+        the side away from their axis line.
         """
         plt = self.plt
         left_top = axis_top(window, plot.left, self.top_step)
         right_top = axis_top(window, plot.right, self.top_step)
-        # Cap the shared tick count by the smaller axis so its labels stay
-        # distinct.
-        smaller_top = min(left_top, right_top) if right_top > 0 else left_top
-        count, gaps = tick_layout(self.size.height, round(smaller_top) + 1)
+        count, gaps = tick_layout(self.size.height, (left_top, right_top))
         left_axis_max, left_positions, left_labels = axis_ticks(
             left_top, count, gaps
         )
         plt.ylim(0, left_axis_max, yside="left")
-        plt.yticks(left_positions, self.padded(left_labels), yside="left")
+        plt.yticks(
+            left_positions,
+            [label.rjust(Y_LABEL_WIDTH) for label in left_labels],
+            yside="left",
+        )
         right_axis_max = None
         if right_top > 0:
             right_axis_max, right_positions, right_labels = axis_ticks(
@@ -564,7 +575,9 @@ class ResourcePlotPane(PlotextPlot):
             )
             plt.ylim(0, right_axis_max, yside="right")
             plt.yticks(
-                right_positions, self.padded(right_labels), yside="right"
+                right_positions,
+                [label.ljust(Y_LABEL_WIDTH) for label in right_labels],
+                yside="right",
             )
         else:
             plt.ylim(0, None, yside="right")

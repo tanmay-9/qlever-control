@@ -1,26 +1,29 @@
 """Tests for the plot widget's scaling, series picking, and colors.
 
 These are the parts a plot definition drives: how far up an axis goes,
-which of a plot's columns the window actually has, which color a line
-is drawn in, which plots a log can carry, and how wide a stack pads its
-labels. Drawing itself is left to the widget.
+which ticks it gets, which of a plot's columns the window actually has,
+which color a line is drawn in, and which plots a log can carry.
+Drawing itself is left to the widget.
 """
 
 from math import isnan
+
+import pytest
 
 from qlever.monitor_queries.models import ResourceSeries, ResourceWindow
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     PLOTS,
     Axis,
-    Plot,
     available_plots,
+    axis_ticks,
     axis_top,
     clamp,
     empty_note,
-    label_width,
     line_color,
     percentile,
+    round_step,
     series_for_keys,
+    tick_layout,
 )
 
 NAN = float("nan")
@@ -245,57 +248,6 @@ def test_a_window_missing_only_this_plot_names_the_plot():
     assert empty_note(win, PLOTS[1]) == "No Disk I/O readings in this window"
 
 
-def test_label_width_takes_the_longest_number_in_the_stack():
-    win = window(
-        series("rss", (7.0,), total=32.9),
-        series("cpu_percent", (400.0,), total=16.0),
-        series("read_bytes_per_s", (2.0,)),
-        series("write_bytes_per_s", (6000.0,)),
-    )
-    stack = [
-        Plot(name="A", left=axis("rss"), right=axis("cpu_percent")),
-        Plot(
-            name="B",
-            left=axis("read_bytes_per_s", "write_bytes_per_s"),
-            right=axis(),
-        ),
-    ]
-    # 33, 16 and 2 are two digits or fewer; 6000 is four.
-    assert label_width(win, stack) == 4
-
-
-def test_label_width_of_one_plot_is_its_own_longest():
-    win = window(
-        series("rss", (7.0,), total=32.9),
-        series("cpu_percent", (400.0,), total=16.0),
-    )
-    assert label_width(win, [PLOTS[0]]) == 2
-
-
-def test_label_width_follows_the_axis_down_a_step():
-    readings = tuple(float(value) for value in range(1, 10)) + (100.0,)
-    win = window(series("read_bytes_per_s", readings))
-    stepped = [
-        Plot(
-            name="A",
-            left=axis("read_bytes_per_s", adjustable=True),
-            right=axis(),
-        )
-    ]
-    assert label_width(win, stepped) == 3
-    assert label_width(win, stepped, step=2) == 1
-
-
-def test_label_width_counts_the_zero_of_a_side_with_no_series():
-    win = window(series("rss", (7.0,), total=32.9))
-    only_absent = Plot(name="A", left=axis("io_stall_percent"), right=axis())
-    assert label_width(win, [only_absent]) == 1
-
-
-def test_label_width_of_no_plots_pads_nothing():
-    assert label_width(window(), []) == 0
-
-
 def test_left_axis_gives_each_series_its_own_color():
     first = line_color("left", 0, dark=True)
     second = line_color("left", 1, dark=True)
@@ -315,3 +267,78 @@ def test_line_colors_differ_between_the_theme_backgrounds():
     assert line_color("right", 0, dark=True) != line_color(
         "right", 0, dark=False
     )
+
+
+def test_round_step_rounds_up_to_the_next_round_number():
+    assert round_step(752.25) == 800
+    assert round_step(23) == 25
+
+
+def test_round_step_keeps_a_value_that_is_already_round():
+    assert round_step(1000) == 1000
+    assert round_step(3) == 3
+
+
+def test_round_step_moves_to_the_next_power_of_ten_past_eight():
+    assert round_step(900) == 1000
+
+
+def test_round_step_never_picks_a_fraction():
+    # 2.5 is round at every power of ten but the first.
+    assert round_step(2.2) == 3
+    assert round_step(0.3) == 1
+
+
+def test_axis_ticks_label_round_numbers_to_at_least_the_top():
+    axis_max, positions, labels = axis_ticks(3009, count=5, gaps=16)
+    assert labels == ["0", "800", "1600", "2400", "3200"]
+    assert positions == [0, 800, 1600, 2400, 3200]
+    assert axis_max == 3200
+
+
+def test_axis_ticks_print_a_step_of_25_without_a_decimal():
+    _, _, labels = axis_ticks(70, count=4, gaps=12)
+    assert labels == ["0", "25", "50", "75"]
+
+
+def test_axis_ticks_print_a_large_label_in_full():
+    _, _, labels = axis_ticks(3_600_000, count=5, gaps=16)
+    assert labels[-1] == "4000000"
+
+
+def test_axis_ticks_raise_the_axis_over_a_spare_row():
+    # Ten rows in three gaps leaves one row above the top tick, worth a
+    # third of a step.
+    axis_max, _, labels = axis_ticks(40, count=4, gaps=10)
+    assert labels[-1] == "60"
+    assert axis_max == pytest.approx(200 / 3)
+
+
+def test_axis_ticks_of_an_empty_axis_is_a_lone_zero():
+    assert axis_ticks(0, count=5, gaps=16) == (1.0, [0], ["0"])
+
+
+def test_tick_layout_picks_the_count_that_wastes_the_least():
+    # Five ticks end RAM at 160 and CPU at exactly 32.
+    count, gaps = tick_layout(20, (135.0, 32.0))
+    assert (count, gaps) == (5, 16)
+
+
+def test_tick_layout_keeps_four_ticks_when_they_fit():
+    # Three ticks, 0 20 40 and 0 8 16, would waste a little less here.
+    count, _ = tick_layout(14, (32.88, 16.0))
+    assert count >= 4
+
+
+def test_tick_layout_uses_fewer_ticks_on_a_short_pane():
+    count, gaps = tick_layout(8, (32.88, 16.0))
+    assert (count, gaps) == (3, 4)
+
+
+def test_tick_layout_skips_a_side_with_nothing_to_draw():
+    assert tick_layout(20, (135.0, 0.0)) == tick_layout(20, (135.0,))
+
+
+def test_tick_layout_of_two_empty_sides_uses_the_most_ticks():
+    count, _ = tick_layout(20, (0.0, 0.0))
+    assert count == 8
