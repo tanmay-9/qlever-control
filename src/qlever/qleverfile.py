@@ -221,6 +221,16 @@ class Qleverfile:
             "large enough to contain the end of at least one statement "
             "(default: 10M)",
         )
+        index_args["index_rows_per_block"] = arg(
+            "--index-rows-per-block",
+            type=int,
+            help="The number of rows of one block of the permutations (and "
+            "of the other sorted lists of the index, like materialized "
+            "views); smaller blocks make selective index scans read fewer "
+            "rows, at the price of more block metadata (which is held in "
+            "RAM) and a slightly larger index (default: 31250, which is "
+            "250 kB per column)",
+        )
         index_args["geo_cell_grid_level"] = arg(
             "--geo-cell-grid-level",
             type=int,
@@ -242,6 +252,27 @@ class Qleverfile:
             default=None,
             help="Cell assignment scheme of the geo cell grid "
             "(default: flat); only relevant with GEO_CELL_GRID_LEVEL > 0",
+        )
+        index_args["geo_point_encoding"] = arg(
+            "--geo-point-encoding",
+            type=str,
+            choices=["z-order", "lat-major"],
+            default=None,
+            help="How geo points are encoded in the IDs of the index; "
+            "`lat-major` is how they were encoded before 2026-09-26, it is "
+            "deprecated and only meant for software that decodes the IDs of "
+            "an index (default: `z-order`)",
+        )
+        index_args["parsed_geometries_min_length"] = arg(
+            "--parsed-geometries-min-length",
+            type=int,
+            default=None,
+            help="Store the WKT literals with at least this many bytes in "
+            "the form that libspatialjoin needs, so that spatial joins do "
+            "not have to parse them at query time (which takes seconds "
+            "for a huge geometry like a country boundary); requires "
+            "VOCABULARY_TYPE on-disk-compressed-geo-split, a value like "
+            "100000 covers the geometries that matter (default: none)",
         )
         index_args["encode_as_id"] = arg(
             "--encode-as-id",
