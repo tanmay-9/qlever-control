@@ -9,15 +9,18 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen, Screen
 
 from qlever.monitor_queries.models import ResourceWindow
+from qlever.monitor_queries.util import action_key
 from qlever.monitor_queries.widgets.footer import Footer
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     Plot,
     ResourcePlotPane,
 )
+from qlever.monitor_queries.widgets.window_range import WindowRange
+from qlever.monitor_queries.widgets.window_stepper import WindowStepper
 
 
 class ResourcePlotModal(ModalScreen):
@@ -33,8 +36,9 @@ class ResourcePlotModal(ModalScreen):
         # One footer entry for the pair: the key that opened it closes it.
         Binding("escape", "close", "Close", key_display="esc/z"),
         Binding("z", "close", "Close", show=False),
-        # A modal cuts the app's bindings, so quit is repeated here.
+        # A modal cuts the app's bindings, so quit and help are repeated.
         Binding("q", "app.quit", "Quit"),
+        Binding("question_mark", "app.toggle_help", "Help"),
         # The window belongs to the screen beneath, so its keys run there.
         Binding("w", "forward('cycle_window')", "Window size", show=False),
         Binding(
@@ -76,6 +80,16 @@ class ResourcePlotModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="resource-plot-modal"):
+            with Horizontal(id="modal-top-row"):
+                yield WindowStepper(
+                    self.owner.window_size,
+                    caption="WINDOW",
+                    tooltip="Width of the time window the plots show.",
+                )
+                # Movable exactly when the arrow keys are, see check_action.
+                yield WindowRange(
+                    movable=hasattr(self.owner, "action_shift_earlier")
+                )
             for plot in self.plots:
                 yield ResourcePlotPane(
                     self.window,
@@ -85,10 +99,73 @@ class ResourcePlotModal(ModalScreen):
                 )
         yield Footer(show_command_palette=False)
 
+    def on_mount(self) -> None:
+        """Follow the window the panes are handed, and label the arrows."""
+        self.watch(
+            self.query_one(ResourcePlotPane), "window", self.sync_top_row
+        )
+        # Label the controls with the keys that run them; CSS decides
+        # when the labels show.
+        self.query_one(WindowStepper).set_help_keys(
+            action_key(self, "forward('cycle_window_back')"),
+            action_key(self, "forward('cycle_window')"),
+        )
+        self.query_one(WindowRange).set_help_keys(
+            shift=(
+                action_key(self, "forward('shift_earlier')"),
+                action_key(self, "forward('shift_later')"),
+            ),
+            jump=(
+                action_key(self, "forward('snap_start')"),
+                action_key(self, "forward('snap_end')"),
+            ),
+        )
+
+    def sync_top_row(self) -> None:
+        """Show the screen beneath's window size, range and log edges."""
+        self.query_one(WindowStepper).window_size = self.owner.window_size
+        window = self.query_one(ResourcePlotPane).window
+        window_range = self.query_one(WindowRange)
+        window_range.show_range(
+            int(window.start_s * 1000), int(window.end_s * 1000)
+        )
+        if window_range.movable:
+            window_range.set_edges(
+                at_start=self.owner.window_start_ms <= self.owner.log_start_ms,
+                at_end=self.owner.window_end_ms >= self.owner.log_end_ms,
+            )
+
     def action_close(self) -> None:
         """Close the modal, unless a prior event already closed it."""
         if self.is_current:
             self.dismiss()
+
+    async def on_window_stepper_stepped(
+        self, message: WindowStepper.Stepped
+    ) -> None:
+        """Step the window size when a stepper arrow is clicked."""
+        if message.direction > 0:
+            await self.action_forward("cycle_window")
+        else:
+            await self.action_forward("cycle_window_back")
+
+    async def on_window_range_shifted(
+        self, message: WindowRange.Shifted
+    ) -> None:
+        """Shift the window when a shift arrow is clicked."""
+        if message.direction > 0:
+            await self.action_forward("shift_later")
+        else:
+            await self.action_forward("shift_earlier")
+
+    async def on_window_range_jumped(
+        self, message: WindowRange.Jumped
+    ) -> None:
+        """Jump to a log edge when a jump arrow is clicked."""
+        if message.direction > 0:
+            await self.action_forward("snap_end")
+        else:
+            await self.action_forward("snap_start")
 
     def check_action(self, action: str, parameters: tuple) -> bool:
         """Keep only the window keys the screen beneath has an action for."""
@@ -97,5 +174,10 @@ class ResourcePlotModal(ModalScreen):
         return True
 
     async def action_forward(self, name: str) -> None:
-        """Run a window action on the screen that opened the modal."""
+        """Run a window action on the screen beneath, then show the result.
+
+        The window size and edges change at once, before Historic's read
+        lands, so the row is synced here and again when the read does.
+        """
         await self.owner.run_action(name)
+        self.sync_top_row()

@@ -414,12 +414,12 @@ def test_clock_ticks_leave_a_narrow_leftover_start_unmarked():
 
 def test_clock_ticks_date_a_long_window_where_the_day_changes():
     _, labels = clock_ticks(START_S, START_S + 86_400)
-    assert labels[0] == "10-03 14:23"
+    assert labels[0] == "Oct 3 14:23"
     assert labels[1] == "17:23"
     # 02:23 is the first tick of the next day.
-    assert labels[4] == "10-04 02:23"
+    assert labels[4] == "Oct 4 02:23"
     assert labels[5] == "05:23"
-    assert labels[-1] == "10-04 14:23"
+    assert labels[-1] == "Oct 4 14:23"
 
 
 def test_clock_ticks_of_an_empty_window_is_one_label():

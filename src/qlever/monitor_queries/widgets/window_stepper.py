@@ -61,9 +61,13 @@ class WindowStepper(Horizontal):
     def compose(self) -> ComposeResult:
         yield Static(self.caption, classes="stepper-caption")
         yield Static("", id="window-prev-key", classes="key-pill")
-        yield Static("◄", id="window-prev", classes="stepper-arrow")
+        prev_arrow = Static("◄", id="window-prev", classes="stepper-arrow")
+        prev_arrow.tooltip = "Step to the previous window size."
+        yield prev_arrow
         yield Static(self.window_size, id="window-size")
-        yield Static("►", id="window-next", classes="stepper-arrow")
+        next_arrow = Static("►", id="window-next", classes="stepper-arrow")
+        next_arrow.tooltip = "Step to the next window size."
+        yield next_arrow
         yield Static("", id="window-next-key", classes="key-pill")
 
     def watch_window_size(self, value: str) -> None:

@@ -50,9 +50,36 @@ def format_timestamp(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def format_clock(ms: int) -> str:
-    """Render an epoch (ms) as a local wall-clock time."""
-    return datetime.fromtimestamp(ms / 1000).strftime("%H:%M:%S")
+def format_clock(
+    ms: float, with_date: bool = False, with_seconds: bool = True
+) -> str:
+    """Render an epoch (ms) as local wall-clock time, dated when asked."""
+    moment = datetime.fromtimestamp(ms / 1000)
+    time = moment.strftime("%H:%M:%S" if with_seconds else "%H:%M")
+    if with_date:
+        # The day without a leading zero, as `Oct 4`, which `%-d` cannot
+        # give on every platform.
+        return f"{moment:%b} {moment.day} {time}"
+    return time
+
+
+def format_range(start_ms: int, end_ms: int, now_ms: int) -> str:
+    """A window's start and end, dated unless both fall on today.
+
+    Ends on one day share a single date up front; ends on different days
+    each get their own. `now_ms` is passed in so the caller decides what
+    today is.
+    """
+    start = datetime.fromtimestamp(start_ms / 1000)
+    end = datetime.fromtimestamp(end_ms / 1000)
+    if start.date() != end.date():
+        dated_start = format_clock(start_ms, with_date=True)
+        dated_end = format_clock(end_ms, with_date=True)
+        return f"{dated_start} → {dated_end}"
+    times = f"{format_clock(start_ms)} → {format_clock(end_ms)}"
+    if start.date() == datetime.fromtimestamp(now_ms / 1000).date():
+        return times
+    return f"{start:%b} {start.day} · {times}"
 
 
 def format_seconds(seconds: float) -> str:

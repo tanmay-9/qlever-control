@@ -25,6 +25,7 @@ from qlever.monitor_queries.models import (
 )
 from qlever.monitor_queries.resource_data import OPERATION_KEYS
 from qlever.monitor_queries.resource_reader import REQUIRED_COLUMNS
+from qlever.monitor_queries.util import format_clock
 
 RgbColor = tuple[int, int, int]
 
@@ -277,7 +278,7 @@ def clock_ticks(start_s: float, end_s: float) -> tuple[list[float], list[str]]:
     before it.
     """
     if end_s <= start_s:
-        return [start_s], [datetime.fromtimestamp(start_s).strftime("%H:%M")]
+        return [start_s], [format_clock(start_s * 1000, with_seconds=False)]
     step = clock_step(end_s - start_s)
     positions = []
     tick_s = end_s
@@ -293,10 +294,12 @@ def clock_ticks(start_s: float, end_s: float) -> tuple[list[float], list[str]]:
     for index, position in enumerate(positions):
         moment = datetime.fromtimestamp(position)
         is_edge = index in (0, len(positions) - 1)
-        if show_dates and (is_edge or moment.date() != previous_day):
-            labels.append(moment.strftime("%m-%d %H:%M"))
-        else:
-            labels.append(moment.strftime("%H:%M"))
+        with_date = show_dates and (is_edge or moment.date() != previous_day)
+        labels.append(
+            format_clock(
+                position * 1000, with_date=with_date, with_seconds=False
+            )
+        )
         previous_day = moment.date()
     return positions, labels
 

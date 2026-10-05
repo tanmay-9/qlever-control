@@ -176,12 +176,14 @@ Timeline {
     height: 1;
 }
 
-.timeline-arrow {
+.timeline-arrow,
+.range-arrow {
     width: auto;
     padding: 0 1;
 }
 
-.timeline-arrow:hover {
+.timeline-arrow:hover,
+.range-arrow:hover {
     background: $primary-lighten-2;
 }
 
@@ -193,7 +195,8 @@ Timeline {
     text-align: center;
 }
 
-.timeline-arrow:disabled {
+.timeline-arrow:disabled,
+.range-arrow:disabled {
     color: $text-disabled;
 }
 
@@ -556,6 +559,30 @@ ResourcePlotModal {
 
 #resource-plot-modal PlotextPlot {
     height: 1fr;
+}
+
+/* The stepper and the range each take half the row, centered in it. */
+#modal-top-row {
+    height: 1;
+}
+
+#modal-top-row > WindowStepper,
+#modal-top-row > WindowRange {
+    width: 1fr;
+    align-horizontal: center;
+}
+
+WindowRange {
+    height: 1;
+}
+
+WindowRange > Static {
+    width: auto;
+}
+
+#range-text {
+    padding: 0 1;
+    text-style: bold;
 }
 
 /* Footer */
