@@ -391,6 +391,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Dim the rows so a window change registers before the scan lands."""
         self.query_one(HistoricQueryTable).add_class("stale")
         self.query_one(MetricsRow).add_class("stale")
+        self.app.mark_plots_stale()
         self.query_one("#table-status", Static).update("Loading window…")
 
     def refresh_view(self, rescan: bool) -> None:

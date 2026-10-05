@@ -145,6 +145,12 @@ ResourceRow.stale {
     text-opacity: 50%;
 }
 
+/* A plot whose window is still being read. text-opacity again, since
+   plotext colors its lines inline. */
+ResourcePlotPane.stale {
+    text-opacity: 50%;
+}
+
 /* Timeline (Historic only) */
 
 TimelineRow {
