@@ -2,9 +2,7 @@
 
 The panes inside do the drawing. This modal only stacks them, frames
 them and closes them. They all read the same window, so the same moment
-in time is at the same place in each, and the whole stack is one read:
-a bigger pane fits more buckets and says so when it resizes, so the
-screen that holds the readings can send a more detailed window.
+in time is at the same place in each.
 """
 
 from __future__ import annotations
@@ -27,8 +25,8 @@ class ResourcePlotModal(ModalScreen):
 
     Opens on the window and each plot's axis top the inline pane holds,
     so what the reader set is what the modal draws. After that the
-    screen keeps every pane up to date: Historic sends the window it
-    re-reads at this size, and Live sends fresh readings on its timer.
+    screen keeps every pane up to date: Historic sends each window it
+    reads, and Live sends fresh readings on its timer.
     """
 
     BINDINGS = [

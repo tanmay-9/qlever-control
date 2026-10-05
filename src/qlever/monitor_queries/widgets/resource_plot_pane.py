@@ -15,7 +15,6 @@ from datetime import datetime
 from math import ceil, floor, isnan, log10
 from typing import NamedTuple
 
-from textual.message import Message
 from textual.reactive import Reactive
 from textual_plotext import PlotextPlot
 
@@ -92,17 +91,9 @@ def event_color(kind: str, dark: bool) -> RgbColor:
     return style.dark if dark else style.light
 
 
-# A plot column holds 2 braille dots across, so 2 buckets per usable
-# column is the most the plot can resolve; more just overplots. Reserve
-# columns for the two y-axis label gutters.
+# Columns taken by the two y-axis label gutters, which the plot area
+# does not get.
 Y_AXIS_CHROME = 16
-MIN_BUCKETS = 60
-
-
-def buckets_for_width(width: int) -> int:
-    """Buckets worth reading for a pane this wide (2 per braille column)."""
-    usable_cols = max(10, width - Y_AXIS_CHROME)
-    return max(MIN_BUCKETS, usable_cols * 2)
 
 
 # Interior rows = pane height minus the two borders and the x-axis label
@@ -511,17 +502,6 @@ class ResourcePlotPane(PlotextPlot):
 
     can_focus = False
 
-    class BucketsChanged(Message):
-        """Posted when a resize changes how many buckets the pane fits.
-
-        Bubbles up so whoever holds the readings decides whether they
-        are worth re-reading at the new width.
-        """
-
-        def __init__(self, buckets: int) -> None:
-            super().__init__()
-            self.buckets = buckets
-
     window = Reactive(None, init=False)
     plot = Reactive(None, init=False)
     # Each plot's axis top step into `TOP_PERCENTILES`, by plot name,
@@ -547,7 +527,6 @@ class ResourcePlotPane(PlotextPlot):
         # Stacked plots share one clock row, printed under the last of
         # them, so the ones above give their row back to the data.
         self.time_labels = time_labels
-        self.last_buckets = None
 
     def on_mount(self) -> None:
         """Draw once, and again whenever the theme's colors change."""
@@ -574,18 +553,8 @@ class ResourcePlotPane(PlotextPlot):
         return self.top_steps.get(self.plot.name, 0)
 
     def on_resize(self) -> None:
-        """Redraw at the new size, and say so if the bucket count moved.
-
-        Staying quiet unless the count moved keeps a resize that only
-        changed the height from asking for a re-read. A hidden pane has
-        width 0 and is skipped.
-        """
+        """Redraw at the new size."""
         self.replot()
-        if self.size.width > 0:
-            buckets = buckets_for_width(self.size.width)
-            if buckets != self.last_buckets:
-                self.last_buckets = buckets
-                self.post_message(self.BucketsChanged(buckets))
 
     def replot(self) -> None:
         """Draw the current window, and set the marker tooltip.

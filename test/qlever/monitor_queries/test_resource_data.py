@@ -2,7 +2,7 @@
 
 import io
 from dataclasses import replace
-from math import isnan
+from math import ceil, isnan
 
 import pytest
 
@@ -11,11 +11,14 @@ from qlever.monitor_queries.models import ResourceWindow
 from qlever.monitor_queries.resource_data import (
     COLUMNS,
     LIVE_RESOURCE_BUFFER_MS,
+    MAX_BUCKETS,
     Capacity,
     Column,
     EventTracker,
     SampleBuffer,
+    bucket_count,
     bucket_value,
+    bucket_width_ms,
     coverage_note,
     live_buffer_span_ms,
     live_window_bounds,
@@ -799,62 +802,96 @@ def test_live_window_presets_stay_within_the_buffer():
     assert widths == sorted(widths)
 
 
-# A moment on a whole minute, so it is a bucket edge for every width in
-# the table below.
+# A moment on a whole minute, where the Live window tests start.
 ON_THE_MINUTE_MS = 1_760_000_400_000
 
+INTERVALS_S = [1, 2, 5, 7]
+SPANS_MS = [
+    5 * 60_000,
+    30 * 60_000,
+    3_600_000,
+    86_400_000,
+    30 * 86_400_000 + 1_234_567,
+]
+HOUR_MS = 3_600_000
 
-def bucket_width_ms(bounds):
+
+def bounds_width_ms(bounds):
     """Width of one bucket in a (start_ms, end_ms, buckets) answer."""
     start_ms, end_ms, buckets = bounds
     return (end_ms - start_ms) // buckets
 
 
-@pytest.mark.parametrize(
-    "interval_s, minutes, width_s, buckets",
-    [
-        (1, 5, 1, 300),
-        (1, 15, 3, 300),
-        (1, 30, 6, 300),
-        (1, 60, 12, 300),
-        (2, 5, 2, 150),
-        (2, 15, 4, 225),
-        (2, 30, 6, 300),
-        (2, 60, 12, 300),
-        (5, 5, 5, 60),
-        (5, 15, 5, 180),
-        (5, 30, 10, 180),
-        (5, 60, 15, 240),
-    ],
-)
-def test_live_window_bounds_use_whole_intervals_and_at_most_300_buckets(
-    interval_s, minutes, width_s, buckets
-):
-    bounds = live_window_bounds(ON_THE_MINUTE_MS, minutes * 60_000, interval_s)
-    assert bucket_width_ms(bounds) == width_s * 1000
-    assert bounds[2] == buckets
+@pytest.mark.parametrize("interval_s", INTERVALS_S)
+@pytest.mark.parametrize("span_ms", SPANS_MS)
+def test_bucket_width_is_whole_intervals(interval_s, span_ms):
+    assert bucket_width_ms(span_ms, interval_s) % (interval_s * 1000) == 0
+
+
+@pytest.mark.parametrize("interval_s", INTERVALS_S)
+@pytest.mark.parametrize("span_ms", SPANS_MS)
+def test_bucket_count_stays_within_the_cap(interval_s, span_ms):
+    assert bucket_count(span_ms, interval_s) <= MAX_BUCKETS
+
+
+@pytest.mark.parametrize("interval_s", INTERVALS_S)
+@pytest.mark.parametrize("span_ms", SPANS_MS)
+def test_bucket_width_is_the_narrowest_that_fits(interval_s, span_ms):
+    # One interval narrower would need more buckets than the cap.
+    interval_ms = interval_s * 1000
+    width_ms = bucket_width_ms(span_ms, interval_s)
+    if width_ms > interval_ms:
+        assert ceil(span_ms / (width_ms - interval_ms)) > MAX_BUCKETS
+
+
+@pytest.mark.parametrize("interval_s", INTERVALS_S)
+def test_bucket_count_keeps_every_reading_up_to_the_cap(interval_s):
+    interval_ms = interval_s * 1000
+    full_ms = MAX_BUCKETS * interval_ms
+    assert bucket_width_ms(full_ms, interval_s) == interval_ms
+    assert bucket_count(full_ms, interval_s) == MAX_BUCKETS
+    # One reading more and two share a bucket.
+    assert bucket_width_ms(full_ms + interval_ms, interval_s) > interval_ms
+
+
+@pytest.mark.parametrize("interval_s", INTERVALS_S)
+@pytest.mark.parametrize("span_ms", SPANS_MS)
+def test_live_window_bounds_use_the_shared_width(interval_s, span_ms):
+    bounds = live_window_bounds(ON_THE_MINUTE_MS, span_ms, interval_s)
+    assert bounds_width_ms(bounds) == bucket_width_ms(span_ms, interval_s)
+    assert bounds[2] == bucket_count(span_ms, interval_s)
+
+
+def hour_edge_and_width_ms():
+    """A bucket edge of the hour window at 2 s, and its bucket width."""
+    width_ms = bucket_width_ms(HOUR_MS, 2)
+    return ON_THE_MINUTE_MS // width_ms * width_ms, width_ms
 
 
 def test_live_window_bounds_end_on_the_edge_after_now():
-    now_ms = ON_THE_MINUTE_MS + 5_300
-    start_ms, end_ms, _ = live_window_bounds(now_ms, 3_600_000, 2)
-    assert end_ms == ON_THE_MINUTE_MS + 12_000
-    assert start_ms == end_ms - 3_600_000
+    edge_ms, width_ms = hour_edge_and_width_ms()
+    start_ms, end_ms, buckets = live_window_bounds(
+        edge_ms + width_ms // 2, HOUR_MS, 2
+    )
+    assert end_ms == edge_ms + width_ms
+    assert end_ms - start_ms == buckets * width_ms
 
 
 def test_live_window_bounds_hold_still_within_a_bucket():
-    early = live_window_bounds(ON_THE_MINUTE_MS + 1, 3_600_000, 2)
-    late = live_window_bounds(ON_THE_MINUTE_MS + 11_999, 3_600_000, 2)
+    edge_ms, width_ms = hour_edge_and_width_ms()
+    early = live_window_bounds(edge_ms + 1, HOUR_MS, 2)
+    late = live_window_bounds(edge_ms + width_ms - 1, HOUR_MS, 2)
     assert early == late
 
 
 def test_live_window_bounds_move_one_bucket_at_an_edge():
+    edge_ms, width_ms = hour_edge_and_width_ms()
     start_ms, end_ms, buckets = live_window_bounds(
-        ON_THE_MINUTE_MS + 11_999, 3_600_000, 2
+        edge_ms + width_ms - 1, HOUR_MS, 2
     )
-    assert live_window_bounds(ON_THE_MINUTE_MS + 12_000, 3_600_000, 2) == (
-        start_ms + 12_000,
-        end_ms + 12_000,
+    assert live_window_bounds(edge_ms + width_ms, HOUR_MS, 2) == (
+        start_ms + width_ms,
+        end_ms + width_ms,
         buckets,
     )
 
@@ -864,24 +901,28 @@ def test_live_window_bounds_cover_a_span_the_width_does_not_divide():
     # reach one second past the five minutes.
     bounds = live_window_bounds(ON_THE_MINUTE_MS, 300_000, 7)
     start_ms, end_ms, buckets = bounds
-    assert bucket_width_ms(bounds) == 7_000
+    assert bounds_width_ms(bounds) == 7_000
     assert buckets == 43
     assert end_ms - start_ms == 301_000
     assert start_ms % 7_000 == 0
 
 
-def test_live_buffer_span_is_the_hour_when_its_buckets_divide_it():
-    assert live_buffer_span_ms(2) == LIVE_RESOURCE_BUFFER_MS
+@pytest.mark.parametrize("interval_s", INTERVALS_S)
+def test_live_buffer_span_is_whole_buckets_just_covering_the_hour(
+    interval_s,
+):
+    width_ms = bucket_width_ms(LIVE_RESOURCE_BUFFER_MS, interval_s)
+    span_ms = live_buffer_span_ms(interval_s)
+    assert span_ms % width_ms == 0
+    assert (
+        LIVE_RESOURCE_BUFFER_MS <= span_ms < LIVE_RESOURCE_BUFFER_MS + width_ms
+    )
 
 
-def test_live_buffer_span_grows_to_whole_buckets():
-    # An hour of 14 s buckets needs 258 of them, 12 s past the hour.
-    assert live_buffer_span_ms(7) == 3_612_000
-
-
-def test_sample_buffer_holds_one_sample_more_than_its_span():
-    assert SampleBuffer(2).size == 1801
-    assert SampleBuffer(7).size == 517
+@pytest.mark.parametrize("interval_s", INTERVALS_S)
+def test_sample_buffer_holds_one_sample_more_than_its_span(interval_s):
+    span_ms = live_buffer_span_ms(interval_s)
+    assert SampleBuffer(interval_s).size == span_ms // (interval_s * 1000) + 1
 
 
 @pytest.mark.parametrize("interval_s", [1, 2, 5, 7, 11])

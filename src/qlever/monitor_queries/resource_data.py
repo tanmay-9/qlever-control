@@ -196,9 +196,24 @@ def coverage_note(window: ResourceWindow, sample_interval_s: int) -> str:
     return f"{age} of data"
 
 
-# Live draws at most this many buckets at any window size, enough for a
-# wide plot and few enough to rebuild on every sample.
-LIVE_MAX_BUCKETS = 300
+# The most buckets a window is split into, enough to fill a full-screen
+# plot on a wide monitor and few enough to rebuild on every sample.
+MAX_BUCKETS = 600
+
+
+def bucket_width_ms(span_ms: int, sample_interval_s: int) -> int:
+    """How wide each bucket of a window this long should be.
+
+    A whole number of sampling intervals, so every full bucket holds the
+    same number of samples and each point is made the same way.
+    """
+    interval_ms = sample_interval_s * 1000
+    return interval_ms * ceil(span_ms / (MAX_BUCKETS * interval_ms))
+
+
+def bucket_count(span_ms: int, sample_interval_s: int) -> int:
+    """How many buckets of `bucket_width_ms` cover a window this long."""
+    return ceil(span_ms / bucket_width_ms(span_ms, sample_interval_s))
 
 
 def live_window_bounds(
@@ -211,8 +226,7 @@ def live_window_bounds(
     its width, so a full bucket never changes and the window moves on
     one whole bucket at a time.
     """
-    interval_ms = sample_interval_s * 1000
-    bucket_ms = interval_ms * ceil(span_ms / (LIVE_MAX_BUCKETS * interval_ms))
+    bucket_ms = bucket_width_ms(span_ms, sample_interval_s)
     end_ms = (now_ms // bucket_ms + 1) * bucket_ms
     buckets = ceil(span_ms / bucket_ms)
     return end_ms - buckets * bucket_ms, end_ms, buckets
