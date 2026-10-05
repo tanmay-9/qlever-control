@@ -550,9 +550,10 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """
         self.app.push_screen(
             ResourcePlotModal(
-                self.resource_window,
-                self.app.offered_plots(),
-                self.query_one(ResourcePlotPane).top_steps,
+                owner=self,
+                window=self.resource_window,
+                plots=self.app.offered_plots(),
+                top_steps=self.query_one(ResourcePlotPane).top_steps,
             )
         )
 

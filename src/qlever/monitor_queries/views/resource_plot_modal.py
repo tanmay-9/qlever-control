@@ -10,7 +10,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 
 from qlever.monitor_queries.models import ResourceWindow
 from qlever.monitor_queries.widgets.footer import Footer
@@ -35,15 +35,41 @@ class ResourcePlotModal(ModalScreen):
         Binding("z", "close", "Close", show=False),
         # A modal cuts the app's bindings, so quit is repeated here.
         Binding("q", "app.quit", "Quit"),
+        # The window belongs to the screen beneath, so its keys run there.
+        Binding("w", "forward('cycle_window')", "Window size", show=False),
+        Binding(
+            "W", "forward('cycle_window_back')", "Window size", show=False
+        ),
+        Binding(
+            "left", "forward('shift_earlier')", "Shift earlier", show=False
+        ),
+        Binding("right", "forward('shift_later')", "Shift later", show=False),
+        Binding(
+            "shift+left",
+            "forward('snap_start')",
+            "Jump to log start",
+            key_display="⇧ ←",
+            show=False,
+        ),
+        Binding(
+            "shift+right",
+            "forward('snap_end')",
+            "Jump to log end",
+            key_display="⇧ →",
+            show=False,
+        ),
     ]
 
     def __init__(
         self,
+        owner: Screen,
         window: ResourceWindow,
         plots: list[Plot],
         top_steps: dict[str, int],
     ) -> None:
         super().__init__()
+        # The screen that opened the modal, which owns the window.
+        self.owner = owner
         self.window = window
         self.plots = plots
         self.top_steps = top_steps
@@ -63,3 +89,13 @@ class ResourcePlotModal(ModalScreen):
         """Close the modal, unless a prior event already closed it."""
         if self.is_current:
             self.dismiss()
+
+    def check_action(self, action: str, parameters: tuple) -> bool:
+        """Keep only the window keys the screen beneath has an action for."""
+        if action == "forward":
+            return hasattr(self.owner, f"action_{parameters[0]}")
+        return True
+
+    async def action_forward(self, name: str) -> None:
+        """Run a window action on the screen that opened the modal."""
+        await self.owner.run_action(name)
