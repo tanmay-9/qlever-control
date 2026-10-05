@@ -283,7 +283,29 @@ def test_label_width_follows_the_axis_down_a_step():
         )
     ]
     assert label_width(win, stepped) == 3
-    assert label_width(win, stepped, step=2) == 1
+    assert label_width(win, stepped, top_steps={"A": 2}) == 1
+
+
+def test_label_width_steps_each_plot_on_its_own():
+    readings = tuple(float(value) for value in range(1, 10)) + (100.0,)
+    win = window(
+        series("read_bytes_per_s", readings),
+        series("write_bytes_per_s", readings),
+    )
+    stack = [
+        Plot(
+            name="A",
+            left=axis("read_bytes_per_s", adjustable=True),
+            right=axis(),
+        ),
+        Plot(
+            name="B",
+            left=axis("write_bytes_per_s", adjustable=True),
+            right=axis(),
+        ),
+    ]
+    # Only A is stepped down to 9, so B still reaches 100.
+    assert label_width(win, stack, top_steps={"A": 2}) == 3
 
 
 def test_label_width_counts_the_zero_of_a_side_with_no_series():

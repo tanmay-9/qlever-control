@@ -172,7 +172,7 @@ class DetailRow(Horizontal):
         self.sync_pane()
         pane = self.query_one(ResourcePlotPane)
         self.watch(pane, "plot", self.sync_scale_arrows)
-        self.watch(pane, "top_step", self.sync_scale_arrows)
+        self.watch(pane, "top_steps", self.sync_scale_arrows)
         self.sync_scale_arrows()
 
     def sync_pane(self) -> None:

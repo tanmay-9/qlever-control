@@ -197,7 +197,9 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
 
 
 def label_width(
-    window: ResourceWindow, plots: list[Plot], step: int = 0
+    window: ResourceWindow,
+    plots: list[Plot],
+    top_steps: dict[str, int] | None = None,
 ) -> int:
     """Digits in the longest y label these plots print for this window.
 
@@ -208,6 +210,7 @@ def label_width(
     """
     width = 0
     for plot in plots:
+        step = (top_steps or {}).get(plot.name, 0)
         for axis in (plot.left, plot.right):
             highest = axis_top(window, axis, step)
             width = max(width, len(str(round(highest))))
@@ -452,15 +455,15 @@ class ResourcePlotPane(PlotextPlot):
 
     window = Reactive(None, init=False)
     plot = Reactive(None, init=False)
-    # An index into `TOP_PERCENTILES`, not a percentage. Carried
-    # across plots, and ignored by an axis that is not adjustable.
-    top_step = Reactive(0, init=False)
+    # Each plot's axis top step into `TOP_PERCENTILES`, by plot name,
+    # so each plot keeps its own. A missing plot is at step 0.
+    top_steps = Reactive(None, init=False)
 
     def __init__(
         self,
         window: ResourceWindow,
         plot: Plot,
-        top_step: int = 0,
+        top_steps: dict[str, int] | None = None,
         time_labels: bool = True,
         label_width: int = 0,
         **kwargs,
@@ -472,7 +475,7 @@ class ResourcePlotPane(PlotextPlot):
         self.theme = "textual-clear"
         self.set_reactive(ResourcePlotPane.window, window)
         self.set_reactive(ResourcePlotPane.plot, plot)
-        self.set_reactive(ResourcePlotPane.top_step, top_step)
+        self.set_reactive(ResourcePlotPane.top_steps, dict(top_steps or {}))
         # Stacked plots share one clock row, printed under the last of
         # them, so the ones above give their row back to the data.
         self.time_labels = time_labels
@@ -496,9 +499,14 @@ class ResourcePlotPane(PlotextPlot):
         """Redraw the same window as the plot it was just switched to."""
         self.replot()
 
-    def watch_top_step(self) -> None:
-        """Redraw the same plot against the top just stepped to."""
+    def watch_top_steps(self) -> None:
+        """Redraw the same plot against the axis top just stepped to."""
         self.replot()
+
+    @property
+    def top_step(self) -> int:
+        """The axis top step of the plot being shown."""
+        return self.top_steps.get(self.plot.name, 0)
 
     def on_resize(self) -> None:
         """Redraw at the new size, and say so if the bucket count moved.
