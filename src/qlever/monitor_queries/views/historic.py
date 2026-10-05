@@ -593,7 +593,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             ResourcePlotModal(
                 self.resource_window,
                 self.app.offered_plots(),
-                self.query_one(ResourcePlotPane).top_step,
+                self.query_one(ResourcePlotPane).top_steps,
             )
         )
 

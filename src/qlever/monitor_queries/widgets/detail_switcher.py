@@ -68,7 +68,9 @@ class DetailSwitcher(ContentSwitcher):
             return
         # Each entry further along the ladder is a lower top.
         wanted = pane.top_step - direction
-        pane.top_step = max(0, min(len(TOP_PERCENTILES) - 1, wanted))
+        step = max(0, min(len(TOP_PERCENTILES) - 1, wanted))
+        # A new dict, since the pane only redraws when one is assigned.
+        pane.top_steps = {**pane.top_steps, pane.plot.name: step}
 
     def show_sparql(self) -> None:
         """Switch to the SPARQL pane."""
