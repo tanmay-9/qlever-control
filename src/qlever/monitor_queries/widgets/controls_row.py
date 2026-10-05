@@ -27,10 +27,7 @@ class HistoricControlsRow(Horizontal):
         yield WindowStepper(
             self.state.window_size,
             caption="WINDOW",
-            tooltip=(
-                "Width of the log time window whose queries are shown. "
-                "Press w or click the arrows to resize."
-            ),
+            tooltip="Width of the log time window whose queries are shown.",
         )
         yield ModePicker(self.state.mode)
         yield SelectedWindow(self.state)

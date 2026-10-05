@@ -35,7 +35,7 @@ from qlever.monitor_queries.resource_reader import (
     parse_tsv_row,
     seek_to_window_start,
 )
-from qlever.monitor_queries.views.live import WINDOW_PRESETS
+from qlever.monitor_queries.views.live import LIVE_WINDOW_PRESETS
 from qlever.monitor_queries.widgets.window_stepper import preset_ms
 
 HEADER = "\t".join(LOG_COLUMNS) + "\n"
@@ -794,7 +794,7 @@ def test_coverage_note_of_an_empty_window_is_empty():
 
 
 def test_live_window_presets_stay_within_the_buffer():
-    widths = [preset_ms(preset) for preset in WINDOW_PRESETS]
+    widths = [preset_ms(preset) for preset in LIVE_WINDOW_PRESETS]
     assert max(widths) == LIVE_RESOURCE_BUFFER_MS
     assert widths == sorted(widths)
 

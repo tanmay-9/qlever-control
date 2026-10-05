@@ -68,7 +68,7 @@ from qlever.util import is_qlever_server_alive
 TITLE = "QLever monitor-queries: Live"
 
 # The window sizes Live offers, none reaching past what the buffer holds.
-WINDOW_PRESETS = ("5m", "15m", "30m", "1h")
+LIVE_WINDOW_PRESETS = ("5m", "15m", "30m", "1h")
 
 
 class LiveScreen(Screen, inherit_bindings=False):
@@ -101,7 +101,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.consecutive_ping_fails = 0
         self.ping_timer = None
         # How much of the buffer the sparklines and the plot draw.
-        self.window_size = WINDOW_PRESETS[0]
+        self.window_size = LIVE_WINDOW_PRESETS[0]
 
     def compose(self) -> ComposeResult:
         yield HeaderRow(
@@ -413,9 +413,9 @@ class LiveScreen(Screen, inherit_bindings=False):
 
     def step_window(self, direction: int) -> None:
         """Move the window size one preset in `direction` (wraps)."""
-        index = WINDOW_PRESETS.index(self.window_size)
-        self.window_size = WINDOW_PRESETS[
-            (index + direction) % len(WINDOW_PRESETS)
+        index = LIVE_WINDOW_PRESETS.index(self.window_size)
+        self.window_size = LIVE_WINDOW_PRESETS[
+            (index + direction) % len(LIVE_WINDOW_PRESETS)
         ]
         self.query_one(WindowStepper).window_size = self.window_size
         self.refresh_resource_window()

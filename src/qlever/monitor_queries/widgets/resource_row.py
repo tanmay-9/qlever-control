@@ -79,8 +79,7 @@ class ResourceRow(Horizontal):
                 caption="USAGE OVER",
                 tooltip=(
                     "How far back the resource usage bars either side "
-                    "and the plot below go. Press w or click the arrows "
-                    "to change it."
+                    "and the plot below go."
                 ),
             ),
             Static(format_subtitle(self.subtitle), classes="resource-status"),
