@@ -372,17 +372,21 @@ def get_live_query_rows(state: LiveState, now_ms: int) -> list[LiveQueryRow]:
 def get_recent_operations(
     state: LiveState, since_ms: int
 ) -> list[CompletedQuery]:
-    """The completions that finished at or after `since_ms`.
+    """The completions that finished at or after `since_ms`, oldest first.
 
-    Copied under the lock, since the tailer appends to the deque from
-    its own thread while the caller walks the result.
+    The history is sorted by end time, so the walk starts at the newest
+    entry and stops at the first one that is too old. Copied under the
+    lock, since the tailer appends to the deque from its own thread
+    while the caller walks the result.
     """
+    recent = []
     with state.lock:
-        return [
-            entry
-            for entry in state.completed.entries
-            if entry.end_ms >= since_ms
-        ]
+        for entry in reversed(state.completed.entries):
+            if entry.end_ms < since_ms:
+                break
+            recent.append(entry)
+    recent.reverse()
+    return recent
 
 
 def discard_finished_backlog(state: LiveState) -> None:

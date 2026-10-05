@@ -28,10 +28,10 @@ from qlever.monitor_queries.models import (
     SparqlContent,
 )
 from qlever.monitor_queries.resource_data import (
-    LIVE_RESOURCE_BUFFER_MS,
     SampleBuffer,
     coverage_note,
     is_sample_fresh,
+    live_buffer_span_ms,
     live_window_bounds,
     window_for_samples,
 )
@@ -370,7 +370,8 @@ class LiveScreen(Screen, inherit_bindings=False):
             return
         with self.app.resource_log.open("rb") as stream:
             seeded = self.resource_log_tail.seed(
-                stream, current_ms() - LIVE_RESOURCE_BUFFER_MS
+                stream,
+                current_ms() - live_buffer_span_ms(self.app.sample_interval_s),
             )
             self.app.call_from_thread(self.apply_resource_samples, seeded)
             while not worker.is_cancelled:

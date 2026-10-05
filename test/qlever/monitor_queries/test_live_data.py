@@ -181,6 +181,14 @@ def test_get_recent_operations_drops_completions_before_the_cutoff():
     assert [entry.end_ms for entry in recent] == [2000, 3000]
 
 
+def test_get_recent_operations_stops_at_the_first_older_entry():
+    # The history is sorted in practice. One entry out of order shows the
+    # walk stops there instead of checking the whole hour.
+    state = state_with_completions(1000, 5000, 2000, 6000)
+    recent = get_recent_operations(state, since_ms=3000)
+    assert [entry.end_ms for entry in recent] == [6000]
+
+
 def test_get_recent_operations_returns_a_snapshot():
     # The caller walks the result while the tailer keeps appending, so
     # what it gets back must not be the live deque.

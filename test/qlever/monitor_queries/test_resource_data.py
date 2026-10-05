@@ -14,8 +14,10 @@ from qlever.monitor_queries.resource_data import (
     Capacity,
     Column,
     EventTracker,
+    SampleBuffer,
     bucket_value,
     coverage_note,
+    live_buffer_span_ms,
     live_window_bounds,
     read_resource_window,
     sample_count,
@@ -866,3 +868,31 @@ def test_live_window_bounds_cover_a_span_the_width_does_not_divide():
     assert buckets == 43
     assert end_ms - start_ms == 301_000
     assert start_ms % 7_000 == 0
+
+
+def test_live_buffer_span_is_the_hour_when_its_buckets_divide_it():
+    assert live_buffer_span_ms(2) == LIVE_RESOURCE_BUFFER_MS
+
+
+def test_live_buffer_span_grows_to_whole_buckets():
+    # An hour of 14 s buckets needs 258 of them, 12 s past the hour.
+    assert live_buffer_span_ms(7) == 3_612_000
+
+
+def test_sample_buffer_holds_one_sample_more_than_its_span():
+    assert SampleBuffer(2).size == 1801
+    assert SampleBuffer(7).size == 517
+
+
+@pytest.mark.parametrize("interval_s", [1, 2, 5, 7, 11])
+def test_a_full_sample_buffer_reaches_the_widest_window_start(interval_s):
+    size = SampleBuffer(interval_s).size
+    interval_ms = interval_s * 1000
+    # The newest sample taken right now is the worst case, since an older
+    # one only pushes the oldest sample further back.
+    for now_ms in range(ON_THE_MINUTE_MS, ON_THE_MINUTE_MS + 30_000, 250):
+        oldest_ms = now_ms - (size - 1) * interval_ms
+        start_ms, _, _ = live_window_bounds(
+            now_ms, LIVE_RESOURCE_BUFFER_MS, interval_s
+        )
+        assert oldest_ms <= start_ms

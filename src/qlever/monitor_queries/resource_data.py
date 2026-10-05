@@ -150,14 +150,16 @@ def sample_count(span_ms: int, sample_interval_s: int) -> int:
 class SampleBuffer:
     """Rolling buffer of the most recent resource samples.
 
-    `maxlen` drops the oldest sample when a new one arrives, so the
-    buffer always holds the last `LIVE_RESOURCE_BUFFER_MS` of readings.
-    Its size follows the log's sampling interval, so the buffer holds
-    that hour whatever interval the server was started with.
+    `maxlen` drops the oldest sample when a new one arrives. The size
+    follows the log's sampling interval, so the buffer always reaches
+    far enough back to fill Live's widest window.
     """
 
     def __init__(self, sample_interval_s: int) -> None:
-        self.size = sample_count(LIVE_RESOURCE_BUFFER_MS, sample_interval_s)
+        span_ms = live_buffer_span_ms(sample_interval_s)
+        # One more sample than fit in the span, since n samples are only
+        # n - 1 intervals apart.
+        self.size = sample_count(span_ms, sample_interval_s) + 1
         self.samples = deque(maxlen=self.size)
 
     def add(self, sample: Sample) -> None:
@@ -214,6 +216,18 @@ def live_window_bounds(
     end_ms = (now_ms // bucket_ms + 1) * bucket_ms
     buckets = ceil(span_ms / bucket_ms)
     return end_ms - buckets * bucket_ms, end_ms, buckets
+
+
+def live_buffer_span_ms(sample_interval_s: int) -> int:
+    """How far back Live's samples must reach to fill its widest window.
+
+    That window holds whole buckets, so it can be a little longer than
+    `LIVE_RESOURCE_BUFFER_MS`. Its length does not depend on the time.
+    """
+    start_ms, end_ms, _ = live_window_bounds(
+        0, LIVE_RESOURCE_BUFFER_MS, sample_interval_s
+    )
+    return end_ms - start_ms
 
 
 def bucket_value(column: Column, running: float, count: int) -> float:
