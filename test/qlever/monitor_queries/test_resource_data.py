@@ -16,6 +16,7 @@ from qlever.monitor_queries.resource_data import (
     EventTracker,
     bucket_value,
     coverage_note,
+    live_window_bounds,
     read_resource_window,
     sample_count,
     window_for_samples,
@@ -794,3 +795,74 @@ def test_live_window_presets_stay_within_the_buffer():
     widths = [preset_ms(preset) for preset in WINDOW_PRESETS]
     assert max(widths) == LIVE_RESOURCE_BUFFER_MS
     assert widths == sorted(widths)
+
+
+# A moment on a whole minute, so it is a bucket edge for every width in
+# the table below.
+ON_THE_MINUTE_MS = 1_760_000_400_000
+
+
+def bucket_width_ms(bounds):
+    """Width of one bucket in a (start_ms, end_ms, buckets) answer."""
+    start_ms, end_ms, buckets = bounds
+    return (end_ms - start_ms) // buckets
+
+
+@pytest.mark.parametrize(
+    "interval_s, minutes, width_s, buckets",
+    [
+        (1, 5, 1, 300),
+        (1, 15, 3, 300),
+        (1, 30, 6, 300),
+        (1, 60, 12, 300),
+        (2, 5, 2, 150),
+        (2, 15, 4, 225),
+        (2, 30, 6, 300),
+        (2, 60, 12, 300),
+        (5, 5, 5, 60),
+        (5, 15, 5, 180),
+        (5, 30, 10, 180),
+        (5, 60, 15, 240),
+    ],
+)
+def test_live_window_bounds_use_whole_intervals_and_at_most_300_buckets(
+    interval_s, minutes, width_s, buckets
+):
+    bounds = live_window_bounds(ON_THE_MINUTE_MS, minutes * 60_000, interval_s)
+    assert bucket_width_ms(bounds) == width_s * 1000
+    assert bounds[2] == buckets
+
+
+def test_live_window_bounds_end_on_the_edge_after_now():
+    now_ms = ON_THE_MINUTE_MS + 5_300
+    start_ms, end_ms, _ = live_window_bounds(now_ms, 3_600_000, 2)
+    assert end_ms == ON_THE_MINUTE_MS + 12_000
+    assert start_ms == end_ms - 3_600_000
+
+
+def test_live_window_bounds_hold_still_within_a_bucket():
+    early = live_window_bounds(ON_THE_MINUTE_MS + 1, 3_600_000, 2)
+    late = live_window_bounds(ON_THE_MINUTE_MS + 11_999, 3_600_000, 2)
+    assert early == late
+
+
+def test_live_window_bounds_move_one_bucket_at_an_edge():
+    start_ms, end_ms, buckets = live_window_bounds(
+        ON_THE_MINUTE_MS + 11_999, 3_600_000, 2
+    )
+    assert live_window_bounds(ON_THE_MINUTE_MS + 12_000, 3_600_000, 2) == (
+        start_ms + 12_000,
+        end_ms + 12_000,
+        buckets,
+    )
+
+
+def test_live_window_bounds_cover_a_span_the_width_does_not_divide():
+    # Five minutes in 7 s buckets needs 42.9 of them, so 43 whole ones
+    # reach one second past the five minutes.
+    bounds = live_window_bounds(ON_THE_MINUTE_MS, 300_000, 7)
+    start_ms, end_ms, buckets = bounds
+    assert bucket_width_ms(bounds) == 7_000
+    assert buckets == 43
+    assert end_ms - start_ms == 301_000
+    assert start_ms % 7_000 == 0

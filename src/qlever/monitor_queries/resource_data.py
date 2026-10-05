@@ -8,6 +8,7 @@ resource log is `resource_reader.py`'s job.
 from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 from typing import Literal, NamedTuple
 
@@ -191,6 +192,28 @@ def coverage_note(window: ResourceWindow, sample_interval_s: int) -> str:
     age_s = window.end_s - window.times_s[0]
     age = f"{int(age_s)}s" if age_s < 60 else f"{int(age_s // 60)}m"
     return f"{age} of data"
+
+
+# Live draws at most this many buckets at any window size, enough for a
+# wide plot and few enough to rebuild on every sample.
+LIVE_MAX_BUCKETS = 300
+
+
+def live_window_bounds(
+    now_ms: int, span_ms: int, sample_interval_s: int
+) -> tuple[int, int, int]:
+    """Start, end and bucket count of Live's window, on the clock's grid.
+
+    A bucket holds a whole number of sampling intervals, so every full
+    bucket holds the same number of samples. Its edges are multiples of
+    its width, so a full bucket never changes and the window moves on
+    one whole bucket at a time.
+    """
+    interval_ms = sample_interval_s * 1000
+    bucket_ms = interval_ms * ceil(span_ms / (LIVE_MAX_BUCKETS * interval_ms))
+    end_ms = (now_ms // bucket_ms + 1) * bucket_ms
+    buckets = ceil(span_ms / bucket_ms)
+    return end_ms - buckets * bucket_ms, end_ms, buckets
 
 
 def bucket_value(column: Column, running: float, count: int) -> float:

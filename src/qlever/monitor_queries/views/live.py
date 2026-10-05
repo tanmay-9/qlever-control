@@ -32,6 +32,7 @@ from qlever.monitor_queries.resource_data import (
     SampleBuffer,
     coverage_note,
     is_sample_fresh,
+    live_window_bounds,
     window_for_samples,
 )
 from qlever.monitor_queries.resource_reader import (
@@ -53,7 +54,6 @@ from qlever.monitor_queries.widgets.metrics_row import MetricsRow
 from qlever.monitor_queries.widgets.nav_pill import NavPill
 from qlever.monitor_queries.widgets.query_table import LiveQueryTable
 from qlever.monitor_queries.widgets.resource_plot_pane import (
-    MIN_BUCKETS,
     ResourcePlotPane,
 )
 from qlever.monitor_queries.widgets.resource_row import ResourceRow
@@ -102,8 +102,6 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.ping_timer = None
         # How much of the buffer the sparklines and the plot draw.
         self.window_size = WINDOW_PRESETS[0]
-        # How many buckets the window holds. The plot sets it on resize.
-        self.resource_buckets = MIN_BUCKETS
 
     def compose(self) -> ComposeResult:
         yield HeaderRow(
@@ -395,25 +393,22 @@ class LiveScreen(Screen, inherit_bindings=False):
     def live_resource_window(self) -> ResourceWindow:
         """Snapshot the buffer as the rolling window the screen shows.
 
-        Built at the detail the plot can draw, so a wide window costs no
-        more than a narrow one. The clock is read once, so the window's
-        start and end are the same instant.
+        The buckets sit on the clock, so between bucket edges only the
+        newest one changes, and the window then moves on by one bucket.
         """
-        now_ms = current_ms()
-        start_ms = now_ms - preset_ms(self.window_size)
+        start_ms, end_ms, buckets = live_window_bounds(
+            current_ms(),
+            preset_ms(self.window_size),
+            self.app.sample_interval_s,
+        )
         return window_for_samples(
             samples=self.resource_samples.samples,
             operations=get_recent_operations(self.app.live_state, start_ms),
             capacity=self.capacity,
             start_ms=start_ms,
-            end_ms=now_ms,
-            buckets=self.resource_buckets,
+            end_ms=end_ms,
+            buckets=buckets,
         )
-
-    def set_resource_buckets(self, buckets: int) -> None:
-        """Rebuild the window at the detail a resized plot can show."""
-        self.resource_buckets = buckets
-        self.refresh_resource_window()
 
     def step_window(self, direction: int) -> None:
         """Move the window size one preset in `direction` (wraps)."""
