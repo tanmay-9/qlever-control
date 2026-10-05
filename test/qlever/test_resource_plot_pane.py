@@ -6,6 +6,8 @@ which color a line is drawn in, and which plots a log can carry.
 Drawing itself is left to the widget.
 """
 
+from datetime import datetime
+from itertools import pairwise
 from math import isnan
 
 import pytest
@@ -18,6 +20,8 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
     axis_ticks,
     axis_top,
     clamp,
+    clock_step,
+    clock_ticks,
     empty_note,
     line_color,
     percentile,
@@ -342,3 +346,81 @@ def test_tick_layout_skips_a_side_with_nothing_to_draw():
 def test_tick_layout_of_two_empty_sides_uses_the_most_ticks():
     count, _ = tick_layout(20, (0.0, 0.0))
     assert count == 8
+
+
+# A local time a few seconds past a minute, so the tests see the labels
+# drop the seconds. Built in local time, so the labels read the same on
+# any machine.
+START_S = datetime(2026, 10, 3, 14, 23, 17).timestamp()
+
+
+@pytest.mark.parametrize(
+    "minutes, step_s",
+    [
+        (5, 60),
+        (15, 180),
+        (30, 300),
+        (60, 600),
+        (6 * 60, 3_600),
+        (12 * 60, 7_200),
+        (24 * 60, 10_800),
+    ],
+)
+def test_clock_step_divides_each_window_size_evenly(minutes, step_s):
+    assert clock_step(minutes * 60) == step_s
+
+
+def test_clock_step_falls_back_to_the_first_step_that_fits():
+    # A 7 s sample interval widens Live's 5m window to 301 s, which no
+    # step divides.
+    assert clock_step(301) == 60
+    assert clock_step(2 * 86_400 + 7 * 3_600) == 43_200
+
+
+def test_clock_step_counts_whole_days_past_daily_ticks():
+    assert clock_step(30 * 86_400) == 4 * 86_400
+
+
+def test_clock_ticks_split_a_window_into_equal_labelled_gaps():
+    positions, labels = clock_ticks(START_S, START_S + 300)
+    assert positions[0] == START_S
+    assert positions[-1] == START_S + 300
+    assert {after - before for before, after in pairwise(positions)} == {60}
+    assert labels == ["14:23", "14:24", "14:25", "14:26", "14:27", "14:28"]
+
+
+def test_clock_ticks_keep_their_place_as_the_window_moves():
+    # Live moves its window one bucket at a time, and the ticks move
+    # with it, so they keep their place on screen.
+    first, _ = clock_ticks(START_S, START_S + 3_600)
+    later, _ = clock_ticks(START_S + 12, START_S + 3_612)
+    assert [tick - START_S for tick in first] == [
+        tick - START_S - 12 for tick in later
+    ]
+
+
+def test_clock_ticks_give_a_wide_leftover_start_its_own_tick():
+    # 12 h steps leave 7 h at the start, more than half a step.
+    span_s = 2 * 86_400 + 7 * 3_600
+    positions, _ = clock_ticks(START_S, START_S + span_s)
+    assert positions[0] == START_S
+    assert positions[1] - positions[0] == 7 * 3_600
+
+
+def test_clock_ticks_leave_a_narrow_leftover_start_unmarked():
+    positions, _ = clock_ticks(START_S, START_S + 301)
+    assert positions[0] == START_S + 1
+
+
+def test_clock_ticks_date_a_long_window_where_the_day_changes():
+    _, labels = clock_ticks(START_S, START_S + 86_400)
+    assert labels[0] == "10-03 14:23"
+    assert labels[1] == "17:23"
+    # 02:23 is the first tick of the next day.
+    assert labels[4] == "10-04 02:23"
+    assert labels[5] == "05:23"
+    assert labels[-1] == "10-04 14:23"
+
+
+def test_clock_ticks_of_an_empty_window_is_one_label():
+    assert clock_ticks(START_S, START_S) == ([START_S], ["14:23"])

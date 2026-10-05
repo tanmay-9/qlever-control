@@ -12,7 +12,7 @@ terminal pane.
 from __future__ import annotations
 
 from datetime import datetime
-from math import floor, isnan, log10
+from math import ceil, floor, isnan, log10
 from typing import NamedTuple
 
 from textual.message import Message
@@ -232,27 +232,81 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
     return top
 
 
-def clock_ticks(
-    start_s: float, end_s: float, count: int = 5
-) -> tuple[list[float], list[str]]:
-    """Evenly spaced x positions across the window with HH:MM:SS labels.
+DAY_S = 86_400
 
-    Returns the tick positions in epoch seconds and their clock-time
-    labels, so the x-axis reads as wall-clock time for both a rolling
-    live window and a fixed historic span.
+# The gaps the x-axis may put between its ticks, in seconds, each one a
+# span people count in. No window is shorter than five minutes, so a
+# minute is the smallest needed.
+CLOCK_STEPS_S = (
+    # 1, 2, 3, 5, 10, 15 and 30 minutes
+    60,
+    120,
+    180,
+    300,
+    600,
+    900,
+    1_800,
+    # 1, 2, 3, 6 and 12 hours
+    3_600,
+    7_200,
+    10_800,
+    21_600,
+    43_200,
+    DAY_S,
+)
+
+# The most gaps the x-axis splits a window into.
+MAX_CLOCK_GAPS = 8
+
+
+def clock_step(span_s: float) -> int:
+    """The gap between ticks for a window this long.
+
+    The smallest step in `CLOCK_STEPS_S` with at most `MAX_CLOCK_GAPS`
+    gaps, preferring one that divides the window, so every gap is the
+    same. A window too long even for daily ticks steps by whole days.
+    """
+    fitting = [
+        step for step in CLOCK_STEPS_S if span_s / step <= MAX_CLOCK_GAPS
+    ]
+    if not fitting:
+        return DAY_S * ceil(span_s / (MAX_CLOCK_GAPS * DAY_S))
+    even = [step for step in fitting if span_s % step == 0]
+    return (even or fitting)[0]
+
+
+def clock_ticks(start_s: float, end_s: float) -> tuple[list[float], list[str]]:
+    """Ticks in equal steps back from the window's end, with labels.
+
+    The ticks are tied to the window's edges, so on Live they keep their
+    place while their labels change. Each label is the minute its tick
+    falls in, in local time. Time left over at the start gets a tick of
+    its own only when it spans half a step. A window of a day or more
+    also dates both edges, and a tick whose day differs from the one
+    before it.
     """
     if end_s <= start_s:
-        return [start_s], [
-            datetime.fromtimestamp(start_s).strftime("%H:%M:%S")
-        ]
-    span = end_s - start_s
-    positions = [
-        start_s + span * index / (count - 1) for index in range(count)
-    ]
-    labels = [
-        datetime.fromtimestamp(position).strftime("%H:%M:%S")
-        for position in positions
-    ]
+        return [start_s], [datetime.fromtimestamp(start_s).strftime("%H:%M")]
+    step = clock_step(end_s - start_s)
+    positions = []
+    tick_s = end_s
+    while tick_s >= start_s:
+        positions.append(tick_s)
+        tick_s -= step
+    if positions[-1] - start_s >= step / 2:
+        positions.append(start_s)
+    positions.reverse()
+    show_dates = end_s - start_s >= DAY_S
+    labels = []
+    previous_day = None
+    for index, position in enumerate(positions):
+        moment = datetime.fromtimestamp(position)
+        is_edge = index in (0, len(positions) - 1)
+        if show_dates and (is_edge or moment.date() != previous_day):
+            labels.append(moment.strftime("%m-%d %H:%M"))
+        else:
+            labels.append(moment.strftime("%H:%M"))
+        previous_day = moment.date()
     return positions, labels
 
 
