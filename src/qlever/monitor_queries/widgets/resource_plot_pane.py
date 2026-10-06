@@ -93,7 +93,7 @@ def event_color(kind: str, dark: bool) -> RgbColor:
 
 # Columns taken by the two y-axis label gutters, which the plot area
 # does not get.
-Y_AXIS_CHROME = 16
+Y_AXIS_CHROME = 14
 
 
 # Interior rows = pane height minus the two borders and the x-axis label
@@ -159,8 +159,23 @@ def round_step(least: float) -> float:
 
 
 # Every y label is padded to this width, so stacked plots line up in
-# time. Six fits a query running into a 600 s timeout, in ms.
-Y_LABEL_WIDTH = 6
+# time. Five fits the longest short number, like `17.5k`.
+Y_LABEL_WIDTH = 5
+
+
+def short_number(value: float) -> str:
+    """A tick value with a `k`, `M`, `G` or `T` suffix, like `17.5k`.
+
+    A tick is a round step times at most seven, so three digits always
+    show it in full.
+    """
+    suffix = ""
+    for next_suffix in ("k", "M", "G", "T"):
+        if value < 1000:
+            break
+        value /= 1000
+        suffix = next_suffix
+    return f"{value:.3g}{suffix}"
 
 
 def axis_ticks(
@@ -178,7 +193,7 @@ def axis_ticks(
     value_step = round_step(top / (count - 1))
     axis_max = value_step * gaps / row_step
     positions = [value_step * index for index in range(count)]
-    return axis_max, positions, [str(round(pos)) for pos in positions]
+    return axis_max, positions, [short_number(pos) for pos in positions]
 
 
 # The tops an adjustable axis steps through, starting at the plain

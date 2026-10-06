@@ -15,6 +15,7 @@ import pytest
 from qlever.monitor_queries.models import ResourceSeries, ResourceWindow
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     PLOTS,
+    Y_LABEL_WIDTH,
     Axis,
     available_plots,
     axis_ticks,
@@ -27,6 +28,7 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
     percentile,
     round_step,
     series_for_keys,
+    short_number,
     tick_layout,
 )
 
@@ -295,7 +297,7 @@ def test_round_step_never_picks_a_fraction():
 
 def test_axis_ticks_label_round_numbers_to_at_least_the_top():
     axis_max, positions, labels = axis_ticks(3009, count=5, gaps=16)
-    assert labels == ["0", "800", "1600", "2400", "3200"]
+    assert labels == ["0", "800", "1.6k", "2.4k", "3.2k"]
     assert positions == [0, 800, 1600, 2400, 3200]
     assert axis_max == 3200
 
@@ -305,9 +307,37 @@ def test_axis_ticks_print_a_step_of_25_without_a_decimal():
     assert labels == ["0", "25", "50", "75"]
 
 
-def test_axis_ticks_print_a_large_label_in_full():
+def test_axis_ticks_shorten_a_large_label():
     _, _, labels = axis_ticks(3_600_000, count=5, gaps=16)
-    assert labels[-1] == "4000000"
+    assert labels[-1] == "4M"
+
+
+def test_short_number_keeps_a_value_under_a_thousand():
+    assert short_number(0) == "0"
+    assert short_number(75.0) == "75"
+    assert short_number(999) == "999"
+
+
+def test_short_number_drops_trailing_zeros():
+    assert short_number(1000) == "1k"
+    assert short_number(600_000) == "600k"
+    assert short_number(2_000_000_000) == "2G"
+
+
+def test_short_number_fits_the_longest_ticks_in_five_columns():
+    # A 2.5 step times seven gives the most digits a tick can have.
+    assert short_number(1750) == "1.75k"
+    assert short_number(17_500) == "17.5k"
+    assert short_number(1_250_000) == "1.25M"
+
+
+def test_every_tick_label_fits_the_label_width():
+    # Every tick a pane can show, from a top of 1 up to the trillions.
+    for top in range(1, 1000):
+        for power in range(10):
+            for count in range(2, 9):
+                _, _, labels = axis_ticks(top * 10**power, count, gaps=28)
+                assert max(len(label) for label in labels) <= Y_LABEL_WIDTH
 
 
 def test_axis_ticks_raise_the_axis_over_a_spare_row():
