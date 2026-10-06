@@ -175,24 +175,56 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
     A column with a capacity uses it, so a light load stays low
     instead of filling the plot. A column without one uses its own
     readings, cut down to the `TOP_PERCENTILES` entry that `step`
-    picks. Zero when the window has none of the axis's columns, which
-    tells the plot that side has nothing to draw.
+    picks. A rung whose cut leaves nothing above zero (most readings
+    are zero on an idle disk) uses the rung above it instead, so a
+    stepped axis never shows every reading as one line along the
+    ceiling. Zero when the window has none of the axis's columns,
+    which tells the plot that side has nothing to draw.
     """
     drawn = series_for_keys(window, axis.keys)
     if not drawn:
         return 0.0
-    percent = TOP_PERCENTILES[step] if axis.adjustable else 100
+    step = step if axis.adjustable else 0
     top = axis.min_top
     for series in drawn:
         if series.total is not None:
             top = max(top, series.total)
-        else:
-            readings = [value for value in series.values if not isnan(value)]
-            # Each series keeps its own percentile, so the taller line
-            # is not pulled down by the shorter one's low readings.
-            if readings:
-                top = max(top, percentile(readings, percent))
+            continue
+        readings = [value for value in series.values if not isnan(value)]
+        if not readings:
+            continue
+        # Each series keeps its own percentile, so the taller line is
+        # not pulled down by the shorter one's low readings.
+        for rung in range(step, -1, -1):
+            cut = percentile(readings, TOP_PERCENTILES[rung])
+            if cut > 0:
+                break
+        top = max(top, cut)
     return top
+
+
+def next_step(
+    window: ResourceWindow, plot: Plot, step: int, direction: int
+) -> int | None:
+    """The rung to move to from `step`, or None when there is none.
+
+    `direction` is 1 to raise the top and -1 to lower it. Raising goes
+    one rung up. Lowering goes to the next rung that actually lowers
+    the top, skipping the ones that leave it where it is (a cut that
+    falls on the same reading, or on no reading above zero), so that a
+    press always changes the plot. None on a plot with no adjustable
+    axis and at the ends of the ladder.
+    """
+    axis = plot.adjustable_axis
+    if axis is None:
+        return None
+    if direction > 0:
+        return step - 1 if step > 0 else None
+    current = axis_top(window, axis, step)
+    for wanted in range(step + 1, len(TOP_PERCENTILES)):
+        if axis_top(window, axis, wanted) < current:
+            return wanted
+    return None
 
 
 def label_width(
@@ -271,7 +303,7 @@ def clamp(
 
     plotext draws nothing at all for a point above the axis, which
     would look like the gap left by a restart. A flat line along the
-    top says the reading ran past it instead. The buckets that
+    ceiling says the reading ran past it instead. The buckets that
     reported nothing stay empty, and a side with no axis of its own
     has no ceiling to pull to.
     """
@@ -338,13 +370,21 @@ class Plot(NamedTuple):
     right: Axis
 
     @property
-    def adjustable(self) -> bool:
-        """Whether either side lets the reader step its top.
+    def adjustable_axis(self) -> Axis | None:
+        """The side that lets the reader step its top, if there is one.
 
         One side at most: the reader steps a single top, so two
         adjustable sides would move together under one control.
         """
-        return self.left.adjustable or self.right.adjustable
+        for axis in (self.left, self.right):
+            if axis.adjustable:
+                return axis
+        return None
+
+    @property
+    def adjustable(self) -> bool:
+        """Whether either side lets the reader step its top."""
+        return self.adjustable_axis is not None
 
 
 # One row per plot, in the order they are offered.
@@ -638,6 +678,19 @@ class ResourcePlotPane(PlotextPlot):
                 alignment="center",
             )
 
+    def ceiling(self, axis_max: float | None) -> float | None:
+        """The value a reading above the axis is pulled down to.
+
+        One row under the top rather than the top itself: the top row
+        holds the series names and the plot name, which would hide the
+        very stretch the clamp is there to show. None when the side has
+        no axis, so nothing is pulled.
+        """
+        if axis_max is None:
+            return None
+        rows = max(2, self.size.height - 2 - (1 if self.time_labels else 0))
+        return axis_max * (rows - 1) / rows
+
     def draw_series(
         self,
         window: ResourceWindow,
@@ -647,11 +700,11 @@ class ResourcePlotPane(PlotextPlot):
     ) -> None:
         """Plot this plot's lines, or a note when it has none to draw.
 
-        A reading above its axis is clamped onto the top, so an axis
-        stepped down past a spike shows a flat line rather than a hole.
-        The lines are broken across each restart's downtime. Vlines mark
-        the server going down and coming back, and an index rebuild
-        starting and ending.
+        A reading above its axis is clamped onto the row under the top,
+        so an axis stepped down past a spike shows a flat line rather
+        than a hole. The lines are broken across each restart's
+        downtime. Vlines mark the server going down and coming back,
+        and an index rebuild starting and ending.
         """
         dark = self.app.current_theme.dark
         plt = self.plt
@@ -666,7 +719,10 @@ class ResourcePlotPane(PlotextPlot):
             for index, series in enumerate(series_for_keys(window, keys))
             if series.values
         ]
-        ceilings = {"left": left_axis_max, "right": right_axis_max}
+        ceilings = {
+            "left": self.ceiling(left_axis_max),
+            "right": self.ceiling(right_axis_max),
+        }
         for side, index, series in lines:
             times, values = break_at_restarts(
                 window.times_s,

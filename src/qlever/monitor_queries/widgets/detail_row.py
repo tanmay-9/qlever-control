@@ -19,8 +19,8 @@ from qlever.monitor_queries.widgets.detail_switcher import (
     DetailSwitcher,
 )
 from qlever.monitor_queries.widgets.resource_plot_pane import (
-    TOP_PERCENTILES,
     ResourcePlotPane,
+    next_step,
 )
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
 
@@ -173,6 +173,8 @@ class DetailRow(Horizontal):
         pane = self.query_one(ResourcePlotPane)
         self.watch(pane, "plot", self.sync_scale_arrows)
         self.watch(pane, "top_step", self.sync_scale_arrows)
+        # The window decides which rungs still lower the top.
+        self.watch(pane, "window", self.sync_scale_arrows)
         self.sync_scale_arrows()
 
     def sync_pane(self) -> None:
@@ -184,11 +186,12 @@ class DetailRow(Horizontal):
     def sync_scale_arrows(self) -> None:
         """Grey out a scale arrow with nowhere left to go."""
         pane = self.query_one(ResourcePlotPane)
-        adjustable = pane.plot.adjustable
-        can_raise = adjustable and pane.top_step > 0
-        can_lower = adjustable and pane.top_step < len(TOP_PERCENTILES) - 1
-        self.query_one("#raise-top-glyph", Button).disabled = not can_raise
-        self.query_one("#lower-top-glyph", Button).disabled = not can_lower
+        for name, direction in (("raise-top", 1), ("lower-top", -1)):
+            wanted = next_step(
+                pane.window, pane.plot, pane.top_step, direction
+            )
+            glyph = self.query_one(f"#{name}-glyph", Button)
+            glyph.disabled = wanted is None
 
     def set_help_keys(self, key_for_action: Callable[[str], str]) -> None:
         """Name the key that runs each control, and the pane's own keys."""

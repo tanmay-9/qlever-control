@@ -12,9 +12,9 @@ from textual.widgets import ContentSwitcher
 from qlever.monitor_queries.models import ResourceWindow, SparqlContent
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     PLOTS,
-    TOP_PERCENTILES,
     Plot,
     ResourcePlotPane,
+    next_step,
 )
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
 
@@ -64,11 +64,9 @@ class DetailSwitcher(ContentSwitcher):
         if self.current != PLOT_ID:
             return
         pane = self.query_one(ResourcePlotPane)
-        if not pane.plot.adjustable:
-            return
-        # Each entry further along the ladder is a lower top.
-        wanted = pane.top_step - direction
-        pane.top_step = max(0, min(len(TOP_PERCENTILES) - 1, wanted))
+        wanted = next_step(pane.window, pane.plot, pane.top_step, direction)
+        if wanted is not None:
+            pane.top_step = wanted
 
     def show_sparql(self) -> None:
         """Switch to the SPARQL pane."""

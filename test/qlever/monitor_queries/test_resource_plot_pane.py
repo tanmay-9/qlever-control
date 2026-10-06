@@ -19,6 +19,7 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
     empty_note,
     label_width,
     line_color,
+    next_step,
     percentile,
     series_for_keys,
 )
@@ -160,6 +161,42 @@ def test_axis_top_gives_each_series_its_own_percentile():
     )
     both = axis("read_bytes_per_s", "write_bytes_per_s", adjustable=True)
     assert axis_top(win, both, step=2) == 90.0
+
+
+def test_axis_top_of_a_rung_with_nothing_above_zero_is_the_rung_above():
+    # The 75th percentile of a mostly idle disk is 0, which would draw
+    # every reading as one line along the ceiling; the 90th is 9.
+    readings = (0.0,) * 8 + (9.0, 100.0)
+    win = window(series("read_bytes_per_s", readings))
+    stepped = axis("read_bytes_per_s", adjustable=True)
+    assert axis_top(win, stepped, step=2) == 9.0
+    assert axis_top(win, stepped, step=3) == 9.0
+
+
+def test_next_step_lowers_to_the_next_rung_that_changes_the_top():
+    # With ten readings the 95th percentile is still the largest one,
+    # so lowering from the top skips that rung and lands on the 90th.
+    readings = tuple(float(step) for step in range(1, 10)) + (100.0,)
+    win = window(series("read_bytes_per_s", readings))
+    assert next_step(win, PLOTS[1], 0, -1) == 2
+
+
+def test_next_step_ends_the_ladder_where_the_top_stops_falling():
+    readings = (0.0,) * 8 + (9.0, 100.0)
+    win = window(series("read_bytes_per_s", readings))
+    assert next_step(win, PLOTS[1], 2, -1) is None
+
+
+def test_next_step_raises_one_rung_and_stops_at_the_top():
+    win = window(series("read_bytes_per_s", (1.0, 2.0, 100.0)))
+    assert next_step(win, PLOTS[1], 2, 1) == 1
+    assert next_step(win, PLOTS[1], 0, 1) is None
+
+
+def test_next_step_of_a_fixed_plot_is_none():
+    win = window(series("rss", (1.0,), total=32.9))
+    assert next_step(win, PLOTS[0], 0, -1) is None
+    assert next_step(win, PLOTS[0], 1, 1) is None
 
 
 def test_the_disk_plot_steps_its_rate_axis():
