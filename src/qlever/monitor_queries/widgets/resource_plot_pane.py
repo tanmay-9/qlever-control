@@ -570,6 +570,18 @@ class ResourcePlotPane(PlotextPlot):
         """The axis top step of the plot being shown."""
         return self.top_steps.get(self.plot.name, 0)
 
+    def step_top(self, direction: int) -> None:
+        """Raise (1) or lower (-1) the shown plot's axis top.
+
+        The ends hold instead of wrapping, so the plot stays where it
+        is put.
+        """
+        # Each entry further along the ladder is a lower top.
+        wanted = self.top_step - direction
+        step = max(0, min(len(TOP_PERCENTILES) - 1, wanted))
+        # A new dict, since the pane only redraws when one is assigned.
+        self.top_steps = {**self.top_steps, self.plot.name: step}
+
     def on_resize(self) -> None:
         """Redraw at the new size."""
         self.replot()

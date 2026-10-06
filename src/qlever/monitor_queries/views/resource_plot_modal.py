@@ -11,16 +11,44 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen, Screen
+from textual.widgets import Button, Static
 
 from qlever.monitor_queries.models import ResourceWindow
 from qlever.monitor_queries.util import action_key
+from qlever.monitor_queries.widgets.detail_row import (
+    GutterControl,
+    gutter_control,
+)
 from qlever.monitor_queries.widgets.footer import Footer
 from qlever.monitor_queries.widgets.resource_plot_pane import (
+    TOP_PERCENTILES,
     Plot,
     ResourcePlotPane,
 )
 from qlever.monitor_queries.widgets.window_range import WindowRange
 from qlever.monitor_queries.widgets.window_stepper import WindowStepper
+
+
+def axis_top_controls(plot: Plot) -> list[GutterControl]:
+    """The raise and lower arrows for one plot's left axis top.
+
+    The ids come from the plot's name, so each plot's arrows are its own.
+    """
+    slug = plot.name.lower().replace("/", "").replace(" ", "-")
+    return [
+        GutterControl(
+            name=f"{slug}-raise-top",
+            glyph="⇡",
+            hint="Raise the left axis top",
+            action=f"step_axis_top('{plot.name}', 1)",
+        ),
+        GutterControl(
+            name=f"{slug}-lower-top",
+            glyph="⇣",
+            hint="Lower the left axis top",
+            action=f"step_axis_top('{plot.name}', -1)",
+        ),
+    ]
 
 
 class ResourcePlotModal(ModalScreen):
@@ -91,12 +119,21 @@ class ResourcePlotModal(ModalScreen):
                     movable=hasattr(self.owner, "action_shift_earlier")
                 )
             for plot in self.plots:
-                yield ResourcePlotPane(
-                    self.window,
-                    plot,
-                    top_steps=self.top_steps,
-                    time_labels=plot is self.plots[-1],
-                )
+                with Horizontal(classes="modal-plot-row"):
+                    # A plot with nothing to adjust keeps an empty column,
+                    # so every plot starts at the same place in time.
+                    with Vertical(classes="modal-gutter"):
+                        if plot.adjustable:
+                            yield Static("", classes="axis-top-rail")
+                            for control in axis_top_controls(plot):
+                                yield gutter_control(control, "-modal")
+                            yield Static("", classes="axis-top-rail")
+                    yield ResourcePlotPane(
+                        self.window,
+                        plot,
+                        top_steps=self.top_steps,
+                        time_labels=plot is self.plots[-1],
+                    )
         yield Footer(show_command_palette=False)
 
     def on_mount(self) -> None:
@@ -104,6 +141,7 @@ class ResourcePlotModal(ModalScreen):
         self.watch(
             self.query_one(ResourcePlotPane), "window", self.sync_top_row
         )
+        self.sync_axis_top_arrows()
         # Label the controls with the keys that run them; CSS decides
         # when the labels show.
         self.query_one(WindowStepper).set_help_keys(
@@ -134,6 +172,26 @@ class ResourcePlotModal(ModalScreen):
                 at_start=self.owner.window_start_ms <= self.owner.log_start_ms,
                 at_end=self.owner.window_end_ms >= self.owner.log_end_ms,
             )
+
+    def action_step_axis_top(self, plot_name: str, direction: int) -> None:
+        """Raise (1) or lower (-1) the named plot's left axis top."""
+        for pane in self.query(ResourcePlotPane):
+            if pane.plot.name == plot_name:
+                pane.step_top(direction)
+        self.sync_axis_top_arrows()
+
+    def sync_axis_top_arrows(self) -> None:
+        """Grey out an axis top arrow with nowhere left to go."""
+        for pane in self.query(ResourcePlotPane):
+            if pane.plot.adjustable:
+                raise_top, lower_top = axis_top_controls(pane.plot)
+                last_step = len(TOP_PERCENTILES) - 1
+                self.query_one(f"#{raise_top.name}-glyph", Button).disabled = (
+                    pane.top_step == 0
+                )
+                self.query_one(f"#{lower_top.name}-glyph", Button).disabled = (
+                    pane.top_step == last_step
+                )
 
     def action_close(self) -> None:
         """Close the modal, unless a prior event already closed it."""

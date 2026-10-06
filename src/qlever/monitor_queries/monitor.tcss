@@ -563,7 +563,27 @@ ResourcePlotModal {
     background: $surface;
 }
 
-#resource-plot-modal PlotextPlot {
+.modal-plot-row {
+    height: 1fr;
+}
+
+.modal-plot-row PlotextPlot {
+    width: 1fr;
+    height: 1fr;
+}
+
+/* The inline left gutter's width and gap, beside each plot's left
+   axis. The two rails share the spare height, which keeps the arrows
+   level with the axis middle, and run down the gutter's center. */
+.modal-gutter {
+    width: 3;
+    height: 1fr;
+    margin-right: 1;
+    align-horizontal: center;
+}
+
+.axis-top-rail {
+    width: 1;
     height: 1fr;
 }
 
