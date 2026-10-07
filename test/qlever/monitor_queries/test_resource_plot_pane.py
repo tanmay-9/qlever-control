@@ -200,10 +200,21 @@ def test_next_step_ends_the_ladder_where_the_top_stops_falling():
     assert next_step(win, PLOTS[1], 2, -1) is None
 
 
-def test_next_step_raises_one_rung_and_stops_at_the_top():
-    win = window(series("read_bytes_per_s", (1.0, 2.0, 100.0)))
-    assert next_step(win, PLOTS[1], 2, 1) == 1
+def test_next_step_raises_to_the_first_step_with_the_next_top():
+    # The tops are 100, 100, 9 and 8, so raising from 9 skips step 1,
+    # which would show the same 100 as step 0.
+    readings = tuple(float(step) for step in range(1, 10)) + (100.0,)
+    win = window(series("read_bytes_per_s", readings))
+    assert next_step(win, PLOTS[1], 3, 1) == 2
+    assert next_step(win, PLOTS[1], 2, 1) == 0
     assert next_step(win, PLOTS[1], 0, 1) is None
+
+
+def test_next_step_raises_to_step_0_when_every_top_is_the_same():
+    # With three readings every step shows 100, so a raise goes back
+    # to step 0 instead of staying stuck with the peak label.
+    win = window(series("read_bytes_per_s", (1.0, 2.0, 100.0)))
+    assert next_step(win, PLOTS[1], 2, 1) == 0
 
 
 def test_next_step_of_a_fixed_plot_is_none():

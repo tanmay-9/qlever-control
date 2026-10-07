@@ -209,21 +209,26 @@ def next_step(
 ) -> int | None:
     """The rung to move to from `step`, or None when there is none.
 
-    `direction` is 1 to raise the top and -1 to lower it. Raising goes
-    one rung up. Lowering goes to the next rung that actually lowers
-    the top, skipping the ones that leave it where it is (a cut that
-    falls on the same reading, or on no reading above zero), so that a
-    press always changes the plot. None on a plot with no adjustable
-    axis and at the ends of the ladder.
+    `direction` is 1 to raise the top and -1 to lower it. Either way
+    it skips the steps that show the same top, so every press changes
+    the plot. None on a plot with no adjustable axis, and at either end.
     """
     axis = plot.adjustable_axis
     if axis is None:
         return None
+    tops = [
+        axis_top(window, axis, rung) for rung in range(len(TOP_PERCENTILES))
+    ]
     if direction > 0:
-        return step - 1 if step > 0 else None
-    current = axis_top(window, axis, step)
+        higher = [rung for rung in range(step) if tops[rung] > tops[step]]
+        if higher:
+            # Go to the first step that shows the next higher top.
+            return tops.index(tops[higher[-1]])
+        # Every step above shows the same top, so go back to step 0,
+        # which also hides the peak label.
+        return 0 if step > 0 else None
     for wanted in range(step + 1, len(TOP_PERCENTILES)):
-        if axis_top(window, axis, wanted) < current:
+        if tops[wanted] < tops[step]:
             return wanted
     return None
 
