@@ -119,8 +119,8 @@ def test_the_disk_plot_bounds_a_small_io_stall():
 
 
 def test_only_the_disk_plot_offers_the_step():
-    assert PLOTS[1].adjustable
-    assert not PLOTS[0].adjustable
+    assert PLOTS[1].adjustable_axis is PLOTS[1].left
+    assert PLOTS[0].adjustable_axis is None
 
 
 def test_percentile_of_a_hundred_is_the_largest_reading():
@@ -171,6 +171,19 @@ def test_axis_top_of_a_rung_with_nothing_above_zero_is_the_rung_above():
     stepped = axis("read_bytes_per_s", adjustable=True)
     assert axis_top(win, stepped, step=2) == 9.0
     assert axis_top(win, stepped, step=3) == 9.0
+
+
+def test_axis_top_of_one_idle_series_does_not_undo_the_step():
+    # Reads are idle but for one spike; writes are busy. The idle
+    # series must not climb to its spike and squash the busy one.
+    reads = (0.0,) * 9 + (500.0,)
+    writes = (10.0, 10.0, 11.0, 11.0, 12.0, 12.0, 13.0, 13.0, 14.0, 14.0)
+    win = window(
+        series("read_bytes_per_s", reads),
+        series("write_bytes_per_s", writes),
+    )
+    stepped = axis("read_bytes_per_s", "write_bytes_per_s", adjustable=True)
+    assert axis_top(win, stepped, step=3) == 13.0
 
 
 def test_next_step_lowers_to_the_next_rung_that_changes_the_top():

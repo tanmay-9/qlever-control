@@ -175,7 +175,7 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
     A column with a capacity uses it, so a light load stays low
     instead of filling the plot. A column without one uses its own
     readings, cut down to the `TOP_PERCENTILES` entry that `step`
-    picks. A rung whose cut leaves nothing above zero (most readings
+    picks. A rung that leaves the whole axis at zero (most readings
     are zero on an idle disk) uses the rung above it instead, so a
     stepped axis never shows every reading as one line along the
     ceiling. Zero when the window has none of the axis's columns,
@@ -185,21 +185,22 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
     if not drawn:
         return 0.0
     step = step if axis.adjustable else 0
-    top = axis.min_top
-    for series in drawn:
-        if series.total is not None:
-            top = max(top, series.total)
-            continue
-        readings = [value for value in series.values if not isnan(value)]
-        if not readings:
-            continue
-        # Each series keeps its own percentile, so the taller line is
-        # not pulled down by the shorter one's low readings.
-        for rung in range(step, -1, -1):
-            cut = percentile(readings, TOP_PERCENTILES[rung])
-            if cut > 0:
-                break
-        top = max(top, cut)
+    # The zero check is on the whole axis, so one idle series does not
+    # climb to its spike while a busy one still has a top to give.
+    for rung in range(step, -1, -1):
+        top = axis.min_top
+        for series in drawn:
+            if series.total is not None:
+                top = max(top, series.total)
+                continue
+            readings = [value for value in series.values if not isnan(value)]
+            if not readings:
+                continue
+            # Each series keeps its own percentile, so the taller line
+            # is not pulled down by the shorter one's low readings.
+            top = max(top, percentile(readings, TOP_PERCENTILES[rung]))
+        if top > 0:
+            break
     return top
 
 
@@ -380,11 +381,6 @@ class Plot(NamedTuple):
             if axis.adjustable:
                 return axis
         return None
-
-    @property
-    def adjustable(self) -> bool:
-        """Whether either side lets the reader step its top."""
-        return self.adjustable_axis is not None
 
 
 # One row per plot, in the order they are offered.
