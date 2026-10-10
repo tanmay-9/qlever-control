@@ -33,6 +33,10 @@ class TestIndexCommand(unittest.TestCase):
                 "index": [
                     "input_files",
                     "cat_input_files",
+                    "geo_cell_grid_level",
+                    "geo_cell_grid_scheme",
+                    "geo_point_encoding",
+                    "parsed_geometries_min_length",
                     "encode_as_id",
                     "multi_input_json",
                     "parallel_parsing",
@@ -47,6 +51,7 @@ class TestIndexCommand(unittest.TestCase):
                     "text_index",
                     "stxxl_memory",
                     "parser_buffer_size",
+                    "index_rows_per_block",
                     "resource_usage_log",
                     "resource_usage_interval",
                     "resource_usage_plot_max_points",

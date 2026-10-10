@@ -7,8 +7,42 @@ import platform
 import shutil
 import socket
 import subprocess
+from collections.abc import Callable
 from datetime import datetime
 from functools import lru_cache
+
+from textual.binding import ActiveBinding, Binding
+from textual.screen import Screen
+
+
+def help_text(
+    bindings: dict[str, ActiveBinding],
+    actions: list[str],
+    key_display: Callable[[Binding], str],
+) -> str:
+    """Render the named actions as one line of key/description pairs.
+
+    An action that is unbound or currently disabled is left out, so a
+    row never names a key that does nothing.
+    """
+    by_action = {entry.binding.action: entry for entry in bindings.values()}
+    parts = []
+    for action in actions:
+        entry = by_action.get(action)
+        if entry is None or not entry.enabled:
+            continue
+        # The key wears the colour help mode uses everywhere else.
+        cap = f"[$text on $success] {key_display(entry.binding)} [/]"
+        parts.append(f"{cap} {entry.binding.description}")
+    return "   ".join(parts)
+
+
+def action_key(screen: Screen, action: str) -> str:
+    """The key that runs `action` on this screen, as the footer shows it."""
+    for entry in screen.active_bindings.values():
+        if entry.binding.action == action:
+            return screen.app.get_key_display(entry.binding)
+    return ""
 
 
 def format_timestamp(ms: int) -> str:
