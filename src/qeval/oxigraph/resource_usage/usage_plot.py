@@ -19,9 +19,7 @@ def overlay(args, log_path: Path) -> list[BandType]:
     log has no timestamps, so the phases are assumed to run back to back
     from the build start.
     """
-    return bands_from_durations(
-        IndexStatsCommand().parse_index_durations(log_path)
-    )
+    return bands_from_durations(IndexStatsCommand().index_durations(log_path))
 
 
 def subtitle(args, log_path: Path) -> str | None:

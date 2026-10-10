@@ -140,7 +140,9 @@ class StartCommand(QleverCommand):
         if args.show:
             return True
 
-        endpoint_url = f"http://{args.host_name}:{args.port}/query"
+        endpoint_url = (
+            f"http://{args.host_name}:{args.port}{args.endpoint_path}"
+        )
 
         # When running natively, check if the binary exists and works.
         if args.system not in Containerize.supported_systems():
@@ -233,8 +235,9 @@ class StartCommand(QleverCommand):
 
             def stop_container() -> None:
                 if in_container:
-                    args.cmdline_regex = StopCommand.DEFAULT_REGEX
-                    StopCommand().execute(args)
+                    stop_command = StopCommand()
+                    args.cmdline_regex = stop_command.default_regex()
+                    stop_command.execute(args)
 
             wait_for_foreground_server(process, log_proc, stop_container)
 
