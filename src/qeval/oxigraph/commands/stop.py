@@ -8,7 +8,7 @@ class StopCommand(BaseStopCommand):
     """Stop the Oxigraph server for a given dataset."""
 
     def default_regex(self) -> str:
-        return r"oxigraph\s+serve.*%%NAME%%_index"
+        return r"^(\S*/)?oxigraph\s+serve.*%%NAME%%_index"
 
     def status_command(self) -> StatusCommand:
         return StatusCommand()

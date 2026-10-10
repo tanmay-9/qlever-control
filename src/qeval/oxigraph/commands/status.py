@@ -9,4 +9,5 @@ class StatusCommand(BaseStatusCommand):
     def default_regex(self) -> str:
         # `serve` also matches `serve-read-only`.
         # `load` and `optimize` are the index-time processes.
-        return r"oxigraph\s+(serve|load|optimize)"
+        # Anchored, so that the shell that started a process does not match.
+        return r"^(\S*/)?oxigraph\s+(serve|load|optimize)"
