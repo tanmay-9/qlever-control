@@ -7,7 +7,7 @@ from pathlib import Path
 from qeval.oxigraph.commands.stop import StopCommand
 from qlever.command import QleverCommand
 from qlever.commands.start import (
-    server_liveness_check,
+    make_server_liveness_check,
     show_log_follow_info,
     wait_for_foreground_server,
     wait_until_server_ready,
@@ -18,6 +18,7 @@ from qlever.util import (
     binary_exists,
     is_server_alive,
     run_command,
+    stop_tailing,
     tail_log_file,
     timeout_seconds,
 )
@@ -191,20 +192,29 @@ class StartCommand(QleverCommand):
         show_log_follow_info(log_name, args.run_in_foreground)
         if in_container:
             # A short delay ensures the container is up before attaching.
-            # The `exec` is important to make sure that the log process is
-            # killed and not just the bash process.
+            # In a session of its own, like `tail_log_file`, so that
+            # `stop_tailing` can stop it.
             time.sleep(2)
-            log_cmd = f"exec {args.system} logs -f {args.server_container}"
-            log_proc = subprocess.Popen(log_cmd, shell=True)
+            log_cmd = f"{args.system} logs -f {args.server_container}"
+            log_proc = subprocess.Popen(
+                log_cmd, shell=True, start_new_session=True
+            )
         else:
             log_proc = tail_log_file(log_file)
         if log_proc is None:
             return False
-        if not wait_until_server_ready(
-            lambda: is_server_alive(endpoint_url),
-            server_liveness_check(args, process),
-        ):
-            log_proc.terminate()
+        try:
+            server_ready = wait_until_server_ready(
+                lambda: is_server_alive(endpoint_url),
+                make_server_liveness_check(args, process, pid=None),
+            )
+        except KeyboardInterrupt:
+            # The log follower runs in a session of its own, so the Ctrl-C
+            # does not reach it.
+            stop_tailing(log_proc)
+            raise
+        if not server_ready:
+            stop_tailing(log_proc)
             return False
 
         log.info(
@@ -213,9 +223,9 @@ class StartCommand(QleverCommand):
             f"queries is {endpoint_url} when the server is ready"
         )
 
-        # Kill the log process
+        # Stop following the log.
         if not args.run_in_foreground:
-            log_proc.terminate()
+            stop_tailing(log_proc)
 
         # With `--run-in-foreground`, wait until the server is stopped.
         # On Ctrl-C, terminate the process and clean up the container.
