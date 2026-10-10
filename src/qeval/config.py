@@ -99,6 +99,7 @@ def parse_command_line() -> argparse.Namespace:
             script_name=SCRIPT_NAME,
             engine_short_name=engine,
             engine_display_name=engine_info.display_name,
+            endpoint_path=engine_info.endpoint_path,
             main_command_name=main_command_name,
         )
         subparsers = engine_parser.add_subparsers(
