@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 
-from qeval.commands.status import StatusCommand
+from qeval.base_commands.status import BaseStatusCommand
 from qlever.command import QleverCommand
 from qlever.commands.stop import stop_container
 from qlever.containerize import Containerize
@@ -10,7 +10,7 @@ from qlever.log import log
 from qlever.util import stop_process_with_regex
 
 
-class StopCommand(QleverCommand):
+class BaseStopCommand(QleverCommand):
     """
     Stop the server of an engine for a given dataset: natively by killing
     the processes that match a regex, in a container by stopping and
@@ -28,7 +28,7 @@ class StopCommand(QleverCommand):
         """
 
     @abstractmethod
-    def status_command(self) -> StatusCommand:
+    def status_command(self) -> BaseStatusCommand:
         """The engine's `status` command, shown when no process matches."""
 
     def description(self) -> str:

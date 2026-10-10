@@ -3,7 +3,7 @@ from __future__ import annotations
 from qlever.commands.query import QueryCommand as QleverQueryCommand
 
 
-class QueryCommand(QleverQueryCommand):
+class BaseQueryCommand(QleverQueryCommand):
     """
     Send a query to the SPARQL endpoint of an engine. QLever's option to pin
     the result to its cache, and the access token that this needs, are left

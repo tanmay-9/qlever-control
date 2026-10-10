@@ -5,7 +5,7 @@ from qlever.commands.benchmark_queries import (
 )
 
 
-class BenchmarkQueriesCommand(QleverBenchmarkQueriesCommand):
+class BaseBenchmarkQueriesCommand(QleverBenchmarkQueriesCommand):
     """
     Run benchmark queries against the SPARQL endpoint of an engine.
     """

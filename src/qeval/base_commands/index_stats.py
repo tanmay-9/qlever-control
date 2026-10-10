@@ -28,7 +28,7 @@ def read_index_log(log_file_name: str | Path) -> str | None:
         return None
 
 
-class IndexStatsCommand(QleverIndexStatsCommand):
+class BaseIndexStatsCommand(QleverIndexStatsCommand):
     """
     Show how long the index build of an engine took and how much space its
     index uses, from the durations in its index log and the size of its

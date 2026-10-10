@@ -11,7 +11,7 @@ from qlever.log import log
 from qlever.qleverfile import Qleverfile
 
 
-class SetupConfigCommand(QleverSetupConfigCommand):
+class BaseSetupConfigCommand(QleverSetupConfigCommand):
     """
     Create a Qleverfile for an engine from one of QLever's pre-configured
     Qleverfiles: keep only the parts that every engine needs, then add the

@@ -5,7 +5,7 @@ from abc import abstractmethod
 from qlever.commands.status import StatusCommand as QleverStatusCommand
 
 
-class StatusCommand(QleverStatusCommand):
+class BaseStatusCommand(QleverStatusCommand):
     """
     Show the processes of an engine.
     """
