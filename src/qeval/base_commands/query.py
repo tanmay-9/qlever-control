@@ -48,12 +48,12 @@ class BaseQueryCommand(QleverQueryCommand):
             default=False,
             help="Do not print the (end-to-end) time taken",
         )
+        # QLever's `execute` reads this option, which is left out above.
+        subparser.set_defaults(pin_to_cache=False)
 
     def execute(self, args) -> bool:
         args.sparql_endpoint = (
             args.sparql_endpoint
             or f"{args.host_name}:{args.port}{args.endpoint_path}"
         )
-        # QLever's `execute` reads this option, which is left out above.
-        args.pin_to_cache = False
         return super().execute(args)
