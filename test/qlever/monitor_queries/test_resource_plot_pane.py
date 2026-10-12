@@ -505,6 +505,23 @@ def test_clock_ticks_leave_a_narrow_leftover_start_unmarked():
     assert positions[0] == START_S + 1
 
 
+@pytest.mark.parametrize("span_s", [30, 90, 150, 330, 450])
+def test_clock_ticks_drop_a_start_tick_in_the_next_ticks_minute(span_s):
+    # A 30 s leftover from 14:23:17 ends at 14:23:47, still in the
+    # same minute, so a start tick would repeat its label.
+    positions, labels = clock_ticks(START_S, START_S + span_s)
+    assert positions[0] == START_S + 30
+    assert len(set(labels)) == len(labels)
+
+
+def test_clock_ticks_keep_a_start_tick_in_a_minute_of_its_own():
+    # From 14:23:57 the next tick is at 14:24:27, a different minute.
+    start_s = START_S + 40
+    positions, labels = clock_ticks(start_s, start_s + 450)
+    assert positions[0] == start_s
+    assert labels[:2] == ["14:23", "14:24"]
+
+
 def test_clock_ticks_date_a_long_window_where_the_day_changes():
     _, labels = clock_ticks(START_S, START_S + 86_400)
     assert labels[0] == "10-03 14:23"

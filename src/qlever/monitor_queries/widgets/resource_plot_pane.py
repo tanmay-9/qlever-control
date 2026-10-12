@@ -285,8 +285,7 @@ def next_step(
 DAY_S = 86_400
 
 # The gaps the x-axis may put between its ticks, in seconds, each one a
-# span people count in. No window is shorter than five minutes, so a
-# minute is the smallest needed.
+# span people count in.
 CLOCK_STEPS_S = (
     # 1, 2, 3, 5, 10, 15 and 30 minutes
     60,
@@ -328,12 +327,9 @@ def clock_step(span_s: float) -> int:
 def clock_ticks(start_s: float, end_s: float) -> tuple[list[float], list[str]]:
     """Ticks in equal steps back from the window's end, with labels.
 
-    The ticks are tied to the window's edges, so on Live they keep their
-    place while their labels change. Each label is the minute its tick
-    falls in, in local time. Time left over at the start gets a tick of
-    its own only when it spans half a step. A window of a day or more
-    also dates both edges, and a tick whose day differs from the one
-    before it.
+    Each label is the local minute its tick falls in. The leftover at
+    the start gets a tick only if it spans half a step and its minute
+    differs from the next tick's. Windows of a day or more show dates.
     """
     if end_s <= start_s:
         return [start_s], [datetime.fromtimestamp(start_s).strftime("%H:%M")]
@@ -343,7 +339,10 @@ def clock_ticks(start_s: float, end_s: float) -> tuple[list[float], list[str]]:
     while tick_s >= start_s:
         positions.append(tick_s)
         tick_s -= step
-    if positions[-1] - start_s >= step / 2:
+    if (
+        positions[-1] - start_s >= step / 2
+        and start_s // 60 != positions[-1] // 60
+    ):
         positions.append(start_s)
     positions.reverse()
     show_dates = end_s - start_s >= DAY_S
