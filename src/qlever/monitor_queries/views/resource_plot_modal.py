@@ -106,7 +106,8 @@ class ResourcePlotModal(ModalScreen[dict[str, int]]):
         shown_plot: str,
     ) -> None:
         super().__init__()
-        # The screen that opened the modal, which owns the window.
+        # The screen that opened the modal. It owns the window, so the
+        # window keys run there and the top row shows its window.
         self.owner = owner
         self.window = window
         self.plots = plots
@@ -183,13 +184,12 @@ class ResourcePlotModal(ModalScreen[dict[str, int]]):
 
     def on_mount(self) -> None:
         """Follow the window the panes are handed, and label the arrows."""
-        self.watch(
-            self.query_one(ResourcePlotPane), "window", self.sync_top_row
-        )
+        pane = self.query_one(ResourcePlotPane)
+        self.watch(pane, "window", self.sync_top_row)
         # The window decides which steps still change the top. Wait until
         # the app has handed it to every pane, not just this first one.
         self.watch(
-            self.query_one(ResourcePlotPane),
+            pane,
             "window",
             lambda: self.call_after_refresh(self.sync_axis_top_arrows),
         )
