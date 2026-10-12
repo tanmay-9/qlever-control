@@ -412,7 +412,8 @@ class LiveScreen(Screen, inherit_bindings=False):
                 self.live_resource_window(),
                 available_plots(log_has_new_columns(self.app.resource_log)),
                 self.query_one(ResourcePlotPane).top_step,
-            )
+            ),
+            self.query_one(DetailSwitcher).set_top_step,
         )
 
     def action_show_sparql(self) -> None:

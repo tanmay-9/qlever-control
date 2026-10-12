@@ -68,6 +68,10 @@ class DetailSwitcher(ContentSwitcher):
         if wanted is not None:
             pane.top_step = wanted
 
+    def set_top_step(self, step: int) -> None:
+        """Take over the top the full-screen view was closed at."""
+        self.query_one(ResourcePlotPane).top_step = step
+
     def show_sparql(self) -> None:
         """Switch to the SPARQL pane."""
         self.current = SPARQL_ID
