@@ -186,6 +186,20 @@ def test_axis_top_of_one_idle_series_does_not_undo_the_step():
     assert axis_top(win, stepped, step=3) == 13.0
 
 
+def test_axis_top_of_a_rung_below_one_unit_is_the_rung_above():
+    # The reads are idle but for one spike and the writes trickle at a
+    # few KB/s, so the 75th and 90th percentiles are below one MB/s
+    # and would draw a 0..1 axis with every reading flat along it.
+    reads = (0.0,) * 9 + (500.0,)
+    writes = (0.002,) * 10
+    win = window(
+        series("read_bytes_per_s", reads),
+        series("write_bytes_per_s", writes),
+    )
+    stepped = axis("read_bytes_per_s", "write_bytes_per_s", adjustable=True)
+    assert axis_top(win, stepped, step=3) == 500.0
+
+
 def test_next_step_lowers_to_the_next_rung_that_changes_the_top():
     # With ten readings the 95th percentile is still the largest one,
     # so lowering from the top skips that rung and lands on the 90th.
