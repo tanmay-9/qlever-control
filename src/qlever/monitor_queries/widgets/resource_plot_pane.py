@@ -223,9 +223,9 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
     A column with a capacity uses it, so a light load stays low
     instead of filling the plot. A column without one uses its own
     readings, cut down to the `TOP_PERCENTILES` entry that `step`
-    picks. A rung that leaves the whole axis at zero (most readings
-    are zero on an idle disk) uses the rung above it instead, so a
-    stepped axis never shows every reading as one line along the
+    picks. A rung that leaves the whole axis below one unit (most
+    readings are zero on an idle disk) uses the rung above it instead,
+    so a stepped axis never shows every reading as one line along the
     ceiling. Zero when the window has none of the axis's columns,
     which tells the plot that side has nothing to draw.
     """
@@ -247,7 +247,9 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
             # Each series keeps its own percentile, so the taller line
             # is not pulled down by the shorter one's low readings.
             top = max(top, percentile(readings, TOP_PERCENTILES[rung]))
-        if top > 0:
+        # The ticks step by whole units, so a top below one draws the
+        # same 0..1 axis as a top of zero.
+        if top >= 1:
             break
     return top
 
