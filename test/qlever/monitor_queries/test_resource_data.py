@@ -695,12 +695,50 @@ def test_window_operation_outside_the_window_is_left_out(end_ms):
     assert "query_mean_ms" not in window.series
 
 
-def test_window_operation_in_a_bucket_with_no_sample_is_dropped():
-    # Bucket 1 got no resource sample, so it is not on the time grid
-    # and an operation there has nowhere to be drawn.
-    operations = [operation(1500, 800), operation(2500, 9999)]
+@pytest.mark.parametrize(
+    ("end_ms", "kept_at"),
+    [
+        # 700 ms from the sample at 3200, 1400 ms from the one at 1100.
+        (2500, 1),
+        # 900 ms from 1100, 1200 ms from 3200.
+        (2000, 0),
+        # 1050 ms from both, so the earlier one wins.
+        (2150, 0),
+    ],
+)
+def test_window_operation_with_no_sample_moves_to_the_nearest(end_ms, kept_at):
+    # Bucket 1 has no sample, so the operation moves to bucket 0 or 2.
+    operations = [operation(end_ms, 800)]
     window = build_window(SAMPLED, 1000, 5000, 4, operations=operations)
-    assert window.series["query_mean_ms"].values[0] == pytest.approx(800.0)
+    values = window.series["query_mean_ms"].values
+    assert values[kept_at] == pytest.approx(800.0)
+    assert isnan(values[1 - kept_at])
+
+
+@pytest.mark.parametrize(("end_ms", "kept"), [(5900, True), (6100, False)])
+def test_window_operation_moves_at_most_the_limit(end_ms, kept):
+    # A 19 s hole between samples, in one-second buckets. 5900 is 4.9 s
+    # from the sample at 1000, and 6100 is 5.1 s from it.
+    samples = [sample(ts_ms=1000), sample(ts_ms=20000)]
+    operations = [operation(end_ms, 800)]
+    window = build_window(samples, 0, 21000, 21, operations=operations)
+    assert ("query_mean_ms" in window.series) == kept
+
+
+def test_window_operation_with_no_sample_anywhere_is_left_out():
+    operations = [operation(1500, 800)]
+    window = build_window([], 1000, 5000, 4, operations=operations)
+    assert "query_mean_ms" not in window.series
+
+
+def test_window_with_more_buckets_than_samples_keeps_every_operation():
+    # A wide plot: a sample each second, cut into 150 ms buckets, so
+    # most buckets have none. Each operation sits between two samples.
+    samples = [sample(ts_ms=second * 1000) for second in range(60)]
+    operations = [operation(second * 1000 + 500, 100) for second in range(60)]
+    window = build_window(samples, 0, 60000, 400, operations=operations)
+    values = window.series["query_mean_ms"].values
+    assert len([value for value in values if not isnan(value)]) == 60
 
 
 def test_window_without_operations_omits_both_series():

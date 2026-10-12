@@ -363,7 +363,7 @@ QueryTable.stale > .datatable--header {
     background: $primary-lighten-2;
 }
 
-/* A control with nowhere to go loses its fill as well as its glyph */
+/* A control with nowhere to go loses its fill as well as its glyph. */
 
 .gutter-glyph:disabled {
     background: $panel;

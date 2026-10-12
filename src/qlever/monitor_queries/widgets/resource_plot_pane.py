@@ -224,9 +224,9 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
     A column with a capacity uses it, so a light load stays low
     instead of filling the plot. A column without one uses its own
     readings, cut down to the `TOP_PERCENTILES` entry that `step`
-    picks. A rung that leaves the whole axis at zero (most readings
-    are zero on an idle disk) uses the rung above it instead, so a
-    stepped axis never shows every reading as one line along the
+    picks. A rung that leaves the whole axis below one unit (most
+    readings are zero on an idle disk) uses the rung above it instead,
+    so a stepped axis never shows every reading as one line along the
     ceiling. Zero when the window has none of the axis's columns,
     which tells the plot that side has nothing to draw.
     """
@@ -248,7 +248,9 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
             # Each series keeps its own percentile, so the taller line
             # is not pulled down by the shorter one's low readings.
             top = max(top, percentile(readings, TOP_PERCENTILES[rung]))
-        if top > 0:
+        # The ticks step by whole units, so a top below one draws the
+        # same 0..1 axis as a top of zero.
+        if top >= 1:
             break
     return top
 
@@ -286,8 +288,7 @@ def next_step(
 DAY_S = 86_400
 
 # The gaps the x-axis may put between its ticks, in seconds, each one a
-# span people count in. No window is shorter than five minutes, so a
-# minute is the smallest needed.
+# span people count in.
 CLOCK_STEPS_S = (
     # 1, 2, 3, 5, 10, 15 and 30 minutes
     60,
@@ -329,12 +330,9 @@ def clock_step(span_s: float) -> int:
 def clock_ticks(start_s: float, end_s: float) -> tuple[list[float], list[str]]:
     """Ticks in equal steps back from the window's end, with labels.
 
-    The ticks are tied to the window's edges, so on Live they keep their
-    place while their labels change. Each label is the minute its tick
-    falls in, in local time. Time left over at the start gets a tick of
-    its own only when it spans half a step. A window of a day or more
-    also dates both edges, and a tick whose day differs from the one
-    before it.
+    Each label is the local minute its tick falls in. The leftover at
+    the start gets a tick only if it spans half a step and its minute
+    differs from the next tick's. Windows of a day or more show dates.
     """
     if end_s <= start_s:
         return [start_s], [format_clock(start_s * 1000, with_seconds=False)]
@@ -344,7 +342,10 @@ def clock_ticks(start_s: float, end_s: float) -> tuple[list[float], list[str]]:
     while tick_s >= start_s:
         positions.append(tick_s)
         tick_s -= step
-    if positions[-1] - start_s >= step / 2:
+    if (
+        positions[-1] - start_s >= step / 2
+        and start_s // 60 != positions[-1] // 60
+    ):
         positions.append(start_s)
     positions.reverse()
     show_dates = end_s - start_s >= DAY_S
