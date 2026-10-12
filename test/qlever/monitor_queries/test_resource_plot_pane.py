@@ -19,6 +19,7 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
     empty_note,
     label_width,
     line_color,
+    next_step,
     percentile,
     series_for_keys,
 )
@@ -118,8 +119,8 @@ def test_the_disk_plot_bounds_a_small_io_stall():
 
 
 def test_only_the_disk_plot_offers_the_step():
-    assert PLOTS[1].adjustable
-    assert not PLOTS[0].adjustable
+    assert PLOTS[1].adjustable_axis is PLOTS[1].left
+    assert PLOTS[0].adjustable_axis is None
 
 
 def test_percentile_of_a_hundred_is_the_largest_reading():
@@ -160,6 +161,66 @@ def test_axis_top_gives_each_series_its_own_percentile():
     )
     both = axis("read_bytes_per_s", "write_bytes_per_s", adjustable=True)
     assert axis_top(win, both, step=2) == 90.0
+
+
+def test_axis_top_of_a_rung_with_nothing_above_zero_is_the_rung_above():
+    # The 75th percentile of a mostly idle disk is 0, which would draw
+    # every reading as one line along the ceiling; the 90th is 9.
+    readings = (0.0,) * 8 + (9.0, 100.0)
+    win = window(series("read_bytes_per_s", readings))
+    stepped = axis("read_bytes_per_s", adjustable=True)
+    assert axis_top(win, stepped, step=2) == 9.0
+    assert axis_top(win, stepped, step=3) == 9.0
+
+
+def test_axis_top_of_one_idle_series_does_not_undo_the_step():
+    # Reads are idle but for one spike; writes are busy. The idle
+    # series must not climb to its spike and squash the busy one.
+    reads = (0.0,) * 9 + (500.0,)
+    writes = (10.0, 10.0, 11.0, 11.0, 12.0, 12.0, 13.0, 13.0, 14.0, 14.0)
+    win = window(
+        series("read_bytes_per_s", reads),
+        series("write_bytes_per_s", writes),
+    )
+    stepped = axis("read_bytes_per_s", "write_bytes_per_s", adjustable=True)
+    assert axis_top(win, stepped, step=3) == 13.0
+
+
+def test_next_step_lowers_to_the_next_rung_that_changes_the_top():
+    # With ten readings the 95th percentile is still the largest one,
+    # so lowering from the top skips that rung and lands on the 90th.
+    readings = tuple(float(step) for step in range(1, 10)) + (100.0,)
+    win = window(series("read_bytes_per_s", readings))
+    assert next_step(win, PLOTS[1], 0, -1) == 2
+
+
+def test_next_step_ends_the_ladder_where_the_top_stops_falling():
+    readings = (0.0,) * 8 + (9.0, 100.0)
+    win = window(series("read_bytes_per_s", readings))
+    assert next_step(win, PLOTS[1], 2, -1) is None
+
+
+def test_next_step_raises_to_the_first_step_with_the_next_top():
+    # The tops are 100, 100, 9 and 8, so raising from 9 skips step 1,
+    # which would show the same 100 as step 0.
+    readings = tuple(float(step) for step in range(1, 10)) + (100.0,)
+    win = window(series("read_bytes_per_s", readings))
+    assert next_step(win, PLOTS[1], 3, 1) == 2
+    assert next_step(win, PLOTS[1], 2, 1) == 0
+    assert next_step(win, PLOTS[1], 0, 1) is None
+
+
+def test_next_step_raises_to_step_0_when_every_top_is_the_same():
+    # With three readings every step shows 100, so a raise goes back
+    # to step 0 instead of staying stuck with the peak label.
+    win = window(series("read_bytes_per_s", (1.0, 2.0, 100.0)))
+    assert next_step(win, PLOTS[1], 2, 1) == 0
+
+
+def test_next_step_of_a_fixed_plot_is_none():
+    win = window(series("rss", (1.0,), total=32.9))
+    assert next_step(win, PLOTS[0], 0, -1) is None
+    assert next_step(win, PLOTS[0], 1, 1) is None
 
 
 def test_the_disk_plot_steps_its_rate_axis():

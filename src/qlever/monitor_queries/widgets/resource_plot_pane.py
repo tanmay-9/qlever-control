@@ -105,23 +105,28 @@ def buckets_for_width(width: int) -> int:
     return max(MIN_BUCKETS, usable_cols * 2)
 
 
-# Interior rows = pane height minus the two borders and the x-axis label
-# row. Aim for a tick every MIN_ROWS_PER_TICK rows, clamped.
-Y_PLOT_CHROME = 3
+# Data rows = pane height minus the two borders, the x-axis label row
+# and the top row, which holds the names. Aim for a tick every
+# MIN_ROWS_PER_TICK rows, clamped.
+Y_PLOT_CHROME = 4
 MIN_ROWS_PER_TICK = 2
 MIN_Y_TICKS = 2
 MAX_Y_TICKS = 8
 
 
-def tick_layout(height: int, max_ticks: int) -> tuple[int, int]:
+def tick_layout(
+    height: int, max_ticks: int, time_labels: bool
+) -> tuple[int, int]:
     """Pick the y-tick count and interior row gaps for a pane this tall.
 
     Returns (count, gaps), shared by both axes so ticks line up. Picks the
     most ticks whose leftover rows stay below one gap, so the space above
     the top tick never exceeds a tick interval. max_ticks caps the count
-    so the smaller axis keeps distinct labels.
+    so the smaller axis keeps distinct labels. A plot without
+    `time_labels` gives the clock row to the data.
     """
-    gaps = max(1, height - Y_PLOT_CHROME - 1)
+    chrome = Y_PLOT_CHROME if time_labels else Y_PLOT_CHROME - 1
+    gaps = max(1, height - chrome - 1)
     cap = min(MAX_Y_TICKS, max_ticks)
     count = MIN_Y_TICKS
     for candidate in range(MIN_Y_TICKS, cap + 1):
@@ -176,24 +181,63 @@ def axis_top(window: ResourceWindow, axis: Axis, step: int = 0) -> float:
     A column with a capacity uses it, so a light load stays low
     instead of filling the plot. A column without one uses its own
     readings, cut down to the `TOP_PERCENTILES` entry that `step`
-    picks. Zero when the window has none of the axis's columns, which
-    tells the plot that side has nothing to draw.
+    picks. A rung that leaves the whole axis at zero (most readings
+    are zero on an idle disk) uses the rung above it instead, so a
+    stepped axis never shows every reading as one line along the
+    ceiling. Zero when the window has none of the axis's columns,
+    which tells the plot that side has nothing to draw.
     """
     drawn = series_for_keys(window, axis.keys)
     if not drawn:
         return 0.0
-    percent = TOP_PERCENTILES[step] if axis.adjustable else 100
-    top = axis.min_top
-    for series in drawn:
-        if series.total is not None:
-            top = max(top, series.total)
-        else:
+    step = step if axis.adjustable else 0
+    # The zero check is on the whole axis, so one idle series does not
+    # climb to its spike while a busy one still has a top to give.
+    for rung in range(step, -1, -1):
+        top = axis.min_top
+        for series in drawn:
+            if series.total is not None:
+                top = max(top, series.total)
+                continue
             readings = [value for value in series.values if not isnan(value)]
+            if not readings:
+                continue
             # Each series keeps its own percentile, so the taller line
             # is not pulled down by the shorter one's low readings.
-            if readings:
-                top = max(top, percentile(readings, percent))
+            top = max(top, percentile(readings, TOP_PERCENTILES[rung]))
+        if top > 0:
+            break
     return top
+
+
+def next_step(
+    window: ResourceWindow, plot: Plot, step: int, direction: int
+) -> int | None:
+    """The rung to move to from `step`, or None when there is none.
+
+    `direction` is 1 to raise the top and -1 to lower it. Either way
+    it skips the steps that show the same top, so every press changes
+    the plot. None on a plot with no adjustable axis, and at either end.
+    """
+    axis = plot.adjustable_axis
+    if axis is None:
+        return None
+    tops = [
+        axis_top(window, axis, rung) for rung in range(len(TOP_PERCENTILES))
+    ]
+    if direction > 0:
+        # The top only falls as the step rises, so equal tops sit side
+        # by side. Go to the first step of the run above this one.
+        start = tops.index(tops[step])
+        if start > 0:
+            return tops.index(tops[start - 1])
+        # Every step above shows the same top, so go back to step 0,
+        # which also hides the peak label.
+        return 0 if step > 0 else None
+    for wanted in range(step + 1, len(TOP_PERCENTILES)):
+        if tops[wanted] < tops[step]:
+            return wanted
+    return None
 
 
 def label_width(
@@ -275,7 +319,7 @@ def clamp(
 
     plotext draws nothing at all for a point above the axis, which
     would look like the gap left by a restart. A flat line along the
-    top says the reading ran past it instead. The buckets that
+    ceiling says the reading ran past it instead. The buckets that
     reported nothing stay empty, and a side with no axis of its own
     has no ceiling to pull to.
     """
@@ -342,13 +386,16 @@ class Plot(NamedTuple):
     right: Axis
 
     @property
-    def adjustable(self) -> bool:
-        """Whether either side lets the reader step its top.
+    def adjustable_axis(self) -> Axis | None:
+        """The side that lets the reader step its top, if there is one.
 
         One side at most: the reader steps a single top, so two
         adjustable sides would move together under one control.
         """
-        return self.left.adjustable or self.right.adjustable
+        for axis in (self.left, self.right):
+            if axis.adjustable:
+                return axis
+        return None
 
 
 # One row per plot, in the order they are offered.
@@ -548,10 +595,10 @@ class ResourcePlotPane(PlotextPlot):
     ) -> tuple[float, float | None]:
         """Scale and label both y-axes and the x-axis for this window.
 
-        Returns the two axis maximums the labels anchor to. The right
-        one is None when the window has nothing to read against it, so
-        that axis gets no ticks. Labels are padded to `label_width`,
-        which lines a stack's gutters up and is zero on its own.
+        Each axis reaches one row above its top, which keeps the names
+        row clear of data. Returns the axis maximums the names sit at,
+        the right one None when it has nothing to read. Labels are
+        padded to `label_width` so a stack's gutters line up.
         """
         plt = self.plt
         left_top = axis_top(window, plot.left, self.top_step)
@@ -559,10 +606,13 @@ class ResourcePlotPane(PlotextPlot):
         # Cap the shared tick count by the smaller axis so its labels stay
         # distinct.
         smaller_top = min(left_top, right_top) if right_top > 0 else left_top
-        count, gaps = tick_layout(self.size.height, round(smaller_top) + 1)
+        count, gaps = tick_layout(
+            self.size.height, round(smaller_top) + 1, self.time_labels
+        )
         left_axis_max, left_positions, left_labels = axis_ticks(
             left_top, count, gaps
         )
+        left_axis_max = left_axis_max * (gaps + 1) / gaps
         plt.ylim(0, left_axis_max, yside="left")
         plt.yticks(left_positions, self.padded(left_labels), yside="left")
         right_axis_max = None
@@ -570,6 +620,7 @@ class ResourcePlotPane(PlotextPlot):
             right_axis_max, right_positions, right_labels = axis_ticks(
                 right_top, count, gaps
             )
+            right_axis_max = right_axis_max * (gaps + 1) / gaps
             plt.ylim(0, right_axis_max, yside="right")
             plt.yticks(
                 right_positions, self.padded(right_labels), yside="right"
@@ -671,6 +722,18 @@ class ResourcePlotPane(PlotextPlot):
                 alignment="center",
             )
 
+    def ceiling(self, axis_max: float | None) -> float | None:
+        """The value a reading above the axis is pulled down to.
+
+        The top data row, one row under the names. None when the side
+        has no axis, so nothing is pulled.
+        """
+        if axis_max is None:
+            return None
+        # The row count does not depend on the tick cap.
+        _, gaps = tick_layout(self.size.height, MAX_Y_TICKS, self.time_labels)
+        return axis_max * gaps / (gaps + 1)
+
     def draw_series(
         self,
         window: ResourceWindow,
@@ -680,11 +743,11 @@ class ResourcePlotPane(PlotextPlot):
     ) -> None:
         """Plot this plot's lines, or a note when it has none to draw.
 
-        A reading above its axis is clamped onto the top, so an axis
-        stepped down past a spike shows a flat line rather than a hole.
-        The lines are broken across each restart's downtime. Vlines mark
-        the server going down and coming back, and an index rebuild
-        starting and ending.
+        A reading above its axis is clamped onto the row under the top,
+        so an axis stepped down past a spike shows a flat line rather
+        than a hole. The lines are broken across each restart's
+        downtime. Vlines mark the server going down and coming back,
+        and an index rebuild starting and ending.
         """
         dark = self.app.current_theme.dark
         plt = self.plt
@@ -699,7 +762,10 @@ class ResourcePlotPane(PlotextPlot):
             for index, series in enumerate(series_for_keys(window, keys))
             if series.values
         ]
-        ceilings = {"left": left_axis_max, "right": right_axis_max}
+        ceilings = {
+            "left": self.ceiling(left_axis_max),
+            "right": self.ceiling(right_axis_max),
+        }
         for side, index, series in lines:
             times, values = break_at_restarts(
                 window.times_s,
