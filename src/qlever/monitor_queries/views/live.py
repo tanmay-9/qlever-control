@@ -429,11 +429,7 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.step_window(-1)
 
     def action_show_plot(self, step: int = 1) -> None:
-        """Show the resource plot, or step to the next or previous one.
-
-        The log's format is read now rather than at startup, since the
-        server may have begun writing it after this screen opened.
-        """
+        """Show the resource plot, or step to the next or previous one."""
         self.query_one(DetailSwitcher).show_plot(
             self.app.offered_plots(), step
         )
