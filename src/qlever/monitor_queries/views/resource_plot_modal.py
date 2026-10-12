@@ -51,13 +51,14 @@ def axis_top_controls(plot: Plot) -> list[GutterControl]:
     ]
 
 
-class ResourcePlotModal(ModalScreen):
+class ResourcePlotModal(ModalScreen[dict[str, int]]):
     """Shows the plots this log can carry, stacked, full screen.
 
     Opens on the window and each plot's axis top the inline pane holds,
-    so what the reader set is what the modal draws. After that the
-    screen keeps every pane up to date: Historic sends each window it
-    reads, and Live sends fresh readings on its timer.
+    so what the reader set is what the modal draws, and closes with each
+    plot's axis top as it was left, which the inline pane takes over. In
+    between, the screen keeps every pane up to date: Historic sends each
+    window it reads, and Live sends fresh readings on its timer.
     """
 
     BINDINGS = [
@@ -297,9 +298,16 @@ class ResourcePlotModal(ModalScreen):
                     self.query_one(f"#{pill_id}").set_class(shown, "-shown")
 
     def action_close(self) -> None:
-        """Close the modal, unless a prior event already closed it."""
+        """Close the modal, unless a prior event already closed it.
+
+        Each pane holds only its own plot's step, so they are gathered
+        into one dict for the inline pane.
+        """
         if self.is_current:
-            self.dismiss()
+            steps = dict(self.top_steps)
+            for pane in self.query(ResourcePlotPane):
+                steps[pane.plot.name] = pane.top_step
+            self.dismiss(steps)
 
     async def on_window_stepper_stepped(
         self, message: WindowStepper.Stepped

@@ -454,7 +454,8 @@ class LiveScreen(Screen, inherit_bindings=False):
                 plots=self.app.offered_plots(),
                 top_steps=pane.top_steps,
                 shown_plot=pane.plot.name,
-            )
+            ),
+            self.query_one(DetailSwitcher).set_top_steps,
         )
 
     def action_show_sparql(self) -> None:

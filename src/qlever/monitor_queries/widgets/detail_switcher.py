@@ -61,6 +61,10 @@ class DetailSwitcher(ContentSwitcher):
         pane = self.query_one(ResourcePlotPane)
         pane.step_top(direction)
 
+    def set_top_steps(self, steps: dict[str, int]) -> None:
+        """Take over the axis tops the full-screen view was closed with."""
+        self.query_one(ResourcePlotPane).top_steps = steps
+
     def show_sparql(self) -> None:
         """Switch to the SPARQL pane."""
         self.current = SPARQL_ID
