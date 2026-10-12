@@ -5,6 +5,7 @@ one plot can read them against each other. Getting the rows out of the
 resource log is `resource_reader.py`'s job.
 """
 
+from bisect import bisect_left
 from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -272,6 +273,10 @@ def bucket_index(
     return min(index, buckets - 1)
 
 
+# How far an operation may move to reach a bucket with a sample.
+NEAREST_SAMPLE_MS = 5_000
+
+
 def window_for_samples(
     samples: Iterable[Sample],
     operations: Iterable[CompletedQuery],
@@ -285,9 +290,10 @@ def window_for_samples(
     Samples arrive oldest first and may fall outside the window: those
     count towards events, so a restart just off the edge is not lost,
     but they get no bucket. An operation goes in the bucket its end
-    time falls in, and one landing where no sample did is left out,
-    since that bucket is not on the time grid. Only the buckets are
-    kept, so memory follows `buckets` and not the number of readings.
+    time falls in. If that bucket has no sample, it moves to the nearest
+    one that does, unless that is more than `NEAREST_SAMPLE_MS` away.
+    Only the buckets are kept, so memory follows `buckets` and not the
+    number of readings.
     """
     buckets = max(1, buckets)
     bucket_span_ms = (end_ms - start_ms) / buckets
@@ -317,20 +323,32 @@ def window_for_samples(
                         running[column.key][index] += raw
                     counts[column.key][index] += 1
 
-    # After the samples, so every bucket that has one is on the grid.
+    # The buckets holding a sample, which are the points the plot draws.
+    filled = [
+        index for index in range(buckets) if bucket_ts[index] is not None
+    ]
     for operation in operations:
         column = OPERATION_COLUMNS.get(operation.op_type)
         if column is not None and start_ms <= operation.end_ms <= end_ms:
             index = bucket_index(
                 operation.end_ms, start_ms, bucket_span_ms, buckets
             )
-            if bucket_ts[index] is not None:
-                running[column.key][index] += operation.duration_ms
-                counts[column.key][index] += 1
+            if bucket_ts[index] is None:
+                # No sample here, so use the nearest bucket that has one.
+                after = bisect_left(filled, index)
+                nearby = filled[max(0, after - 1) : after + 1]
+                if not nearby:
+                    continue
+                index = min(
+                    nearby,
+                    key=lambda near: abs(bucket_ts[near] - operation.end_ms),
+                )
+                moved_ms = abs(bucket_ts[index] - operation.end_ms)
+                if moved_ms > NEAREST_SAMPLE_MS:
+                    continue
+            running[column.key][index] += operation.duration_ms
+            counts[column.key][index] += 1
 
-    filled = [
-        index for index in range(buckets) if bucket_ts[index] is not None
-    ]
     series = {}
     for column in ALL_COLUMNS:
         # The required columns are in every version of the log, so
