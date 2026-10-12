@@ -14,12 +14,14 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
 from qlever.monitor_queries.models import ResourceWindow
+from qlever.monitor_queries.resource_reader import log_has_new_columns
 from qlever.monitor_queries.widgets.detail_switcher import (
     PLOT_ID,
     DetailSwitcher,
 )
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     ResourcePlotPane,
+    available_plots,
     next_step,
 )
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
@@ -173,9 +175,13 @@ class DetailRow(Horizontal):
         pane = self.query_one(ResourcePlotPane)
         self.watch(pane, "plot", self.sync_scale_arrows)
         self.watch(pane, "top_step", self.sync_scale_arrows)
-        # The window decides which rungs still lower the top.
+        # The window decides which rungs still lower the top, and a
+        # server that started later can bring the log format that
+        # offers the second plot.
         self.watch(pane, "window", self.sync_scale_arrows)
+        self.watch(pane, "window", self.sync_plot_arrows)
         self.sync_scale_arrows()
+        self.sync_plot_arrows()
 
     def sync_pane(self) -> None:
         """Mark which pane is showing, so CSS draws only its controls."""
@@ -192,6 +198,13 @@ class DetailRow(Horizontal):
             )
             glyph = self.query_one(f"#{name}-glyph", Button)
             glyph.disabled = wanted is None
+
+    def sync_plot_arrows(self) -> None:
+        """Grey out the plot arrows when the log offers one plot only."""
+        offered = available_plots(log_has_new_columns(self.app.resource_log))
+        for name in ("prev-plot", "next-plot"):
+            glyph = self.query_one(f"#{name}-glyph", Button)
+            glyph.disabled = len(offered) < 2
 
     def set_help_keys(self, key_for_action: Callable[[str], str]) -> None:
         """Name the key that runs each control, and the pane's own keys."""
