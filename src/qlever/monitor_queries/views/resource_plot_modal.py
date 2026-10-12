@@ -90,6 +90,10 @@ class ResourcePlotModal(ModalScreen):
             key_display="⇧ →",
             show=False,
         ),
+        Binding("up", "pick_plot(-1)", "Pick plot", show=False),
+        Binding("down", "pick_plot(1)", "Pick plot", show=False),
+        Binding("minus", "step_picked_top(-1)", "Plot scale", show=False),
+        Binding("plus", "step_picked_top", "Plot scale", show=False),
     ]
 
     def __init__(
@@ -105,6 +109,21 @@ class ResourcePlotModal(ModalScreen):
         self.window = window
         self.plots = plots
         self.top_steps = top_steps
+        # The plot the keys step, by name. None when no plot can step.
+        names = self.pickable_plot_names
+        self.picked = names[0] if names else None
+
+    @property
+    def pickable_plot_names(self) -> list[str]:
+        """The names of the plots the keys can pick, top to bottom.
+
+        Only a plot whose top can step is pickable.
+        """
+        return [
+            plot.name
+            for plot in self.plots
+            if plot.adjustable_axis is not None
+        ]
 
     def compose(self) -> ComposeResult:
         with Vertical(id="resource-plot-modal"):
@@ -124,10 +143,30 @@ class ResourcePlotModal(ModalScreen):
                     # so every plot starts at the same place in time.
                     with Vertical(classes="modal-gutter"):
                         if plot.adjustable_axis is not None:
-                            yield Static("", classes="axis-top-rail")
-                            for control in axis_top_controls(plot):
-                                yield gutter_control(control, "-modal")
-                            yield Static("", classes="axis-top-rail")
+                            raise_top, lower_top = axis_top_controls(plot)
+                            yield Static("╷", classes="axis-top-rail -above")
+                            # The keys that pick this plot from the one
+                            # above it and the one below it.
+                            pick_down = Static(
+                                "",
+                                id=f"{raise_top.name}-pick-key",
+                                classes="gutter-key -above",
+                            )
+                            pick_up = Static(
+                                "",
+                                id=f"{lower_top.name}-pick-key",
+                                classes="gutter-key",
+                            )
+                            for pill in (pick_down, pick_up):
+                                pill.tooltip = (
+                                    "Pick this plot, so the + and - keys"
+                                    " raise or lower its axis top"
+                                )
+                            yield pick_down
+                            yield gutter_control(raise_top, "-modal")
+                            yield gutter_control(lower_top, "-modal")
+                            yield pick_up
+                            yield Static("╵", classes="axis-top-rail -below")
                     yield ResourcePlotPane(
                         self.window,
                         plot,
@@ -149,6 +188,7 @@ class ResourcePlotModal(ModalScreen):
             lambda: self.call_after_refresh(self.sync_axis_top_arrows),
         )
         self.sync_axis_top_arrows()
+        self.sync_picked()
         # Label the controls with the keys that run them; CSS decides
         # when the labels show.
         self.query_one(WindowStepper).set_help_keys(
@@ -165,6 +205,19 @@ class ResourcePlotModal(ModalScreen):
                 action_key(self, "forward('snap_end')"),
             ),
         )
+        # Every plot's pills name their keys. The pick decides which show.
+        for plot in self.plots:
+            if plot.adjustable_axis is not None:
+                raise_top, lower_top = axis_top_controls(plot)
+                for pill_id, action in (
+                    (f"{raise_top.name}-key", "step_picked_top"),
+                    (f"{lower_top.name}-key", "step_picked_top(-1)"),
+                    (f"{raise_top.name}-pick-key", "pick_plot(1)"),
+                    (f"{lower_top.name}-pick-key", "pick_plot(-1)"),
+                ):
+                    self.query_one(f"#{pill_id}", Static).update(
+                        action_key(self, action)
+                    )
 
     def sync_top_row(self) -> None:
         """Show the screen beneath's window size, range and log edges."""
@@ -187,6 +240,21 @@ class ResourcePlotModal(ModalScreen):
                 pane.step_top(direction)
         self.sync_axis_top_arrows()
 
+    def action_step_picked_top(self, direction: int = 1) -> None:
+        """Raise (1) or lower (-1) the picked plot's left axis top."""
+        if self.picked is not None:
+            self.action_step_axis_top(self.picked, direction)
+
+    def action_pick_plot(self, direction: int) -> None:
+        """Pick the adjustable plot below (1) or above (-1) this one."""
+        if self.picked is None:
+            return
+        names = self.pickable_plot_names
+        index = names.index(self.picked) + direction
+        if 0 <= index < len(names):
+            self.picked = names[index]
+            self.sync_picked()
+
     def sync_axis_top_arrows(self) -> None:
         """Grey out an axis top arrow with nowhere left to go."""
         for pane in self.query(ResourcePlotPane):
@@ -198,6 +266,30 @@ class ResourcePlotModal(ModalScreen):
                     )
                     glyph = self.query_one(f"#{control.name}-glyph", Button)
                     glyph.disabled = wanted is None
+
+    def sync_picked(self) -> None:
+        """Mark the picked plot, and show the keys that reach each plot.
+
+        A pill shows only where its key does something: `+` and `-` on the
+        picked plot, `↓` atop the plot below it and `↑` under the one above.
+        """
+        if self.picked is None:
+            return
+        names = self.pickable_plot_names
+        picked_index = names.index(self.picked)
+        for pane in self.query(ResourcePlotPane):
+            pane.parent.set_class(pane.plot.name == self.picked, "-picked")
+            if pane.plot.name in names:
+                # 0 for the picked plot, 1 for the one below it, -1 above.
+                offset = names.index(pane.plot.name) - picked_index
+                raise_top, lower_top = axis_top_controls(pane.plot)
+                for pill_id, shown in (
+                    (f"{raise_top.name}-key", offset == 0),
+                    (f"{lower_top.name}-key", offset == 0),
+                    (f"{raise_top.name}-pick-key", offset == 1),
+                    (f"{lower_top.name}-pick-key", offset == -1),
+                ):
+                    self.query_one(f"#{pill_id}").set_class(shown, "-shown")
 
     def action_close(self) -> None:
         """Close the modal, unless a prior event already closed it."""
