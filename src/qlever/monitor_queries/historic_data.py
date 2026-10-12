@@ -37,7 +37,7 @@ DURATION_UNKNOWN = -1
 
 
 class LoggedQuery(NamedTuple):
-    """One SPARQL operation observed in the log over the current window.
+    """One SPARQL query observed in the log over the current window.
 
     `end_ms` is `None` when the query started but has not ended yet,
     either because it is still running or the server crashed before
