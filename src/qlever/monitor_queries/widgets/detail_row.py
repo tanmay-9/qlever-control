@@ -173,9 +173,12 @@ class DetailRow(Horizontal):
         pane = self.query_one(ResourcePlotPane)
         self.watch(pane, "plot", self.sync_scale_arrows)
         self.watch(pane, "top_steps", self.sync_scale_arrows)
-        # The window decides which rungs still lower the top.
+        # The window decides which rungs still lower the top, and a
+        # restarted server can start logging what a further plot needs.
         self.watch(pane, "window", self.sync_scale_arrows)
+        self.watch(pane, "window", self.sync_plot_arrows)
         self.sync_scale_arrows()
+        self.sync_plot_arrows()
 
     def sync_pane(self) -> None:
         """Mark which pane is showing, so CSS draws only its controls."""
@@ -192,6 +195,12 @@ class DetailRow(Horizontal):
             )
             glyph = self.query_one(f"#{name}-glyph", Button)
             glyph.disabled = wanted is None
+
+    def sync_plot_arrows(self) -> None:
+        """Grey out the plot arrows when the logs offer one plot only."""
+        single = len(self.app.offered_plots()) < 2
+        for name in ("prev-plot", "next-plot"):
+            self.query_one(f"#{name}-glyph", Button).disabled = single
 
     def set_help_keys(self, key_for_action: Callable[[str], str]) -> None:
         """Name the key that runs each control, and the pane's own keys."""
