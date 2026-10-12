@@ -21,9 +21,9 @@ from qlever.monitor_queries.widgets.detail_row import (
 )
 from qlever.monitor_queries.widgets.footer import Footer
 from qlever.monitor_queries.widgets.resource_plot_pane import (
-    TOP_PERCENTILES,
     Plot,
     ResourcePlotPane,
+    next_step,
 )
 from qlever.monitor_queries.widgets.window_range import WindowRange
 from qlever.monitor_queries.widgets.window_stepper import WindowStepper
@@ -123,7 +123,7 @@ class ResourcePlotModal(ModalScreen):
                     # A plot with nothing to adjust keeps an empty column,
                     # so every plot starts at the same place in time.
                     with Vertical(classes="modal-gutter"):
-                        if plot.adjustable:
+                        if plot.adjustable_axis is not None:
                             yield Static("", classes="axis-top-rail")
                             for control in axis_top_controls(plot):
                                 yield gutter_control(control, "-modal")
@@ -140,6 +140,13 @@ class ResourcePlotModal(ModalScreen):
         """Follow the window the panes are handed, and label the arrows."""
         self.watch(
             self.query_one(ResourcePlotPane), "window", self.sync_top_row
+        )
+        # The window decides which steps still change the top. Wait until
+        # the app has handed it to every pane, not just this first one.
+        self.watch(
+            self.query_one(ResourcePlotPane),
+            "window",
+            lambda: self.call_after_refresh(self.sync_axis_top_arrows),
         )
         self.sync_axis_top_arrows()
         # Label the controls with the keys that run them; CSS decides
@@ -183,15 +190,14 @@ class ResourcePlotModal(ModalScreen):
     def sync_axis_top_arrows(self) -> None:
         """Grey out an axis top arrow with nowhere left to go."""
         for pane in self.query(ResourcePlotPane):
-            if pane.plot.adjustable:
+            if pane.plot.adjustable_axis is not None:
                 raise_top, lower_top = axis_top_controls(pane.plot)
-                last_step = len(TOP_PERCENTILES) - 1
-                self.query_one(f"#{raise_top.name}-glyph", Button).disabled = (
-                    pane.top_step == 0
-                )
-                self.query_one(f"#{lower_top.name}-glyph", Button).disabled = (
-                    pane.top_step == last_step
-                )
+                for control, direction in ((raise_top, 1), (lower_top, -1)):
+                    wanted = next_step(
+                        pane.window, pane.plot, pane.top_step, direction
+                    )
+                    glyph = self.query_one(f"#{control.name}-glyph", Button)
+                    glyph.disabled = wanted is None
 
     def action_close(self) -> None:
         """Close the modal, unless a prior event already closed it."""

@@ -59,8 +59,6 @@ class DetailSwitcher(ContentSwitcher):
         if self.current != PLOT_ID:
             return
         pane = self.query_one(ResourcePlotPane)
-        if not pane.plot.adjustable:
-            return
         pane.step_top(direction)
 
     def show_sparql(self) -> None:
