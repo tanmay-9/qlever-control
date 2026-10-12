@@ -102,6 +102,7 @@ class ResourcePlotModal(ModalScreen):
         window: ResourceWindow,
         plots: list[Plot],
         top_steps: dict[str, int],
+        shown_plot: str,
     ) -> None:
         super().__init__()
         # The screen that opened the modal, which owns the window.
@@ -109,9 +110,13 @@ class ResourcePlotModal(ModalScreen):
         self.window = window
         self.plots = plots
         self.top_steps = top_steps
-        # The plot the keys step, by name. None when no plot can step.
+        # The plot the keys step, by name. It starts on the plot the inline
+        # pane shows when that one can step. None when no plot can step.
         names = self.pickable_plot_names
-        self.picked = names[0] if names else None
+        if shown_plot in names:
+            self.picked = shown_plot
+        else:
+            self.picked = names[0] if names else None
 
     @property
     def pickable_plot_names(self) -> list[str]:

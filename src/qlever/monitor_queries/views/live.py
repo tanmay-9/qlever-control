@@ -450,12 +450,14 @@ class LiveScreen(Screen, inherit_bindings=False):
         pane is showing. The resource timer reaches the modal's panes as
         well, so they keep rolling.
         """
+        pane = self.query_one(ResourcePlotPane)
         self.app.push_screen(
             ResourcePlotModal(
                 owner=self,
                 window=self.live_resource_window(),
                 plots=self.app.offered_plots(),
-                top_steps=self.query_one(ResourcePlotPane).top_steps,
+                top_steps=pane.top_steps,
+                shown_plot=pane.plot.name,
             )
         )
 

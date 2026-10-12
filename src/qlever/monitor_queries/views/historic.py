@@ -549,12 +549,14 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Shows every plot this log can carry, on the readings the inline
         plot is showing.
         """
+        pane = self.query_one(ResourcePlotPane)
         self.app.push_screen(
             ResourcePlotModal(
                 owner=self,
                 window=self.resource_window,
                 plots=self.app.offered_plots(),
-                top_steps=self.query_one(ResourcePlotPane).top_steps,
+                top_steps=pane.top_steps,
+                shown_plot=pane.plot.name,
             )
         )
 
