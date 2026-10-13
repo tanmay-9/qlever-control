@@ -76,7 +76,8 @@ def container_memory_to_bytes(memory_string: str) -> int:
 
 def sample_container(system: str, container: str) -> Sample:
     """
-    One RSS+CPU read via `<system> stats --no-stream` on a named container.
+    One reading of the memory and CPU usage of `container`, via
+    `<system> stats --no-stream`. Empty if it cannot be read.
     """
     try:
         output = run_command(
@@ -154,9 +155,11 @@ class ResourceMonitor:
         self.interval = interval
         self.peak_rss = 0
         self.worker_proc = None
+        self.log_path = None
         self.log_file = None
         self.stop_event = threading.Event()
-        self.start_time = 0
+        self.start_time = 0.0
+        self.thread = None
 
     @classmethod
     def from_args(cls, args) -> ResourceMonitor:
