@@ -18,11 +18,3 @@ class BaseStatusCommand(QleverStatusCommand):
         return (
             "Show the processes of this graph database running on this machine"
         )
-
-    def additional_arguments(self, subparser) -> None:
-        subparser.add_argument(
-            "--cmdline-regex",
-            default=self.default_regex(),
-            help="Show only processes where the command "
-            "line matches this regex",
-        )

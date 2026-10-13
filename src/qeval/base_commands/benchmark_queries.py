@@ -20,10 +20,3 @@ class BaseBenchmarkQueriesCommand(QleverBenchmarkQueriesCommand):
     def can_clear_cache(self, args, engine: str | None) -> bool:
         # Clearing the cache before each query only works for QLever.
         return False
-
-    def execute(self, args) -> bool:
-        args.sparql_endpoint = (
-            args.sparql_endpoint
-            or f"{args.host_name}:{args.port}{args.endpoint_path}"
-        )
-        return super().execute(args)
