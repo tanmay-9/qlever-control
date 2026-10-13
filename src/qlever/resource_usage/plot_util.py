@@ -8,11 +8,17 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from qlever.log import log
 
 # One shaded region of the plot: name, start and end in seconds.
 BandType = tuple[str, float, float]
+
+# The engine-specific parts of the plot, called with `args` and the path
+# of the index log.
+OverlayType = Callable[[Any, Path], list[BandType]]
+SubtitleType = Callable[[Any, Path], str | None]
 
 # Separator between the fields of a subtitle.
 SUBTITLE_SEPARATOR = "   |   "
@@ -40,9 +46,8 @@ def render_usage_plot_if_installed(
     args,
     *,
     plot_only: bool,
-    engine_overlay: Callable[..., list[BandType]] | None = None,
-    engine_subtitle: Callable[..., str | None] | None = None,
-    output_dir: Path | None = None,
+    engine_overlay: OverlayType | None = None,
+    engine_subtitle: SubtitleType | None = None,
 ) -> Path | None:
     """
     Render the resource-usage plot with `usage_plot.render_usage_plot`.
@@ -70,5 +75,4 @@ def render_usage_plot_if_installed(
         args,
         engine_overlay=engine_overlay,
         engine_subtitle=engine_subtitle,
-        output_dir=output_dir,
     )

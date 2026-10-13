@@ -4,7 +4,6 @@ import csv
 import json
 import re
 import warnings
-from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -16,7 +15,12 @@ matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 
 from qlever.log import log
-from qlever.resource_usage.plot_util import SUBTITLE_SEPARATOR, BandType
+from qlever.resource_usage.plot_util import (
+    SUBTITLE_SEPARATOR,
+    BandType,
+    OverlayType,
+    SubtitleType,
+)
 from qlever.util import (
     iter_permutation_phases,
     parse_phase_markers,
@@ -332,8 +336,8 @@ def write_usage_plot(
 def render_usage_plot(
     args,
     *,
-    engine_overlay: Callable[..., list[BandType]] | None = None,
-    engine_subtitle: Callable[..., str | None] | None = None,
+    engine_overlay: OverlayType | None = None,
+    engine_subtitle: SubtitleType | None = None,
     output_dir: Path | None = None,
 ) -> Path | None:
     """

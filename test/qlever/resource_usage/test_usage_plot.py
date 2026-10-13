@@ -18,6 +18,13 @@ from qlever.resource_usage.usage_plot import (  # noqa: E402
 )
 
 
+def write_log(tmp_path, lines):
+    """Write an index-log file from full timestamped lines."""
+    path = tmp_path / "index-log.txt"
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
 @pytest.mark.parametrize(
     "seconds,expected",
     [
@@ -33,60 +40,6 @@ from qlever.resource_usage.usage_plot import (  # noqa: E402
 )
 def test_pick_time_unit(seconds, expected):
     assert pick_time_unit(seconds) == expected
-
-
-def test_read_usage_tsv_parses_columns_and_blank_as_nan(tmp_path):
-    path = tmp_path / "data.resource-usage-log.tsv"
-    path.write_text("elapsed_s\trss\tcpu_percent\n1.0\t100\t5.0\n2.0\t\t6.0\n")
-    data = read_usage_tsv(path)
-    assert set(data) == {"elapsed_s", "rss", "cpu_percent"}
-    np.testing.assert_array_equal(data["elapsed_s"], np.array([1.0, 2.0]))
-    assert data["rss"][0] == 100
-    assert np.isnan(data["rss"][1])
-    np.testing.assert_array_equal(data["cpu_percent"], np.array([5.0, 6.0]))
-
-
-def test_read_usage_tsv_header_only(tmp_path):
-    path = tmp_path / "data.tsv"
-    path.write_text("elapsed_s\trss\tcpu_percent\n")
-    data = read_usage_tsv(path)
-    assert len(data["elapsed_s"]) == 0
-
-
-def test_read_usage_tsv_empty_file(tmp_path):
-    path = tmp_path / "data.tsv"
-    path.write_text("")
-    assert read_usage_tsv(path) == {}
-
-
-def test_downsample_for_plot_returns_input_when_within_budget():
-    data = {
-        "elapsed_s": np.arange(5.0),
-        "rss": np.arange(5.0),
-        "cpu_percent": np.arange(5.0),
-    }
-    assert downsample_for_plot(data, 10) is data
-
-
-def test_downsample_for_plot_caps_points_and_keeps_peak():
-    data = {
-        "elapsed_s": np.arange(10.0),
-        "rss": np.array([1, 2, 3, 99, 4, 5, 6, 7, 8, 9], dtype=float),
-        "cpu_percent": np.zeros(10),
-    }
-    out = downsample_for_plot(data, 3)
-    assert len(out["elapsed_s"]) <= 3
-    # nanmax bucketing must preserve the global peak exactly.
-    assert np.nanmax(out["rss"]) == 99
-    # elapsed_s uses nanmin, so the first bucket starts at the origin.
-    assert out["elapsed_s"][0] == 0.0
-
-
-def write_log(tmp_path, lines):
-    """Write an index-log file from full timestamped lines."""
-    path = tmp_path / "index-log.txt"
-    path.write_text("\n".join(lines) + "\n")
-    return path
 
 
 @pytest.mark.parametrize(
@@ -152,6 +105,53 @@ def test_build_plot_subtitle_invalid_settings_json(tmp_path):
     log_path.write_text("")
     # Malformed JSON must not raise; the batch part is simply omitted.
     assert build_plot_subtitle(log_path, "", "not-json") is None
+
+
+def test_read_usage_tsv_parses_columns_and_blank_as_nan(tmp_path):
+    path = tmp_path / "data.resource-usage-log.tsv"
+    path.write_text("elapsed_s\trss\tcpu_percent\n1.0\t100\t5.0\n2.0\t\t6.0\n")
+    data = read_usage_tsv(path)
+    assert set(data) == {"elapsed_s", "rss", "cpu_percent"}
+    np.testing.assert_array_equal(data["elapsed_s"], np.array([1.0, 2.0]))
+    assert data["rss"][0] == 100
+    assert np.isnan(data["rss"][1])
+    np.testing.assert_array_equal(data["cpu_percent"], np.array([5.0, 6.0]))
+
+
+def test_read_usage_tsv_header_only(tmp_path):
+    path = tmp_path / "data.tsv"
+    path.write_text("elapsed_s\trss\tcpu_percent\n")
+    data = read_usage_tsv(path)
+    assert len(data["elapsed_s"]) == 0
+
+
+def test_read_usage_tsv_empty_file(tmp_path):
+    path = tmp_path / "data.tsv"
+    path.write_text("")
+    assert read_usage_tsv(path) == {}
+
+
+def test_downsample_for_plot_returns_input_when_within_budget():
+    data = {
+        "elapsed_s": np.arange(5.0),
+        "rss": np.arange(5.0),
+        "cpu_percent": np.arange(5.0),
+    }
+    assert downsample_for_plot(data, 10) is data
+
+
+def test_downsample_for_plot_caps_points_and_keeps_peak():
+    data = {
+        "elapsed_s": np.arange(10.0),
+        "rss": np.array([1, 2, 3, 99, 4, 5, 6, 7, 8, 9], dtype=float),
+        "cpu_percent": np.zeros(10),
+    }
+    out = downsample_for_plot(data, 3)
+    assert len(out["elapsed_s"]) <= 3
+    # nanmax bucketing must preserve the global peak exactly.
+    assert np.nanmax(out["rss"]) == 99
+    # elapsed_s uses nanmin, so the first bucket starts at the origin.
+    assert out["elapsed_s"][0] == 0.0
 
 
 def test_compute_phase_boundaries_missing_file(tmp_path):
@@ -274,4 +274,38 @@ def test_render_usage_plot_falls_back_to_old_tsv_name(tmp_path):
     )
     plot_path = render("data", tmp_path)
     assert plot_path == tmp_path / "data.resource-usage-plot.png"
+    assert plot_path.exists()
+
+
+def test_render_usage_plot_passes_args_and_log_to_engine_hooks(tmp_path):
+    # Another engine passes its own hooks and gets `<dataset>.<engine>`
+    # file names.
+    tsv_path = tmp_path / "data.testengine.index.resource-usage-log.tsv"
+    tsv_path.write_text(
+        "elapsed_s\trss\tcpu_percent\n1.0\t100\t5.0\n2.0\t200\t6.0\n"
+    )
+    received = {}
+
+    def overlay(args, log_path):
+        received["overlay"] = (args, log_path)
+        return [("Load", 0.0, 1.0)]
+
+    def subtitle(args, log_path):
+        received["subtitle"] = (args, log_path)
+        return "testengine v1"
+
+    args = plot_args("data")
+    args.engine_short_name = "testengine"
+    plot_path = render_usage_plot(
+        args,
+        engine_overlay=overlay,
+        engine_subtitle=subtitle,
+        output_dir=tmp_path,
+    )
+    log_path = tmp_path / "data.index-log.txt"
+    assert received == {
+        "overlay": (args, log_path),
+        "subtitle": (args, log_path),
+    }
+    assert plot_path == tmp_path / "data.testengine.resource-usage-plot.png"
     assert plot_path.exists()
