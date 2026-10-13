@@ -70,6 +70,7 @@ from qlever.monitor_queries.widgets.resource_plot_pane import ResourcePlotPane
 from qlever.monitor_queries.widgets.selected_window import SelectedWindow
 from qlever.monitor_queries.widgets.timeline import Timeline
 from qlever.monitor_queries.widgets.timeline_row import TimelineRow
+from qlever.monitor_queries.widgets.window_arrows import WindowArrows
 from qlever.monitor_queries.widgets.window_stepper import (
     WindowStepper,
     available_presets,
@@ -812,11 +813,11 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Recenter the window on the clicked timeline position."""
         self.center_window_at(message.center_ms)
 
-    def on_timeline_row_shifted(self, message: TimelineRow.Shifted) -> None:
+    def on_window_arrows_shifted(self, message: WindowArrows.Shifted) -> None:
         """Shift the window when a timeline arrow is clicked."""
         self.shift_window(message.direction)
 
-    def on_timeline_row_jumped(self, message: TimelineRow.Jumped) -> None:
+    def on_window_arrows_jumped(self, message: WindowArrows.Jumped) -> None:
         """Jump to a log edge when a jump arrow is clicked."""
         if message.direction < 0:
             self.action_snap_start()

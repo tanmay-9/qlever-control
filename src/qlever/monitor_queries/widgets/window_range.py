@@ -6,37 +6,20 @@ gives the same shift and jump controls around the range they move.
 
 from __future__ import annotations
 
-from textual import events
 from textual.app import ComposeResult
-from textual.containers import Horizontal
-from textual.message import Message
 from textual.widgets import Static
 
 from qlever.monitor_queries.live_data import current_ms
 from qlever.monitor_queries.util import format_range
+from qlever.monitor_queries.widgets.window_arrows import WindowArrows
 
 
-class WindowRange(Horizontal):
+class WindowRange(WindowArrows):
     """The range as `« ◄ 10:02:00 → 10:17:00 ► »`, arrows optional.
 
-    A window that cannot move, as on Live, shows the range alone.
+    A window that cannot move, as on Live, shows the range alone, and
+    the arrow methods must not be called.
     """
-
-    can_focus = False
-
-    class Shifted(Message):
-        """Posted when an arrow is clicked; -1 earlier, +1 later."""
-
-        def __init__(self, direction: int) -> None:
-            super().__init__()
-            self.direction = direction
-
-    class Jumped(Message):
-        """Posted when a jump arrow is clicked; -1 to start, +1 to end."""
-
-        def __init__(self, direction: int) -> None:
-            super().__init__()
-            self.direction = direction
 
     def __init__(self, movable: bool) -> None:
         """Remember whether to draw the arrows."""
@@ -73,37 +56,3 @@ class WindowRange(Horizontal):
         self.query_one("#range-text", Static).update(
             format_range(start_ms, end_ms, current_ms())
         )
-
-    def set_edges(self, at_start: bool, at_end: bool) -> None:
-        """Grey both arrows on a side the window cannot move toward."""
-        if not self.movable:
-            return
-        for arrow in ("#jump-start", "#shift-earlier"):
-            self.query_one(arrow, Static).disabled = at_start
-        for arrow in ("#shift-later", "#jump-end"):
-            self.query_one(arrow, Static).disabled = at_end
-
-    def set_help_keys(
-        self, shift: tuple[str, str], jump: tuple[str, str]
-    ) -> None:
-        """Name the keys on the shift arrows and on the jump arrows."""
-        if not self.movable:
-            return
-        self.query_one("#shift-earlier-key", Static).update(shift[0])
-        self.query_one("#shift-later-key", Static).update(shift[1])
-        self.query_one("#jump-start-key", Static).update(jump[0])
-        self.query_one("#jump-end-key", Static).update(jump[1])
-
-    def on_click(self, event: events.Click) -> None:
-        """Translate an arrow click into a Shifted or Jumped message."""
-        if event.widget is None or event.widget.disabled:
-            return
-        clicked = event.widget.id
-        if clicked == "shift-earlier":
-            self.post_message(self.Shifted(-1))
-        elif clicked == "shift-later":
-            self.post_message(self.Shifted(1))
-        elif clicked == "jump-start":
-            self.post_message(self.Jumped(-1))
-        elif clicked == "jump-end":
-            self.post_message(self.Jumped(1))

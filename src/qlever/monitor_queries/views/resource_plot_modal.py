@@ -25,6 +25,7 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
     ResourcePlotPane,
     next_step,
 )
+from qlever.monitor_queries.widgets.window_arrows import WindowArrows
 from qlever.monitor_queries.widgets.window_range import WindowRange
 from qlever.monitor_queries.widgets.window_stepper import WindowStepper
 
@@ -201,16 +202,18 @@ class ResourcePlotModal(ModalScreen[dict[str, int]]):
             action_key(self, "forward('cycle_window_back')"),
             action_key(self, "forward('cycle_window')"),
         )
-        self.query_one(WindowRange).set_help_keys(
-            shift=(
-                action_key(self, "forward('shift_earlier')"),
-                action_key(self, "forward('shift_later')"),
-            ),
-            jump=(
-                action_key(self, "forward('snap_start')"),
-                action_key(self, "forward('snap_end')"),
-            ),
-        )
+        window_range = self.query_one(WindowRange)
+        if window_range.movable:
+            window_range.set_help_keys(
+                shift=(
+                    action_key(self, "forward('shift_earlier')"),
+                    action_key(self, "forward('shift_later')"),
+                ),
+                jump=(
+                    action_key(self, "forward('snap_start')"),
+                    action_key(self, "forward('snap_end')"),
+                ),
+            )
         # Every plot's pills name their keys. The pick decides which show.
         for plot in self.plots:
             if plot.adjustable_axis is not None:
@@ -318,8 +321,8 @@ class ResourcePlotModal(ModalScreen[dict[str, int]]):
         else:
             await self.action_forward("cycle_window_back")
 
-    async def on_window_range_shifted(
-        self, message: WindowRange.Shifted
+    async def on_window_arrows_shifted(
+        self, message: WindowArrows.Shifted
     ) -> None:
         """Shift the window when a shift arrow is clicked."""
         if message.direction > 0:
@@ -327,8 +330,8 @@ class ResourcePlotModal(ModalScreen[dict[str, int]]):
         else:
             await self.action_forward("shift_earlier")
 
-    async def on_window_range_jumped(
-        self, message: WindowRange.Jumped
+    async def on_window_arrows_jumped(
+        self, message: WindowArrows.Jumped
     ) -> None:
         """Jump to a log edge when a jump arrow is clicked."""
         if message.direction > 0:
