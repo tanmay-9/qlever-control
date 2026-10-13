@@ -286,7 +286,7 @@ def parse_command_line() -> argparse.Namespace:
         script_name="qlever",
         engine_short_name="qlever",
         engine_display_name="QLever",
-        endpoint_path="",
+        endpoint_path="/",
         main_command_name="qlever",
     )
 
