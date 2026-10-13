@@ -8,23 +8,13 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("matplotlib")
 
 from qlever.resource_usage.usage_plot import (  # noqa: E402
-    bands_from_durations,
     build_plot_subtitle,
     compute_phase_boundaries,
     downsample_for_plot,
-    overlay,
     pick_time_unit,
     read_usage_tsv,
     render_usage_plot,
-    subtitle,
 )
-
-
-def write_log(tmp_path, lines):
-    """Write an index-log file from full timestamped lines."""
-    path = tmp_path / "index-log.txt"
-    path.write_text("\n".join(lines) + "\n")
-    return path
 
 
 @pytest.mark.parametrize(
@@ -42,47 +32,6 @@ def write_log(tmp_path, lines):
 )
 def test_pick_time_unit(seconds, expected):
     assert pick_time_unit(seconds) == expected
-
-
-@pytest.mark.parametrize(
-    "triples,expected_fragment",
-    [
-        (1_000_000, "batch = 1M triples"),
-        (5_000_000, "batch = 5M triples"),
-        (2_500_000, "batch = 2.5M triples"),
-        (1_000, "batch = 1K triples"),
-        (50_000, "batch = 50K triples"),
-        (500, "batch = 500 triples"),
-    ],
-)
-def test_build_plot_subtitle_batch_formatting(
-    triples, expected_fragment, tmp_path
-):
-    log_path = tmp_path / "index-log.txt"
-    log_path.write_text("")
-    settings_json = f'{{"num-triples-per-batch": {triples}}}'
-    subtitle = build_plot_subtitle(log_path, "", settings_json)
-    assert subtitle == expected_fragment
-
-
-def test_build_plot_subtitle_stxxl(tmp_path):
-    log_path = tmp_path / "index-log.txt"
-    log_path.write_text("")
-    subtitle = build_plot_subtitle(log_path, "5G", "{}")
-    assert subtitle == "STXXL = 5G"
-
-
-def test_build_plot_subtitle_no_values(tmp_path):
-    log_path = tmp_path / "index-log.txt"
-    log_path.write_text("")
-    assert build_plot_subtitle(log_path, "", "{}") is None
-
-
-def test_build_plot_subtitle_invalid_settings_json(tmp_path):
-    log_path = tmp_path / "index-log.txt"
-    log_path.write_text("")
-    # Malformed JSON must not raise; the batch part is simply omitted.
-    assert build_plot_subtitle(log_path, "", "not-json") is None
 
 
 def test_read_usage_tsv_parses_columns_and_blank_as_nan(tmp_path):
@@ -130,6 +79,54 @@ def test_downsample_for_plot_caps_points_and_keeps_peak():
     assert np.nanmax(out["rss"]) == 99
     # elapsed_s uses nanmin, so the first bucket starts at the origin.
     assert out["elapsed_s"][0] == 0.0
+
+
+def write_log(tmp_path, lines):
+    """Write an index-log file from full timestamped lines."""
+    path = tmp_path / "index-log.txt"
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+@pytest.mark.parametrize(
+    "triples,expected_fragment",
+    [
+        (1_000_000, "batch = 1M triples"),
+        (5_000_000, "batch = 5M triples"),
+        (2_500_000, "batch = 2.5M triples"),
+        (1_000, "batch = 1K triples"),
+        (50_000, "batch = 50K triples"),
+        (500, "batch = 500 triples"),
+    ],
+)
+def test_build_plot_subtitle_batch_formatting(
+    triples, expected_fragment, tmp_path
+):
+    log_path = tmp_path / "index-log.txt"
+    log_path.write_text("")
+    settings_json = f'{{"num-triples-per-batch": {triples}}}'
+    subtitle = build_plot_subtitle(log_path, "", settings_json)
+    assert subtitle == expected_fragment
+
+
+def test_build_plot_subtitle_stxxl(tmp_path):
+    log_path = tmp_path / "index-log.txt"
+    log_path.write_text("")
+    subtitle = build_plot_subtitle(log_path, "5G", "{}")
+    assert subtitle == "STXXL = 5G"
+
+
+def test_build_plot_subtitle_no_values(tmp_path):
+    log_path = tmp_path / "index-log.txt"
+    log_path.write_text("")
+    assert build_plot_subtitle(log_path, "", "{}") is None
+
+
+def test_build_plot_subtitle_invalid_settings_json(tmp_path):
+    log_path = tmp_path / "index-log.txt"
+    log_path.write_text("")
+    # Malformed JSON must not raise; the batch part is simply omitted.
+    assert build_plot_subtitle(log_path, "", "not-json") is None
 
 
 def test_compute_phase_boundaries_missing_file(tmp_path):
@@ -214,13 +211,6 @@ def test_compute_phase_boundaries_skips_incomplete_phase(tmp_path):
     assert phases == {}
 
 
-def test_bands_from_durations_lays_phases_back_to_back():
-    bands = bands_from_durations(
-        {"Load": 10.0, "Optimize": 5.0, "TOTAL time": 15.0}
-    )
-    assert bands == [("Load", 0.0, 10.0), ("Optimize", 10.0, 15.0)]
-
-
 def plot_args(name):
     """The `args` attributes that `render_usage_plot` reads."""
     return SimpleNamespace(
@@ -235,12 +225,7 @@ def plot_args(name):
 
 def render(name, tmp_path):
     """Render a QLever usage plot for `name` in `tmp_path`."""
-    return render_usage_plot(
-        plot_args(name),
-        engine_overlay=overlay,
-        engine_subtitle=subtitle,
-        output_dir=tmp_path,
-    )
+    return render_usage_plot(plot_args(name), output_dir=tmp_path)
 
 
 def test_render_usage_plot_missing_tsv(tmp_path):

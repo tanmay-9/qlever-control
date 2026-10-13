@@ -15,6 +15,7 @@ matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 
 from qlever.log import log
+from qlever.resource_usage.plot_util import SUBTITLE_SEPARATOR, BandType
 from qlever.util import (
     iter_permutation_phases,
     parse_git_hash,
@@ -23,9 +24,6 @@ from qlever.util import (
 )
 
 GB = 1024**3
-
-# One shaded region of the plot: name, start and end in seconds.
-BandType = tuple[str, float, float]
 
 
 def read_usage_tsv(path: Path) -> dict[str, np.ndarray]:
@@ -162,28 +160,6 @@ def compute_phase_boundaries(
     add("Text index", text_begin, text_end)
 
     return phases
-
-
-def bands_from_durations(
-    durations: dict[str, float],
-) -> list[BandType]:
-    """
-    Turn phase durations in seconds into `(label, start_s, end_s)` bands,
-    laying the phases back to back from the build start in the given
-    order. The `TOTAL time` entry is skipped.
-    """
-    bands = []
-    start_s = 0.0
-    for label, duration_s in durations.items():
-        if label == "TOTAL time":
-            continue
-        bands.append((label, start_s, start_s + duration_s))
-        start_s += duration_s
-    return bands
-
-
-# Separator between the fields of a subtitle.
-SUBTITLE_SEPARATOR = "   |   "
 
 
 def build_plot_subtitle(
@@ -346,8 +322,8 @@ def write_usage_plot(
 def render_usage_plot(
     args,
     *,
-    engine_overlay: Callable[..., list[BandType]],
-    engine_subtitle: Callable[..., str | None],
+    engine_overlay: Callable[..., list[BandType]] | None = None,
+    engine_subtitle: Callable[..., str | None] | None = None,
     output_dir: Path | None = None,
 ) -> Path | None:
     """
@@ -357,9 +333,11 @@ def render_usage_plot(
     `<prefix>.resource-usage-log.tsv` as written by older qlever
     versions. `engine_overlay` and `engine_subtitle` are called with
     `(args, log_path)` and provide the engine-specific parts of the plot.
-    Returns the plot path on success, None if the log is missing or the
-    plot could not be rendered.
+    Without them, the plot describes a QLever index build. Returns the
+    plot path on success, None if the plot was not rendered.
     """
+    engine_overlay = engine_overlay or overlay
+    engine_subtitle = engine_subtitle or subtitle
     dataset = args.name
     prefix = resource_usage_prefix(args.engine_short_name, dataset)
     output_dir = output_dir or Path.cwd()
@@ -390,4 +368,5 @@ def render_usage_plot(
             f"resource-usage log `{tsv_path.name}`"
         )
         return None
+    log.info(f"Resource-usage plot saved to `{plot_path.name}`")
     return plot_path
