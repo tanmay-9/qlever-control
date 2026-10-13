@@ -4,19 +4,18 @@ import shlex
 import time
 from pathlib import Path
 
+from qeval.oxigraph.resource_usage.usage_plot import overlay, subtitle
+from qeval.resource_monitor import ResourceMonitor
 from qlever.command import QleverCommand
-from qlever.commands.index import render_usage_plot
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.resource_usage.resource_monitor import ResourceMonitor
+from qlever.resource_usage.plot_util import render_usage_plot_if_installed
 from qlever.util import (
     binary_exists,
     get_total_file_size,
     input_files_exist,
     run_command,
 )
-
-USAGE_PLOT_MODULE = "qeval.oxigraph.resource_usage.usage_plot"
 
 
 def wrap_cmd_in_container(args, cmd: str, ulimit: int | None = None) -> str:
@@ -90,13 +89,13 @@ class IndexCommand(QleverCommand):
         # Render the resource-usage plot from the existing log without
         # rebuilding the index.
         if args.resource_usage_plot_only:
-            plot_path = render_usage_plot(
-                args, plot_only=True, engine_module=USAGE_PLOT_MODULE
+            plot_path = render_usage_plot_if_installed(
+                args,
+                plot_only=True,
+                engine_overlay=overlay,
+                engine_subtitle=subtitle,
             )
-            if plot_path is None:
-                return False
-            log.info(f"Resource-usage plot saved to `{plot_path.name}`")
-            return True
+            return plot_path is not None
 
         cmds_to_execute = []
         index_cmd = (
@@ -205,10 +204,11 @@ class IndexCommand(QleverCommand):
                 f.write(f"Optimize time: {optimize_s:.0f}s\n")
             f.write(f"TOTAL time: {load_s + optimize_s:.0f}s\n")
 
-        plot_path = render_usage_plot(
-            args, plot_only=False, engine_module=USAGE_PLOT_MODULE
+        render_usage_plot_if_installed(
+            args,
+            plot_only=False,
+            engine_overlay=overlay,
+            engine_subtitle=subtitle,
         )
-        if plot_path is not None:
-            log.info(f"Resource-usage plot saved to `{plot_path.name}`")
 
         return True

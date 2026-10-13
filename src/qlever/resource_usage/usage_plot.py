@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import warnings
 from collections.abc import Callable
 from datetime import datetime
@@ -15,17 +16,14 @@ matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 
 from qlever.log import log
+from qlever.resource_usage.plot_util import SUBTITLE_SEPARATOR, BandType
 from qlever.util import (
     iter_permutation_phases,
-    parse_git_hash,
     parse_phase_markers,
     resource_usage_prefix,
 )
 
 GB = 1024**3
-
-# One shaded region of the plot: name, start and end in seconds.
-BandType = tuple[str, float, float]
 
 
 def read_usage_tsv(path: Path) -> dict[str, np.ndarray]:
@@ -164,46 +162,14 @@ def compute_phase_boundaries(
     return phases
 
 
-def bands_from_durations(
-    durations: dict[str, float],
-) -> list[BandType]:
-    """
-    Turn phase durations in seconds into `(label, start_s, end_s)` bands,
-    laying the phases back to back from the build start in the given
-    order. The `TOTAL time` entry is skipped.
-    """
-    bands = []
-    start_s = 0.0
-    for label, duration_s in durations.items():
-        if label == "TOTAL time":
-            continue
-        bands.append((label, start_s, start_s + duration_s))
-        start_s += duration_s
-    return bands
-
-
-# Separator between the fields of a subtitle, and the width at which the
-# title starts to be clipped by a 12in figure's axes.
-SUBTITLE_SEPARATOR = "   |   "
-SUBTITLE_MAX_CHARS = 105
-
-
-def wrap_subtitle(text: str) -> str:
-    """Break a subtitle at its field separators into lines that fit the axes."""
-    lines = []
-    for line in text.split("\n"):
-        fields = line.split(SUBTITLE_SEPARATOR)
-        current = fields[0]
-        for field in fields[1:]:
-            if len(current) + len(SUBTITLE_SEPARATOR) + len(field) > (
-                SUBTITLE_MAX_CHARS
-            ):
-                lines.append(current)
-                current = field
-            else:
-                current += SUBTITLE_SEPARATOR + field
-        lines.append(current)
-    return "\n".join(lines)
+def parse_git_hash(log_path: Path) -> str | None:
+    """Return the git hash printed on the first line of a QLever index log."""
+    try:
+        first_line = log_path.read_text().splitlines()[0]
+    except (OSError, IndexError):
+        return None
+    match = re.search(r"git hash ([0-9a-f]+)", first_line)
+    return match.group(1) if match else None
 
 
 def build_plot_subtitle(
@@ -255,7 +221,6 @@ def write_usage_plot(
     bands: list[BandType],
     subtitle_text: str | None,
     plot_max_points: int = 500,
-    sample_interval_s: float = 1.0,
 ) -> bool:
     """
     Read the usage TSV, render a dual-axis plot of memory and CPU over
@@ -308,13 +273,9 @@ def write_usage_plot(
         )
         if band_s < min_label_s:
             continue
-        mid = (start_s + end_s) / 2
-        # Skip the name when the band's middle is past the last sample.
-        # Text that far outside the axes collapses the layout.
-        if mid > total_s:
-            continue
+        mid = (start_s + end_s) / 2 / x_factor
         ax_mem.text(
-            mid / x_factor,
+            mid,
             0.98,
             name,
             transform=ax_mem.get_xaxis_transform(),
@@ -362,25 +323,7 @@ def write_usage_plot(
         bbox_to_anchor=(1.08, 0.5),
     )
 
-    # The bands describe the index log's timeline, the axis describes the
-    # samples. If the bands reach past the last sample, the two do not
-    # cover the same run and the shading sits on the wrong part of the
-    # curve. Allow for the sampling stopping a little early.
-    tolerance_s = 2 * sample_interval_s + 5
-    bands_end_s = max((end_s for _, _, end_s in bands), default=0.0)
-    if bands_end_s > total_s + tolerance_s:
-        note = "(!) shading exceeds the sampled range"
-        log.warning(
-            f"The shaded regions cover {bands_end_s:.0f}s but only "
-            f"{total_s:.0f}s were sampled, so they may not line up with "
-            "the curves"
-        )
-        # On its own line: the subtitle is already near the axes width.
-        subtitle_text = f"{subtitle_text}\n{note}" if subtitle_text else note
-
-    ax_mem.set_title(
-        f"{title}\n{wrap_subtitle(subtitle_text)}" if subtitle_text else title
-    )
+    ax_mem.set_title(f"{title}\n{subtitle_text}" if subtitle_text else title)
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
     return True
@@ -389,8 +332,8 @@ def write_usage_plot(
 def render_usage_plot(
     args,
     *,
-    engine_overlay: Callable[..., list[BandType]],
-    engine_subtitle: Callable[..., str | None],
+    engine_overlay: Callable[..., list[BandType]] | None = None,
+    engine_subtitle: Callable[..., str | None] | None = None,
     output_dir: Path | None = None,
 ) -> Path | None:
     """
@@ -400,9 +343,11 @@ def render_usage_plot(
     `<prefix>.resource-usage-log.tsv` as written by older qlever
     versions. `engine_overlay` and `engine_subtitle` are called with
     `(args, log_path)` and provide the engine-specific parts of the plot.
-    Returns the plot path on success, None if the log is missing or the
-    plot could not be rendered.
+    Without them, the plot describes a QLever index build. Returns the
+    plot path on success, None if the plot was not rendered.
     """
+    engine_overlay = engine_overlay or overlay
+    engine_subtitle = engine_subtitle or subtitle
     dataset = args.name
     prefix = resource_usage_prefix(args.engine_short_name, dataset)
     output_dir = output_dir or Path.cwd()
@@ -423,7 +368,6 @@ def render_usage_plot(
             bands=engine_overlay(args, log_path),
             subtitle_text=engine_subtitle(args, log_path),
             plot_max_points=args.resource_usage_plot_max_points,
-            sample_interval_s=args.resource_usage_interval,
         )
     except Exception as error:
         log.warning(f"Could not render resource-usage plot: {error}")
@@ -434,4 +378,5 @@ def render_usage_plot(
             f"resource-usage log `{tsv_path.name}`"
         )
         return None
+    log.info(f"Resource-usage plot saved to `{plot_path.name}`")
     return plot_path

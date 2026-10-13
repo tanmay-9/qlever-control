@@ -5,7 +5,7 @@ from pathlib import Path
 
 from qeval.oxigraph.commands.index_stats import IndexStatsCommand
 from qlever.containerize import Containerize
-from qlever.resource_usage.usage_plot import (
+from qlever.resource_usage.plot_util import (
     SUBTITLE_SEPARATOR,
     BandType,
     bands_from_durations,

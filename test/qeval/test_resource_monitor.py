@@ -3,14 +3,44 @@ from unittest.mock import MagicMock
 import psutil
 import pytest
 
-from qlever.resource_usage.resource_monitor import (
+from qeval.resource_monitor import (
     Sample,
+    container_memory_to_bytes,
     sample_container,
     sample_process,
     sample_to_tsv_row,
 )
 
-MODULE = "qlever.resource_usage.resource_monitor"
+MODULE = "qeval.resource_monitor"
+
+
+@pytest.mark.parametrize(
+    "usage,expected",
+    [
+        ("2TiB", 2 * 1024**4),
+        ("1.5GiB", int(1.5 * 1024**3)),
+        ("512MiB", 512 * 1024**2),
+        ("4KiB", 4 * 1024),
+        ("2TB", 2 * 1000**4),
+        ("1.5GB", int(1.5 * 1000**3)),
+        ("512MB", 512 * 1000**2),
+        ("4KB", 4 * 1000),
+        ("100B", 100),
+        ("0B", 0),
+        # Longest matching suffix wins; "GiB"/"GB" must not be read as
+        # bare bytes via the trailing "B".
+        ("2GiB", 2 * 1024**3),
+        ("2GB", 2 * 1000**3),
+        # Leading/trailing whitespace and case are tolerated.
+        ("  1.5gib ", int(1.5 * 1024**3)),
+        # A space between number and unit is accepted by float().
+        ("1.5 GiB", int(1.5 * 1024**3)),
+        ("", 0),
+        ("garbage", 0),
+    ],
+)
+def test_container_memory_to_bytes(usage, expected):
+    assert container_memory_to_bytes(usage) == expected
 
 
 @pytest.mark.parametrize(
