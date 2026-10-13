@@ -5,7 +5,6 @@ import pytest
 from qlever.util import (
     edit_option_line,
     get_random_string,
-    parse_git_hash,
     positive_int,
     stop_systemd_unit,
     stop_tailing,
@@ -30,20 +29,6 @@ def test_get_random_string():
     assert random_string_1 != random_string_2
 
 
-@pytest.mark.parametrize(
-    "first_line,expected",
-    [
-        ("qlever-server, git hash 1a2b3c4, compiled", "1a2b3c4"),
-        ("no hash on this line", None),
-    ],
-)
-def test_parse_git_hash_reads_first_line_only(first_line, expected, tmp_path):
-    path = tmp_path / "index-log.txt"
-    # Second line also carries a hash; only the first line should count.
-    path.write_text(first_line + "\nsomething git hash deadbeef here\n")
-    assert parse_git_hash(path) == expected
-
-
 @pytest.mark.parametrize("value,expected", [("1", 1), ("500", 500)])
 def test_positive_int_accepts(value, expected):
     assert positive_int(value) == expected
@@ -60,16 +45,6 @@ def test_positive_int_rejects_non_integer(value):
     # argparse also treats a plain `ValueError` as invalid input
     with pytest.raises(ValueError):
         positive_int(value)
-
-
-def test_parse_git_hash_missing_file(tmp_path):
-    assert parse_git_hash(tmp_path / "nope.txt") is None
-
-
-def test_parse_git_hash_empty_file(tmp_path):
-    path = tmp_path / "empty.txt"
-    path.write_text("")
-    assert parse_git_hash(path) is None
 
 
 def test_edit_option_line_replaces_value_and_keeps_alignment():

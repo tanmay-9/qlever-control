@@ -938,16 +938,6 @@ def stop_tailing(tail_proc: subprocess.Popen) -> None:
         os.killpg(pid, signal.SIGTERM)
 
 
-def parse_git_hash(log_path: Path) -> str | None:
-    """Return the git hash printed on the first line of a QLever index log."""
-    try:
-        first_line = log_path.read_text().splitlines()[0]
-    except (OSError, IndexError):
-        return None
-    match = re.search(r"git hash ([0-9a-f]+)", first_line)
-    return match.group(1) if match else None
-
-
 class PhaseMarkers(NamedTuple):
     """
     Timestamp markers delimiting each phase of an index build. Any

@@ -11,6 +11,7 @@ from qlever.resource_usage.usage_plot import (  # noqa: E402
     build_plot_subtitle,
     compute_phase_boundaries,
     downsample_for_plot,
+    parse_git_hash,
     pick_time_unit,
     read_usage_tsv,
     render_usage_plot,
@@ -86,6 +87,30 @@ def write_log(tmp_path, lines):
     path = tmp_path / "index-log.txt"
     path.write_text("\n".join(lines) + "\n")
     return path
+
+
+@pytest.mark.parametrize(
+    "first_line,expected",
+    [
+        ("qlever-server, git hash 1a2b3c4, compiled", "1a2b3c4"),
+        ("no hash on this line", None),
+    ],
+)
+def test_parse_git_hash_reads_first_line_only(first_line, expected, tmp_path):
+    path = tmp_path / "index-log.txt"
+    # Second line also carries a hash; only the first line should count.
+    path.write_text(first_line + "\nsomething git hash deadbeef here\n")
+    assert parse_git_hash(path) == expected
+
+
+def test_parse_git_hash_missing_file(tmp_path):
+    assert parse_git_hash(tmp_path / "nope.txt") is None
+
+
+def test_parse_git_hash_empty_file(tmp_path):
+    path = tmp_path / "empty.txt"
+    path.write_text("")
+    assert parse_git_hash(path) is None
 
 
 @pytest.mark.parametrize(

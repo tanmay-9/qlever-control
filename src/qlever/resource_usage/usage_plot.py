@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import warnings
 from collections.abc import Callable
 from datetime import datetime
@@ -18,7 +19,6 @@ from qlever.log import log
 from qlever.resource_usage.plot_util import SUBTITLE_SEPARATOR, BandType
 from qlever.util import (
     iter_permutation_phases,
-    parse_git_hash,
     parse_phase_markers,
     resource_usage_prefix,
 )
@@ -160,6 +160,16 @@ def compute_phase_boundaries(
     add("Text index", text_begin, text_end)
 
     return phases
+
+
+def parse_git_hash(log_path: Path) -> str | None:
+    """Return the git hash printed on the first line of a QLever index log."""
+    try:
+        first_line = log_path.read_text().splitlines()[0]
+    except (OSError, IndexError):
+        return None
+    match = re.search(r"git hash ([0-9a-f]+)", first_line)
+    return match.group(1) if match else None
 
 
 def build_plot_subtitle(
