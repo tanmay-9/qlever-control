@@ -2,9 +2,7 @@
 
 The panes inside do the drawing. This modal only stacks them, frames
 them and closes them. They all read the same window, so the same moment
-in time is at the same place in each, and the whole stack is one read:
-a bigger pane fits more buckets and says so when it resizes, so the
-screen that holds the readings can send a more detailed window.
+in time is at the same place in each.
 """
 
 from __future__ import annotations
@@ -19,7 +17,6 @@ from qlever.monitor_queries.widgets.footer import Footer
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     Plot,
     ResourcePlotPane,
-    label_width,
 )
 
 
@@ -28,8 +25,8 @@ class ResourcePlotModal(ModalScreen):
 
     Opens on the window and each plot's axis top the inline pane holds,
     so what the reader set is what the modal draws. After that the
-    screen keeps every pane up to date: Historic sends the window it
-    re-reads at this size, and Live sends fresh readings on its timer.
+    screen keeps every pane up to date: Historic sends each window it
+    reads, and Live sends fresh readings on its timer.
     """
 
     BINDINGS = [
@@ -52,9 +49,6 @@ class ResourcePlotModal(ModalScreen):
         self.top_steps = top_steps
 
     def compose(self) -> ComposeResult:
-        # One width for the whole stack, since a pane only knows its own
-        # numbers and the gutters have to come out the same size.
-        width = label_width(self.window, self.plots, self.top_steps)
         with Vertical(id="resource-plot-modal"):
             for plot in self.plots:
                 yield ResourcePlotPane(
@@ -62,7 +56,6 @@ class ResourcePlotModal(ModalScreen):
                     plot,
                     top_steps=self.top_steps,
                     time_labels=plot is self.plots[-1],
-                    label_width=width,
                 )
         yield Footer(show_command_palette=False)
 
