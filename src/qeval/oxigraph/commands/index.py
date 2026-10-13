@@ -4,7 +4,7 @@ import shlex
 import time
 from pathlib import Path
 
-from qeval.oxigraph.resource_usage.usage_plot import overlay, subtitle
+from qeval.oxigraph.usage_plot import overlay, subtitle
 from qeval.resource_monitor import ResourceMonitor
 from qlever.command import QleverCommand
 from qlever.containerize import Containerize
