@@ -11,6 +11,7 @@ from qlever.monitor_queries.models import ResourceWindow
 from qlever.monitor_queries.resource_data import (
     COLUMNS,
     LIVE_RESOURCE_BUFFER_MS,
+    LIVE_WINDOW_PRESETS,
     MAX_BUCKETS,
     Capacity,
     Column,
@@ -38,7 +39,6 @@ from qlever.monitor_queries.resource_reader import (
     parse_tsv_row,
     seek_to_window_start,
 )
-from qlever.monitor_queries.views.live import LIVE_WINDOW_PRESETS
 from qlever.monitor_queries.widgets.window_stepper import preset_ms
 
 HEADER = "\t".join(LOG_COLUMNS) + "\n"
