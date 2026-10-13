@@ -66,11 +66,8 @@ class DetailSwitcher(ContentSwitcher):
         pane = self.query_one(ResourcePlotPane)
         wanted = next_step(pane.window, pane.plot, pane.top_step, direction)
         if wanted is not None:
-            pane.top_step = wanted
-
-    def set_top_step(self, step: int) -> None:
-        """Take over the top the full-screen view was closed at."""
-        self.query_one(ResourcePlotPane).top_step = step
+            # A new dict, since the pane only redraws when one is assigned.
+            pane.top_steps = {**pane.top_steps, pane.plot.name: wanted}
 
     def show_sparql(self) -> None:
         """Switch to the SPARQL pane."""

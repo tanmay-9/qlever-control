@@ -24,6 +24,7 @@ from qlever.monitor_queries.models import (
     ResourceSeries,
     ResourceWindow,
 )
+from qlever.monitor_queries.resource_data import OPERATION_KEYS
 from qlever.monitor_queries.resource_reader import REQUIRED_COLUMNS
 
 RgbColor = tuple[int, int, int]
@@ -242,7 +243,9 @@ def next_step(
 
 
 def label_width(
-    window: ResourceWindow, plots: list[Plot], step: int = 0
+    window: ResourceWindow,
+    plots: list[Plot],
+    top_steps: dict[str, int] | None = None,
 ) -> int:
     """Digits in the longest y label these plots print for this window.
 
@@ -253,6 +256,7 @@ def label_width(
     """
     width = 0
     for plot in plots:
+        step = (top_steps or {}).get(plot.name, 0)
         for axis in (plot.left, plot.right):
             highest = axis_top(window, axis, step)
             width = max(width, len(str(round(highest))))
@@ -415,6 +419,13 @@ PLOTS = (
         # into a plot full of spikes.
         right=Axis(keys=("io_stall_percent",), min_top=20.0),
     ),
+    Plot(
+        name="Operation time",
+        # Times have no capacity to hold the axis steady, so one slow
+        # operation can leave every other reading flat along the bottom.
+        left=Axis(keys=("query_mean_ms", "update_mean_ms"), adjustable=True),
+        right=Axis(keys=("cpu_percent",)),
+    ),
 )
 
 
@@ -429,21 +440,38 @@ def empty_note(window: ResourceWindow, plot: Plot) -> str:
     return "No samples in this window"
 
 
-def available_plots(log_has_new_columns: bool) -> list[Plot]:
-    """The plots a log of this format can carry.
+def series_available(
+    key: str, has_new_columns: bool, has_operation_types: bool
+) -> bool:
+    """Whether the logs currently carry the series under this key.
 
-    An older log holds only the columns every log has, so a plot
-    needing any other one has nothing to draw from and is not offered.
-    Whether a machine or a window actually reported a column is a
-    separate question, answered in the plot itself.
+    A required column is in every resource log. An operation series
+    needs the metrics log to record the type. Anything else is an
+    optional resource column, which only the newer format carries.
     """
-    if log_has_new_columns:
-        return list(PLOTS)
+    if key in OPERATION_KEYS:
+        return has_operation_types
+    if key in REQUIRED_COLUMNS:
+        return True
+    return has_new_columns
+
+
+def available_plots(
+    has_new_columns: bool, has_operation_types: bool
+) -> list[Plot]:
+    """The plots the two logs can currently fill.
+
+    A plot whose series no log can supply has nothing to draw from and
+    is not offered at all. Whether a machine or a window actually
+    reported a series is a separate question, answered in the plot
+    itself.
+    """
     return [
         plot
         for plot in PLOTS
         if all(
-            key in REQUIRED_COLUMNS for key in plot.left.keys + plot.right.keys
+            series_available(key, has_new_columns, has_operation_types)
+            for key in plot.left.keys + plot.right.keys
         )
     ]
 
@@ -476,15 +504,15 @@ class ResourcePlotPane(PlotextPlot):
 
     window = Reactive(None, init=False)
     plot = Reactive(None, init=False)
-    # An index into `TOP_PERCENTILES`, not a percentage. Carried
-    # across plots, and ignored by an axis that is not adjustable.
-    top_step = Reactive(0, init=False)
+    # Each plot's axis top step into `TOP_PERCENTILES`, by plot name,
+    # so each plot keeps its own. A missing plot is at step 0.
+    top_steps = Reactive(None, init=False)
 
     def __init__(
         self,
         window: ResourceWindow,
         plot: Plot,
-        top_step: int = 0,
+        top_steps: dict[str, int] | None = None,
         time_labels: bool = True,
         label_width: int = 0,
         **kwargs,
@@ -496,7 +524,7 @@ class ResourcePlotPane(PlotextPlot):
         self.theme = "textual-clear"
         self.set_reactive(ResourcePlotPane.window, window)
         self.set_reactive(ResourcePlotPane.plot, plot)
-        self.set_reactive(ResourcePlotPane.top_step, top_step)
+        self.set_reactive(ResourcePlotPane.top_steps, dict(top_steps or {}))
         # Stacked plots share one clock row, printed under the last of
         # them, so the ones above give their row back to the data.
         self.time_labels = time_labels
@@ -520,9 +548,14 @@ class ResourcePlotPane(PlotextPlot):
         """Redraw the same window as the plot it was just switched to."""
         self.replot()
 
-    def watch_top_step(self) -> None:
-        """Redraw the same plot against the top just stepped to."""
+    def watch_top_steps(self) -> None:
+        """Redraw the same plot against the axis top just stepped to."""
         self.replot()
+
+    @property
+    def top_step(self) -> int:
+        """The axis top step of the plot being shown."""
+        return self.top_steps.get(self.plot.name, 0)
 
     def on_resize(self) -> None:
         """Redraw at the new size, and say so if the bucket count moved.

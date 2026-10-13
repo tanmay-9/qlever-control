@@ -15,6 +15,7 @@ from textual.worker import get_current_worker
 
 from qlever.monitor_queries.historic_data import (
     LoggedQuery,
+    completed_operations,
     display_duration_ms,
     filter_by_text,
     filter_queries,
@@ -43,7 +44,6 @@ from qlever.monitor_queries.resource_data import (
     read_resource_window,
     window_for_samples,
 )
-from qlever.monitor_queries.resource_reader import log_has_new_columns
 from qlever.monitor_queries.util import (
     action_key,
     help_text,
@@ -69,7 +69,6 @@ from qlever.monitor_queries.widgets.query_table import HistoricQueryTable
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     MIN_BUCKETS,
     ResourcePlotPane,
-    available_plots,
     buckets_for_width,
 )
 from qlever.monitor_queries.widgets.selected_window import SelectedWindow
@@ -252,11 +251,12 @@ class HistoricScreen(Screen, inherit_bindings=False):
         # An empty window frames the selected time span until the first
         # read lands, so the plot has axes to draw from the start.
         self.resource_window = window_for_samples(
-            [],
-            self.app.capacity,
-            self.window_start_ms,
-            self.window_end_ms,
-            MIN_BUCKETS,
+            samples=[],
+            operations=[],
+            capacity=self.app.capacity,
+            start_ms=self.window_start_ms,
+            end_ms=self.window_end_ms,
+            buckets=MIN_BUCKETS,
         )
         controls = ControlsState(
             window_size=self.window_size,
@@ -483,11 +483,12 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.render_cache = {}
             self.cached_window = (self.window_start_ms, self.window_end_ms)
             resource_window = read_resource_window(
-                self.app.resource_log,
-                self.app.capacity,
-                self.window_start_ms,
-                self.window_end_ms,
-                buckets,
+                path=self.app.resource_log,
+                operations=completed_operations(window_queries),
+                capacity=self.app.capacity,
+                start_ms=self.window_start_ms,
+                end_ms=self.window_end_ms,
+                buckets=buckets,
                 should_cancel=lambda: worker.is_cancelled,
             )
             if worker.is_cancelled:
@@ -543,16 +544,18 @@ class HistoricScreen(Screen, inherit_bindings=False):
         A resized plot says how many buckets it now fits, whether it is
         the inline one or the maximized one. An exclusive worker means a
         fast drag cancels superseded reads, so only the final width
-        lands. Reads the resource log alone, not the query table, which
-        a resize has no reason to redo.
+        lands. Reads the resource log alone and re-buckets the
+        operations already scanned, since a resize has no reason to
+        redo the query table.
         """
         worker = get_current_worker()
         resource_window = read_resource_window(
-            self.app.resource_log,
-            self.app.capacity,
-            self.window_start_ms,
-            self.window_end_ms,
-            buckets,
+            path=self.app.resource_log,
+            operations=completed_operations(self.window_queries or []),
+            capacity=self.app.capacity,
+            start_ms=self.window_start_ms,
+            end_ms=self.window_end_ms,
+            buckets=buckets,
             should_cancel=lambda: worker.is_cancelled,
         )
         if worker.is_cancelled:
@@ -570,8 +573,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Showing the hidden pane resizes it from zero, so its on_resize
         redraws it; no explicit replot here.
         """
-        offered = available_plots(log_has_new_columns(self.app.resource_log))
-        self.query_one(DetailSwitcher).show_plot(offered, step)
+        self.query_one(DetailSwitcher).show_plot(
+            self.app.offered_plots(), step
+        )
 
     def action_step_top(self, direction: int = 1) -> None:
         """Raise or lower the top of the plot's adjustable axis."""
@@ -588,10 +592,9 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.app.push_screen(
             ResourcePlotModal(
                 self.resource_window,
-                available_plots(log_has_new_columns(self.app.resource_log)),
-                self.query_one(ResourcePlotPane).top_step,
-            ),
-            self.query_one(DetailSwitcher).set_top_step,
+                self.app.offered_plots(),
+                self.query_one(ResourcePlotPane).top_steps,
+            )
         )
 
     def action_show_sparql(self) -> None:

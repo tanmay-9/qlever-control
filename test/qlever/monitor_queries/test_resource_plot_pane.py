@@ -282,13 +282,30 @@ def test_series_for_keys_of_an_empty_window_is_empty():
     assert series_for_keys(window(), ("rss",)) == []
 
 
-def test_an_old_log_offers_only_the_plot_it_has_columns_for():
-    offered = available_plots(log_has_new_columns=False)
-    assert [plot.name for plot in offered] == ["Memory and CPU"]
+def offered_names(has_new_columns, has_operation_types):
+    """Plot names offered for one combination of log formats."""
+    return [
+        plot.name
+        for plot in available_plots(has_new_columns, has_operation_types)
+    ]
 
 
-def test_a_new_log_offers_every_plot():
-    assert available_plots(log_has_new_columns=True) == list(PLOTS)
+def test_old_logs_offer_only_the_plot_every_log_can_fill():
+    assert offered_names(False, False) == ["Memory and CPU"]
+
+
+def test_new_logs_offer_every_plot():
+    assert available_plots(True, True) == list(PLOTS)
+
+
+def test_an_old_resource_log_still_offers_the_operation_plot():
+    # It reads CPU, which every resource log has, and its two other
+    # series come from the metrics log.
+    assert offered_names(False, True) == ["Memory and CPU", "Operation time"]
+
+
+def test_a_metrics_log_without_types_hides_the_operation_plot():
+    assert offered_names(True, False) == ["Memory and CPU", "Disk I/O"]
 
 
 def test_an_empty_window_says_it_has_no_samples():
@@ -341,7 +358,29 @@ def test_label_width_follows_the_axis_down_a_step():
         )
     ]
     assert label_width(win, stepped) == 3
-    assert label_width(win, stepped, step=2) == 1
+    assert label_width(win, stepped, top_steps={"A": 2}) == 1
+
+
+def test_label_width_steps_each_plot_on_its_own():
+    readings = tuple(float(value) for value in range(1, 10)) + (100.0,)
+    win = window(
+        series("read_bytes_per_s", readings),
+        series("write_bytes_per_s", readings),
+    )
+    stack = [
+        Plot(
+            name="A",
+            left=axis("read_bytes_per_s", adjustable=True),
+            right=axis(),
+        ),
+        Plot(
+            name="B",
+            left=axis("write_bytes_per_s", adjustable=True),
+            right=axis(),
+        ),
+    ]
+    # Only A is stepped down to 9, so B still reaches 100.
+    assert label_width(win, stack, top_steps={"A": 2}) == 3
 
 
 def test_label_width_counts_the_zero_of_a_side_with_no_series():

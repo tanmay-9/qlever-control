@@ -19,6 +19,7 @@ from qlever.monitor_queries.live_data import (
     discard_finished_backlog,
     get_live_metrics,
     get_live_query_rows,
+    get_recent_operations,
     is_log_fresh,
 )
 from qlever.monitor_queries.models import (
@@ -35,7 +36,6 @@ from qlever.monitor_queries.resource_data import (
 from qlever.monitor_queries.resource_reader import (
     Sample,
     SampleTail,
-    log_has_new_columns,
 )
 from qlever.monitor_queries.util import action_key
 from qlever.monitor_queries.views.resource_plot_modal import (
@@ -53,7 +53,6 @@ from qlever.monitor_queries.widgets.nav_pill import NavPill
 from qlever.monitor_queries.widgets.query_table import LiveQueryTable
 from qlever.monitor_queries.widgets.resource_plot_pane import (
     ResourcePlotPane,
-    available_plots,
 )
 from qlever.monitor_queries.widgets.resource_row import ResourceRow
 from qlever.monitor_queries.widgets.resource_sparkline import ResourceSparkline
@@ -378,22 +377,21 @@ class LiveScreen(Screen, inherit_bindings=False):
         the window's start and end are the same instant.
         """
         now_ms = current_ms()
+        start_ms = now_ms - LIVE_RESOURCE_WINDOW_MS
         return window_for_samples(
-            self.resource_samples.samples,
-            self.capacity,
-            now_ms - LIVE_RESOURCE_WINDOW_MS,
-            now_ms,
-            self.resource_samples.size,
+            samples=self.resource_samples.samples,
+            operations=get_recent_operations(self.app.live_state, start_ms),
+            capacity=self.capacity,
+            start_ms=start_ms,
+            end_ms=now_ms,
+            buckets=self.resource_samples.size,
         )
 
     def action_show_plot(self, step: int = 1) -> None:
-        """Show the resource plot, or step to the next or previous one.
-
-        The log's format is read now rather than at startup, since the
-        server may have begun writing it after this screen opened.
-        """
-        offered = available_plots(log_has_new_columns(self.app.resource_log))
-        self.query_one(DetailSwitcher).show_plot(offered, step)
+        """Show the resource plot, or step to the next or previous one."""
+        self.query_one(DetailSwitcher).show_plot(
+            self.app.offered_plots(), step
+        )
         self.refresh_table_status()
 
     def action_step_top(self, direction: int = 1) -> None:
@@ -410,10 +408,9 @@ class LiveScreen(Screen, inherit_bindings=False):
         self.app.push_screen(
             ResourcePlotModal(
                 self.live_resource_window(),
-                available_plots(log_has_new_columns(self.app.resource_log)),
-                self.query_one(ResourcePlotPane).top_step,
-            ),
-            self.query_one(DetailSwitcher).set_top_step,
+                self.app.offered_plots(),
+                self.query_one(ResourcePlotPane).top_steps,
+            )
         )
 
     def action_show_sparql(self) -> None:
