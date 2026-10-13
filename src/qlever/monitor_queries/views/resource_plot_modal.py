@@ -113,6 +113,12 @@ class ResourcePlotModal(ModalScreen[dict[str, int]]):
         self.window = window
         self.plots = plots
         self.top_steps = top_steps
+        # The raise and lower arrows of each adjustable plot, by name.
+        self.controls = {
+            plot.name: axis_top_controls(plot)
+            for plot in plots
+            if plot.adjustable_axis is not None
+        }
         # The plot the keys step, by name. It starts on the plot the inline
         # pane shows when that one can step. None when no plot can step.
         names = self.pickable_plot_names
@@ -151,7 +157,7 @@ class ResourcePlotModal(ModalScreen[dict[str, int]]):
                     # so every plot starts at the same place in time.
                     with Vertical(classes="modal-gutter"):
                         if plot.adjustable_axis is not None:
-                            raise_top, lower_top = axis_top_controls(plot)
+                            raise_top, lower_top = self.controls[plot.name]
                             yield Static("╷", classes="axis-top-rail -above")
                             # The keys that pick this plot from the one
                             # above it and the one below it.
@@ -186,14 +192,15 @@ class ResourcePlotModal(ModalScreen[dict[str, int]]):
     def on_mount(self) -> None:
         """Follow the window the panes are handed, and label the arrows."""
         pane = self.query_one(ResourcePlotPane)
-        self.watch(pane, "window", self.sync_top_row)
-        # The window decides which steps still change the top. Wait until
-        # the app has handed it to every pane, not just this first one.
-        self.watch(
-            pane,
-            "window",
-            lambda: self.call_after_refresh(self.sync_axis_top_arrows),
-        )
+
+        def on_window() -> None:
+            self.sync_top_row()
+            # The window decides which steps still change the top. Wait
+            # until the app has handed it to every pane, not just this
+            # first one.
+            self.call_after_refresh(self.sync_axis_top_arrows)
+
+        self.watch(pane, "window", on_window)
         self.sync_axis_top_arrows()
         self.sync_picked()
         # Label the controls with the keys that run them; CSS decides
@@ -217,7 +224,7 @@ class ResourcePlotModal(ModalScreen[dict[str, int]]):
         # Every plot's pills name their keys. The pick decides which show.
         for plot in self.plots:
             if plot.adjustable_axis is not None:
-                raise_top, lower_top = axis_top_controls(plot)
+                raise_top, lower_top = self.controls[plot.name]
                 for pill_id, action in (
                     (f"{raise_top.name}-key", "step_picked_top"),
                     (f"{lower_top.name}-key", "step_picked_top(-1)"),
@@ -268,7 +275,7 @@ class ResourcePlotModal(ModalScreen[dict[str, int]]):
         """Grey out an axis top arrow with nowhere left to go."""
         for pane in self.query(ResourcePlotPane):
             if pane.plot.adjustable_axis is not None:
-                raise_top, lower_top = axis_top_controls(pane.plot)
+                raise_top, lower_top = self.controls[pane.plot.name]
                 for control, direction in ((raise_top, 1), (lower_top, -1)):
                     wanted = next_step(
                         pane.window, pane.plot, pane.top_step, direction
@@ -291,7 +298,7 @@ class ResourcePlotModal(ModalScreen[dict[str, int]]):
             if pane.plot.name in names:
                 # 0 for the picked plot, 1 for the one below it, -1 above.
                 offset = names.index(pane.plot.name) - picked_index
-                raise_top, lower_top = axis_top_controls(pane.plot)
+                raise_top, lower_top = self.controls[pane.plot.name]
                 for pill_id, shown in (
                     (f"{raise_top.name}-key", offset == 0),
                     (f"{lower_top.name}-key", offset == 0),
