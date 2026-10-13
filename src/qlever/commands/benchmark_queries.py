@@ -842,7 +842,8 @@ class BenchmarkQueriesCommand(QleverCommand):
             f"curl -sv https://qlever.dev/api/examples/{args.ui_config}"
         )
         sparql_endpoint = (
-            args.sparql_endpoint or f"{args.host_name}:{args.port}"
+            args.sparql_endpoint
+            or f"{args.host_name}:{args.port}{args.endpoint_path}"
         )
 
         self.show(

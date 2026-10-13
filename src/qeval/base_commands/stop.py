@@ -47,8 +47,7 @@ class BaseStopCommand(QleverCommand):
         subparser.add_argument(
             "--cmdline-regex",
             default=self.default_regex(),
-            help="Show only processes where the command "
-            "line matches this regex",
+            help="Stop the processes whose command line matches this regex",
         )
 
     def execute(self, args) -> bool:

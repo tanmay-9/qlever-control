@@ -20,17 +20,23 @@ from qlever.monitor_queries.live_data import (
     load_completed_history,
 )
 from qlever.monitor_queries.log_reader import (
+    log_has_operation_types,
     open_log_buffer,
     read_first_timestamp,
 )
 from qlever.monitor_queries.models import ResourceWindow
 from qlever.monitor_queries.resource_data import Capacity
+from qlever.monitor_queries.resource_reader import log_has_new_columns
 from qlever.monitor_queries.util import clipboard_install_hint, copy_text
 from qlever.monitor_queries.views.historic import HistoricScreen
 from qlever.monitor_queries.views.live import LiveScreen
 from qlever.monitor_queries.widgets.header_row import ThemeSelect
 from qlever.monitor_queries.widgets.query_table import QueryTable
-from qlever.monitor_queries.widgets.resource_plot_pane import ResourcePlotPane
+from qlever.monitor_queries.widgets.resource_plot_pane import (
+    Plot,
+    ResourcePlotPane,
+    available_plots,
+)
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane, SparqlScroll
 from qlever.util import pretty_printed_query
 
@@ -174,6 +180,18 @@ class MonitorQueriesApp(App):
         log_start_or_boot = self.log_start_ms or self.boot_time_ms
         self.live_state.metrics_known_from_ms = max(
             log_start_or_boot, self.boot_time_ms - LIVE_HORIZON_MS
+        )
+
+    def offered_plots(self) -> list[Plot]:
+        """The plots the two logs can fill right now.
+
+        Read on each press rather than once at startup, because either
+        log can appear or change format while the app runs: the server
+        may not have started yet, or may be restarted on a newer build.
+        """
+        return available_plots(
+            log_has_new_columns(self.resource_log),
+            log_has_operation_types(self.log_file),
         )
 
     def push_resource_window(self, window: ResourceWindow) -> None:

@@ -110,7 +110,7 @@ class QueryCommand(QleverCommand):
         sparql_endpoint = (
             args.sparql_endpoint
             if args.sparql_endpoint
-            else f"{args.host_name}:{args.port}"
+            else f"{args.host_name}:{args.port}{args.endpoint_path}"
         )
         curl_cmd = (
             f"curl -s {sparql_endpoint}"
