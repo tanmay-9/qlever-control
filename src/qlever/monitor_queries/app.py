@@ -200,11 +200,19 @@ class MonitorQueriesApp(App):
         The maximized plot is a screen of its own, so the screen that
         read the window cannot reach it. The app owns the screen stack,
         so it hands the window over: while the plot is maximized, it and
-        the pane underneath show the same readings.
+        the pane underneath show the same readings. Fresh readings also
+        lift the dimming `mark_plots_stale` put on.
         """
         for screen in self.screen_stack:
             for pane in screen.query(ResourcePlotPane):
                 pane.window = window
+                pane.remove_class("stale")
+
+    def mark_plots_stale(self) -> None:
+        """Dim every resource plot until the window being read arrives."""
+        for screen in self.screen_stack:
+            for pane in screen.query(ResourcePlotPane):
+                pane.add_class("stale")
 
     def action_swap_screen(self) -> None:
         """Toggle between Live and Historic (bound to Tab on each screen)."""

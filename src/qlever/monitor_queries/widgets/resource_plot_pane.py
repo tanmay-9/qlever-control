@@ -25,6 +25,7 @@ from qlever.monitor_queries.models import (
 )
 from qlever.monitor_queries.resource_data import OPERATION_KEYS
 from qlever.monitor_queries.resource_reader import REQUIRED_COLUMNS
+from qlever.monitor_queries.util import format_clock
 
 RgbColor = tuple[int, int, int]
 
@@ -334,7 +335,7 @@ def clock_ticks(start_s: float, end_s: float) -> tuple[list[float], list[str]]:
     differs from the next tick's. Windows of a day or more show dates.
     """
     if end_s <= start_s:
-        return [start_s], [datetime.fromtimestamp(start_s).strftime("%H:%M")]
+        return [start_s], [format_clock(start_s * 1000, with_seconds=False)]
     step = clock_step(end_s - start_s)
     positions = []
     tick_s = end_s
@@ -353,10 +354,12 @@ def clock_ticks(start_s: float, end_s: float) -> tuple[list[float], list[str]]:
     for index, position in enumerate(positions):
         moment = datetime.fromtimestamp(position)
         is_edge = index in (0, len(positions) - 1)
-        if show_dates and (is_edge or moment.date() != previous_day):
-            labels.append(moment.strftime("%m-%d %H:%M"))
-        else:
-            labels.append(moment.strftime("%H:%M"))
+        with_date = show_dates and (is_edge or moment.date() != previous_day)
+        labels.append(
+            format_clock(
+                position * 1000, with_date=with_date, with_seconds=False
+            )
+        )
         previous_day = moment.date()
     return positions, labels
 
@@ -614,6 +617,17 @@ class ResourcePlotPane(PlotextPlot):
     def top_step(self) -> int:
         """The axis top step of the plot being shown."""
         return self.top_steps.get(self.plot.name, 0)
+
+    def step_top(self, direction: int) -> None:
+        """Raise (1) or lower (-1) the shown plot's axis top.
+
+        The ends hold instead of wrapping, so the plot stays where it
+        is put.
+        """
+        wanted = next_step(self.window, self.plot, self.top_step, direction)
+        if wanted is not None:
+            # A new dict, since the pane only redraws when one is assigned.
+            self.top_steps = {**self.top_steps, self.plot.name: wanted}
 
     def on_resize(self) -> None:
         """Redraw at the new size."""

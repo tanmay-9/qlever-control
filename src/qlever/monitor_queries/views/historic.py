@@ -70,6 +70,7 @@ from qlever.monitor_queries.widgets.resource_plot_pane import ResourcePlotPane
 from qlever.monitor_queries.widgets.selected_window import SelectedWindow
 from qlever.monitor_queries.widgets.timeline import Timeline
 from qlever.monitor_queries.widgets.timeline_row import TimelineRow
+from qlever.monitor_queries.widgets.window_arrows import WindowArrows
 from qlever.monitor_queries.widgets.window_stepper import (
     WindowStepper,
     available_presets,
@@ -388,6 +389,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Dim the rows so a window change registers before the scan lands."""
         self.query_one(HistoricQueryTable).add_class("stale")
         self.query_one(MetricsRow).add_class("stale")
+        self.app.mark_plots_stale()
         self.query_one("#table-status", Static).update("Loading window…")
 
     def refresh_view(self, rescan: bool) -> None:
@@ -549,12 +551,16 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Shows every plot this log can carry, on the readings the inline
         plot is showing.
         """
+        pane = self.query_one(ResourcePlotPane)
         self.app.push_screen(
             ResourcePlotModal(
-                self.resource_window,
-                self.app.offered_plots(),
-                self.query_one(ResourcePlotPane).top_steps,
-            )
+                owner=self,
+                window=self.resource_window,
+                plots=self.app.offered_plots(),
+                top_steps=pane.top_steps,
+                shown_plot=pane.plot.name,
+            ),
+            self.query_one(DetailSwitcher).set_top_steps,
         )
 
     def action_show_sparql(self) -> None:
@@ -807,11 +813,11 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Recenter the window on the clicked timeline position."""
         self.center_window_at(message.center_ms)
 
-    def on_timeline_row_shifted(self, message: TimelineRow.Shifted) -> None:
+    def on_window_arrows_shifted(self, message: WindowArrows.Shifted) -> None:
         """Shift the window when a timeline arrow is clicked."""
         self.shift_window(message.direction)
 
-    def on_timeline_row_jumped(self, message: TimelineRow.Jumped) -> None:
+    def on_window_arrows_jumped(self, message: WindowArrows.Jumped) -> None:
         """Jump to a log edge when a jump arrow is clicked."""
         if message.direction < 0:
             self.action_snap_start()
