@@ -15,6 +15,7 @@ from textual.worker import get_current_worker
 
 from qlever.monitor_queries.historic_data import (
     LoggedQuery,
+    completed_operations,
     display_duration_ms,
     filter_by_text,
     filter_queries,
@@ -204,8 +205,11 @@ class HistoricScreen(Screen, inherit_bindings=False):
         Binding("i", "invert_sort", "Invert sort", show=False),
         Binding("f", "edit_filter", "Filter", show=False),
         Binding("F", "clear_filters", "Clear filters", show=False),
-        Binding("r", "show_plot", "Resource plot", show=False),
-        Binding("z", "maximize_plot", "Zoom the plot", show=False),
+        Binding("r", "show_plot", "Resource plots", show=False),
+        Binding("R", "show_plot(-1)", "Resource plots", show=False),
+        Binding("minus", "step_top(-1)", "Plot scale", show=False),
+        Binding("plus", "step_top", "Plot scale", show=False),
+        Binding("z", "maximize_plot", "Full screen", show=False),
         Binding("s", "show_sparql", "SPARQL", show=False),
         Binding("ctrl+c,super+c", "screen.copy_text", "Copy selection"),
     ]
@@ -247,11 +251,12 @@ class HistoricScreen(Screen, inherit_bindings=False):
         # An empty window frames the selected time span until the first
         # read lands, so the plot has axes to draw from the start.
         self.resource_window = window_for_samples(
-            [],
-            self.app.capacity,
-            self.window_start_ms,
-            self.window_end_ms,
-            MIN_BUCKETS,
+            samples=[],
+            operations=[],
+            capacity=self.app.capacity,
+            start_ms=self.window_start_ms,
+            end_ms=self.window_end_ms,
+            buckets=MIN_BUCKETS,
         )
         controls = ControlsState(
             window_size=self.window_size,
@@ -428,11 +433,14 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.refresh_data(rescan=False)
 
     def schedule_rescan(self) -> None:
-        """Collapse a fast window scrub into one scan of where the user lands."""
+        """Collapse a fast window scrub into one scan of where the user lands.
+
+        The pane is measured when the timer fires, not when it is set:
+        on the first scan the screen is not laid out yet and the pane
+        still has no width.
+        """
         if self.rescan_timer is not None:
             self.rescan_timer.stop()
-        # The width is read when the timer fires, not now: on the first
-        # resume the pane is not laid out yet and would report width 0.
         self.rescan_timer = self.set_timer(
             RESCAN_DEBOUNCE_S,
             lambda: self.refresh_data(
@@ -475,11 +483,12 @@ class HistoricScreen(Screen, inherit_bindings=False):
             self.render_cache = {}
             self.cached_window = (self.window_start_ms, self.window_end_ms)
             resource_window = read_resource_window(
-                self.app.resource_log,
-                self.app.capacity,
-                self.window_start_ms,
-                self.window_end_ms,
-                buckets,
+                path=self.app.resource_log,
+                operations=completed_operations(window_queries),
+                capacity=self.app.capacity,
+                start_ms=self.window_start_ms,
+                end_ms=self.window_end_ms,
+                buckets=buckets,
                 should_cancel=lambda: worker.is_cancelled,
             )
             if worker.is_cancelled:
@@ -535,16 +544,18 @@ class HistoricScreen(Screen, inherit_bindings=False):
         A resized plot says how many buckets it now fits, whether it is
         the inline one or the maximized one. An exclusive worker means a
         fast drag cancels superseded reads, so only the final width
-        lands. Reads the resource log alone, not the query table, which
-        a resize has no reason to redo.
+        lands. Reads the resource log alone and re-buckets the
+        operations already scanned, since a resize has no reason to
+        redo the query table.
         """
         worker = get_current_worker()
         resource_window = read_resource_window(
-            self.app.resource_log,
-            self.app.capacity,
-            self.window_start_ms,
-            self.window_end_ms,
-            buckets,
+            path=self.app.resource_log,
+            operations=completed_operations(self.window_queries or []),
+            capacity=self.app.capacity,
+            start_ms=self.window_start_ms,
+            end_ms=self.window_end_ms,
+            buckets=buckets,
             should_cancel=lambda: worker.is_cancelled,
         )
         if worker.is_cancelled:
@@ -556,22 +567,35 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.resource_window = resource_window
         self.app.push_resource_window(resource_window)
 
-    def action_show_plot(self) -> None:
-        """Switch the detail pane to the resource plot.
+    def action_show_plot(self, step: int = 1) -> None:
+        """Show the resource plot, or step to the next or previous one.
 
         Showing the hidden pane resizes it from zero, so its on_resize
-        redraws with the current window's plot; no explicit replot here.
+        redraws it; no explicit replot here.
         """
-        self.query_one(DetailSwitcher).show_plot()
+        self.query_one(DetailSwitcher).show_plot(
+            self.app.offered_plots(), step
+        )
+
+    def action_step_top(self, direction: int = 1) -> None:
+        """Raise or lower the top of the plot's adjustable axis."""
+        self.query_one(DetailSwitcher).step_top(direction)
 
     def action_maximize_plot(self) -> None:
         """Open the resource plot as a full-screen modal.
 
-        The modal opens on the readings the inline plot is showing. Its
-        wider pane then fits more buckets and says so, which brings back
-        a window read at that size, so maximizing shows more detail.
+        Shows every plot this log can carry, on the readings the inline
+        plot is showing. A wider pane then fits more buckets and says
+        so, which brings back a window read at that size, so maximizing
+        shows more detail as well as more plots.
         """
-        self.app.push_screen(ResourcePlotModal(self.resource_window))
+        self.app.push_screen(
+            ResourcePlotModal(
+                self.resource_window,
+                self.app.offered_plots(),
+                self.query_one(ResourcePlotPane).top_steps,
+            )
+        )
 
     def action_show_sparql(self) -> None:
         """Switch the detail pane to the SPARQL query."""
