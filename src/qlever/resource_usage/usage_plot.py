@@ -182,28 +182,8 @@ def bands_from_durations(
     return bands
 
 
-# Separator between the fields of a subtitle, and the width at which the
-# title starts to be clipped by a 12in figure's axes.
+# Separator between the fields of a subtitle.
 SUBTITLE_SEPARATOR = "   |   "
-SUBTITLE_MAX_CHARS = 105
-
-
-def wrap_subtitle(text: str) -> str:
-    """Break a subtitle at its field separators into lines that fit the axes."""
-    lines = []
-    for line in text.split("\n"):
-        fields = line.split(SUBTITLE_SEPARATOR)
-        current = fields[0]
-        for field in fields[1:]:
-            if len(current) + len(SUBTITLE_SEPARATOR) + len(field) > (
-                SUBTITLE_MAX_CHARS
-            ):
-                lines.append(current)
-                current = field
-            else:
-                current += SUBTITLE_SEPARATOR + field
-        lines.append(current)
-    return "\n".join(lines)
 
 
 def build_plot_subtitle(
@@ -255,7 +235,6 @@ def write_usage_plot(
     bands: list[BandType],
     subtitle_text: str | None,
     plot_max_points: int = 500,
-    sample_interval_s: float = 1.0,
 ) -> bool:
     """
     Read the usage TSV, render a dual-axis plot of memory and CPU over
@@ -308,13 +287,9 @@ def write_usage_plot(
         )
         if band_s < min_label_s:
             continue
-        mid = (start_s + end_s) / 2
-        # Skip the name when the band's middle is past the last sample.
-        # Text that far outside the axes collapses the layout.
-        if mid > total_s:
-            continue
+        mid = (start_s + end_s) / 2 / x_factor
         ax_mem.text(
-            mid / x_factor,
+            mid,
             0.98,
             name,
             transform=ax_mem.get_xaxis_transform(),
@@ -362,25 +337,7 @@ def write_usage_plot(
         bbox_to_anchor=(1.08, 0.5),
     )
 
-    # The bands describe the index log's timeline, the axis describes the
-    # samples. If the bands reach past the last sample, the two do not
-    # cover the same run and the shading sits on the wrong part of the
-    # curve. Allow for the sampling stopping a little early.
-    tolerance_s = 2 * sample_interval_s + 5
-    bands_end_s = max((end_s for _, _, end_s in bands), default=0.0)
-    if bands_end_s > total_s + tolerance_s:
-        note = "(!) shading exceeds the sampled range"
-        log.warning(
-            f"The shaded regions cover {bands_end_s:.0f}s but only "
-            f"{total_s:.0f}s were sampled, so they may not line up with "
-            "the curves"
-        )
-        # On its own line: the subtitle is already near the axes width.
-        subtitle_text = f"{subtitle_text}\n{note}" if subtitle_text else note
-
-    ax_mem.set_title(
-        f"{title}\n{wrap_subtitle(subtitle_text)}" if subtitle_text else title
-    )
+    ax_mem.set_title(f"{title}\n{subtitle_text}" if subtitle_text else title)
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
     return True
@@ -423,7 +380,6 @@ def render_usage_plot(
             bands=engine_overlay(args, log_path),
             subtitle_text=engine_subtitle(args, log_path),
             plot_max_points=args.resource_usage_plot_max_points,
-            sample_interval_s=args.resource_usage_interval,
         )
     except Exception as error:
         log.warning(f"Could not render resource-usage plot: {error}")

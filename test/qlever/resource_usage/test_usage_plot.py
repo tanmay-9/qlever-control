@@ -1,4 +1,3 @@
-import logging
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +8,6 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("matplotlib")
 
 from qlever.resource_usage.usage_plot import (  # noqa: E402
-    SUBTITLE_SEPARATOR,
     bands_from_durations,
     build_plot_subtitle,
     compute_phase_boundaries,
@@ -19,8 +17,6 @@ from qlever.resource_usage.usage_plot import (  # noqa: E402
     read_usage_tsv,
     render_usage_plot,
     subtitle,
-    wrap_subtitle,
-    write_usage_plot,
 )
 
 
@@ -225,53 +221,6 @@ def test_bands_from_durations_lays_phases_back_to_back():
     assert bands == [("Load", 0.0, 10.0), ("Optimize", 10.0, 15.0)]
 
 
-def test_wrap_subtitle_keeps_a_short_subtitle_on_one_line():
-    subtitle = SUBTITLE_SEPARATOR.join(["batch = 10M triples", "git = abc123"])
-    assert wrap_subtitle(subtitle) == subtitle
-
-
-def test_wrap_subtitle_breaks_a_long_subtitle_at_the_separators():
-    fields = [f"field {i} = {'x' * 20}" for i in range(5)]
-    lines = wrap_subtitle(SUBTITLE_SEPARATOR.join(fields)).split("\n")
-    assert len(lines) > 1
-    assert all(len(line) <= 105 for line in lines)
-    # No field is split in the middle and none is lost.
-    assert SUBTITLE_SEPARATOR.join(lines).split(SUBTITLE_SEPARATOR) == fields
-
-
-def write_samples(tmp_path, last_elapsed_s):
-    """Write a two-row usage TSV ending at `last_elapsed_s`."""
-    tsv_path = tmp_path / "data.tsv"
-    tsv_path.write_text(
-        "elapsed_s\trss\tcpu_percent\n"
-        f"0\t100\t5.0\n{last_elapsed_s}\t200\t6.0\n"
-    )
-    return tsv_path
-
-
-def write_plot_with_bands(tmp_path, last_elapsed_s, bands):
-    """Render a plot from `bands` over samples ending at `last_elapsed_s`."""
-    return write_usage_plot(
-        tsv_path=write_samples(tmp_path, last_elapsed_s),
-        out_path=tmp_path / "plot.png",
-        title="Test",
-        bands=bands,
-        subtitle_text=None,
-    )
-
-
-def test_write_usage_plot_warns_when_shading_exceeds_samples(tmp_path, caplog):
-    with caplog.at_level(logging.WARNING, logger="qlever"):
-        assert write_plot_with_bands(tmp_path, 10, [("Phase", 0.0, 300.0)])
-    assert "300s" in caplog.text and "10s were sampled" in caplog.text
-
-
-def test_write_usage_plot_quiet_when_shading_fits_samples(tmp_path, caplog):
-    with caplog.at_level(logging.WARNING, logger="qlever"):
-        assert write_plot_with_bands(tmp_path, 10, [("Phase", 0.0, 10.0)])
-    assert caplog.text == ""
-
-
 def plot_args(name):
     """The `args` attributes that `render_usage_plot` reads."""
     return SimpleNamespace(
@@ -279,7 +228,6 @@ def plot_args(name):
         engine_short_name="qlever",
         engine_display_name="QLever",
         resource_usage_plot_max_points=500,
-        resource_usage_interval=1,
         stxxl_memory="",
         settings_json="{}",
     )
