@@ -100,7 +100,7 @@ class ResourceSparkline(Static):
         self.paint_title()
 
     def paint_title(self) -> None:
-        """Rebuild the border label from the window and the two flags."""
+        """Rebuild the border label from the window, the stale flag and the note."""
         self.border_title = series_title(self.series, self.stale, self.note)
 
     @property

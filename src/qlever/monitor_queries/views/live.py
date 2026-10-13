@@ -28,6 +28,7 @@ from qlever.monitor_queries.models import (
     SparqlContent,
 )
 from qlever.monitor_queries.resource_data import (
+    LIVE_WINDOW_PRESETS,
     SampleBuffer,
     coverage_note,
     is_sample_fresh,
@@ -66,9 +67,6 @@ from qlever.monitor_queries.widgets.window_stepper import (
 from qlever.util import is_qlever_server_alive
 
 TITLE = "QLever monitor-queries: Live"
-
-# The window sizes Live offers, none reaching past what the buffer holds.
-LIVE_WINDOW_PRESETS = ("5m", "15m", "30m", "1h")
 
 
 class LiveScreen(Screen, inherit_bindings=False):

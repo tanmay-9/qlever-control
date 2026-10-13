@@ -29,6 +29,9 @@ from qlever.monitor_queries.resource_reader import (
 # draws whichever part of it the window stepper asks for.
 LIVE_RESOURCE_BUFFER_MS = 3_600_000
 
+# The window sizes Live offers, none reaching past what the buffer holds.
+LIVE_WINDOW_PRESETS = ("5m", "15m", "30m", "1h")
+
 # Intervals without a sample before the server counts as gone. Three, so
 # a single missed sample still counts as live.
 FRESH_INTERVALS = 3

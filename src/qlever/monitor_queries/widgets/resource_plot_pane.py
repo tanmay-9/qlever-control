@@ -730,7 +730,7 @@ class ResourcePlotPane(PlotextPlot):
         # top, so say what they really reached. It shares the label
         # row, which is already spent, rather than taking a data row.
         if plot.left.adjustable and self.top_step > 0:
-            chip = f" ⇡ peak {round(axis_top(window, plot.left))} "
+            chip = f" ⇡ peak {short_number(axis_top(window, plot.left))} "
             plt.text(
                 chip,
                 window.start_s + next_col * seconds_per_col,

@@ -252,10 +252,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             capacity=self.app.capacity,
             start_ms=self.window_start_ms,
             end_ms=self.window_end_ms,
-            buckets=bucket_count(
-                self.window_end_ms - self.window_start_ms,
-                self.app.sample_interval_s,
-            ),
+            buckets=self.resource_buckets(),
         )
         controls = ControlsState(
             window_size=self.window_size,
@@ -431,6 +428,13 @@ class HistoricScreen(Screen, inherit_bindings=False):
             )
             self.refresh_data(rescan=False)
 
+    def resource_buckets(self) -> int:
+        """Buckets the resource readings of the current window are read into."""
+        return bucket_count(
+            self.window_end_ms - self.window_start_ms,
+            self.app.sample_interval_s,
+        )
+
     def schedule_rescan(self) -> None:
         """Collapse a fast window scrub into one scan of where the user lands."""
         if self.rescan_timer is not None:
@@ -476,10 +480,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
                 capacity=self.app.capacity,
                 start_ms=self.window_start_ms,
                 end_ms=self.window_end_ms,
-                buckets=bucket_count(
-                    self.window_end_ms - self.window_start_ms,
-                    self.app.sample_interval_s,
-                ),
+                buckets=self.resource_buckets(),
                 should_cancel=lambda: worker.is_cancelled,
             )
             if worker.is_cancelled:
