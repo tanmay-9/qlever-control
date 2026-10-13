@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -11,14 +10,6 @@ from qlever.util import (
     iter_permutation_phases,
     parse_phase_markers,
 )
-
-
-def heading_width(headings: Iterable[str], min_width: int = 25) -> int:
-    """
-    Width of the heading column, so that the colons still line up for
-    engines with headings longer than `min_width`.
-    """
-    return max([min_width, *(len(heading) for heading in headings)])
 
 
 def compute_durations(
@@ -315,7 +306,8 @@ class IndexStatsCommand(QleverCommand):
                 durations = self.execute_time(args, log_file_name)
             if not args.only_time:
                 sizes = self.execute_space(args)
-        width = heading_width([*durations, *sizes])
+        # At least 25 wide, and wider if a heading needs it.
+        width = max([25, *(len(heading) for heading in [*durations, *sizes])])
 
         # The "time" part of the command.
         if not args.only_space:
