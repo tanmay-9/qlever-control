@@ -10,12 +10,7 @@ import psutil
 
 from qlever.containerize import Containerize
 from qlever.log import log
-from qlever.util import (
-    container_memory_to_bytes,
-    find_process_by_binary,
-    resource_usage_prefix,
-    run_command,
-)
+from qlever.util import resource_usage_prefix, run_command
 
 
 @dataclass
@@ -52,6 +47,33 @@ def sample_process(proc: psutil.Process) -> Sample:
     return Sample(rss=mem.rss, cpu_percent=cpu_pct)
 
 
+def container_memory_to_bytes(memory_string: str) -> int:
+    """
+    Parse a memory usage string from `docker stats` or `podman stats`
+    into bytes.  Docker reports binary units (GiB, MiB) while Podman
+    reports decimal units (GB, MB).
+    """
+    memory_string = memory_string.strip()
+    # Order matters: the first endswith match wins, and "B" is a suffix
+    # of every other unit, so it must stay last.
+    units = {
+        "TIB": 1024**4,
+        "TB": 1000**4,
+        "GIB": 1024**3,
+        "GB": 1000**3,
+        "MIB": 1024**2,
+        "MB": 1000**2,
+        "KIB": 1024,
+        "KB": 1000,
+        "B": 1,
+    }
+    for suffix, multiplier in units.items():
+        if memory_string.upper().endswith(suffix):
+            number = float(memory_string[: len(memory_string) - len(suffix)])
+            return int(number * multiplier)
+    return 0
+
+
 def sample_container(system: str, container: str) -> Sample:
     """
     One RSS+CPU read via `<system> stats --no-stream` on a named container.
@@ -72,6 +94,28 @@ def sample_container(system: str, container: str) -> Sample:
         )
     except Exception:
         return Sample()
+
+
+def find_process_by_binary(
+    parent_pid: int | None, binary: str
+) -> psutil.Process | None:
+    """Find a descendant of parent_pid whose argv[0] basename matches binary."""
+    try:
+        root = psutil.Process(parent_pid)
+        candidates = [root] + root.children(recursive=True)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return None
+    # Both sides use Path(...).name so any path form (relative, absolute,
+    # bare, symlink) matches as long as argv[0] preserves the binary's name.
+    target = Path(binary).name
+    for proc in candidates:
+        try:
+            cmdline = proc.cmdline()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if cmdline and Path(cmdline[0]).name == target:
+            return proc
+    return None
 
 
 class ResourceMonitor:
