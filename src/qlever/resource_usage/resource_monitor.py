@@ -20,8 +20,10 @@ from qlever.util import (
 
 @dataclass
 class Sample:
-    """One sample of elapsed time, memory (RSS), and CPU usage; None
-    fields are written as empty TSV columns."""
+    """
+    One sample of elapsed time, memory (RSS) and CPU usage. A field that
+    is None is written as an empty TSV column.
+    """
 
     elapsed_s: float | None = None
     rss: int | None = None
@@ -29,14 +31,18 @@ class Sample:
 
 
 def sample_to_tsv_row(sample: Sample) -> str:
-    """Format a Sample as a TSV row; None fields become empty columns."""
+    """Format a `Sample` as a TSV row."""
     values = [getattr(sample, field.name) for field in fields(sample)]
-    return "\t".join("" if v is None else str(v) for v in values) + "\n"
+    return (
+        "\t".join("" if value is None else str(value) for value in values)
+        + "\n"
+    )
 
 
 def sample_process(proc: psutil.Process) -> Sample:
     """
-    One RSS+CPU read from a psutil.Process; empty Sample on access errors.
+    One reading of the memory and CPU usage of `proc`. Empty if the
+    process is gone or cannot be read.
     """
     try:
         mem = proc.memory_info()
@@ -72,21 +78,8 @@ class ResourceMonitor:
     """
     Monitor resource usage (memory, CPU) of an index-building
     process. Works in both native mode (via psutil) and container mode
-    (via docker/podman stats).
-
-    Usage as a context manager:
-
-        with ResourceMonitor(dataset="wikidata", engine="oxigraph",
-                            binary="oxigraph"):
-            run_command(cmd, show_output=True)
-
-        # For container mode:
-        with ResourceMonitor(dataset="wikidata",
-                             engine="oxigraph",
-                             binary="oxigraph",
-                             container="oxigraph.index.wikidata",
-                             system="docker"):
-            run_command(cmd, show_output=True)
+    (via docker/podman stats). Use it as a context manager around the
+    index command.
     """
 
     def __init__(
@@ -104,8 +97,8 @@ class ResourceMonitor:
             engine:     Engine key, which the log and plot names start with.
             binary:     Name of the index executable, matched against the
                         descendant processes (native mode only).
-            container:  Container name to sample; when set with `system`,
-                        sampling uses `docker/podman stats` not psutil.
+            container:  Container name to sample. When set with `system`,
+                        sampling uses `docker/podman stats`, not psutil.
             system:     Container runtime ("docker" or "podman").
             interval:   Seconds between samples.
         """
@@ -172,7 +165,7 @@ class ResourceMonitor:
         prefix = resource_usage_prefix(self.engine, self.dataset)
         self.log_path = Path(f"{prefix}.index.resource-usage-log.tsv")
         self.log_file = open(self.log_path, "w")
-        header = "\t".join(f.name for f in fields(Sample)) + "\n"
+        header = "\t".join(field.name for field in fields(Sample)) + "\n"
         self.log_file.write(header)
         self.log_file.flush()
         self.start_time = time.monotonic()
