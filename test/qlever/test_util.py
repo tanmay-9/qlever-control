@@ -104,7 +104,7 @@ def test_parse_git_hash_empty_file(tmp_path):
     assert parse_git_hash(path) is None
 
 
-@pytest.mark.parametrize("value", ["5ns", "5us", "500ms", "30s", "5min", "2h"])
+@pytest.mark.parametrize("value", ["30s", "5min", "2h"])
 def test_parse_timeout_accepts_every_unit(value):
     assert parse_timeout(value) == value
 
@@ -114,8 +114,17 @@ def test_parse_timeout_accepts_every_unit(value):
     [
         # No unit at all.
         "30",
-        # Unit the server does not accept.
+        # Unit not in the list.
         "30sec",
+        # Units below a second, which the server cannot keep.
+        "5ns",
+        "5us",
+        "500ms",
+        # Zero, which the server refuses.
+        "0s",
+        "0min",
+        # Leading zero.
+        "030s",
         # Wrong case, the server is case sensitive.
         "30S",
         "5MIN",
@@ -139,11 +148,6 @@ def test_parse_timeout_rejects(value):
         ("30s", 30),
         ("5min", 300),
         ("2h", 7200),
-        # Rounded to whole seconds.
-        ("1500ms", 2),
-        # Sub-second timeouts stay a timeout instead of becoming 0.
-        ("1ms", 1),
-        ("1ns", 1),
     ],
 )
 def test_timeout_seconds(value, expected):

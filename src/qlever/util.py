@@ -845,37 +845,34 @@ def parse_memory(value: str) -> str:
     return value.upper()
 
 
-# The timeout units the server accepts, in seconds. Case sensitive.
-TIMEOUT_UNIT_SECONDS = {
-    "ns": 1e-9,
-    "us": 1e-6,
-    "ms": 1e-3,
-    "s": 1,
-    "min": 60,
-    "h": 3600,
-}
+# The timeout units in seconds. Smaller units are left out because the
+# server only keeps whole seconds.
+TIMEOUT_UNIT_SECONDS = {"s": 1, "min": 60, "h": 3600}
 
 
 def parse_timeout(value: str) -> str:
     """
     Validate a timeout string like `180s` or `5min`.
     """
-    if not re.fullmatch(r"\d+(ns|us|ms|s|min|h)", value):
+    units = "|".join(TIMEOUT_UNIT_SECONDS)
+    if not re.fullmatch(rf"[1-9]\d*({units})", value):
+        unit_names = ", ".join(f"`{unit}`" for unit in TIMEOUT_UNIT_SECONDS)
         raise argparse.ArgumentTypeError(
-            f"Invalid timeout `{value}`. Use a number followed by one of "
-            f"{', '.join(TIMEOUT_UNIT_SECONDS)}, for example `30s` or `5min`."
+            f"Invalid timeout `{value}`. "
+            f"Use a whole number followed by one of {unit_names}, "
+            "for example `30s` or `5min`. "
+            "The server only supports whole seconds."
         )
     return value
 
 
 def timeout_seconds(value: str) -> int:
     """
-    A timeout like `5min` as whole seconds, for engines that take a bare
-    number. Never 0, so a sub-second timeout stays a timeout. Expects a
-    value that `parse_timeout` has accepted.
+    A timeout like `5min` as a number of seconds. Expects a value that
+    `parse_timeout` has accepted.
     """
     number, unit = re.fullmatch(r"(\d+)(\D+)", value).groups()
-    return max(1, round(int(number) * TIMEOUT_UNIT_SECONDS[unit]))
+    return int(number) * TIMEOUT_UNIT_SECONDS[unit]
 
 
 def container_memory_to_bytes(memory_string: str) -> int:

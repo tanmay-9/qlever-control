@@ -893,8 +893,7 @@ class BenchmarkQueriesCommand(QleverCommand):
             "queries": [],
         }
         if args.result_file:
-            if timeout:
-                result_yml_query_records["timeout"] = timeout
+            result_yml_query_records["timeout"] = timeout
 
             index_time, index_size = compute_index_stats(IndexStatsCommand())
             result_yml_query_records["index_time"] = index_time
@@ -1013,7 +1012,7 @@ class BenchmarkQueriesCommand(QleverCommand):
             server_restarted = False
             try:
                 max_time = None
-                if args.restart_on_hang and timeout:
+                if args.restart_on_hang:
                     max_time = timeout + 30
                 http_code = run_curl_command(
                     sparql_endpoint,
