@@ -272,7 +272,7 @@ def test_scan_range_includes_the_line_straddling_hi_bound():
 
 
 def test_scan_range_stops_before_a_trailing_partial_line():
-    data, offsets = build_log([1000])
+    data, _ = build_log([1000])
     buf = data + b'{"ts-ms":2000,"event":"end","qid":"q9"'
     assert list(scan_range(buf, 0, len(buf))) == [
         (end_event(1000, "q0", "ok"), 0),
@@ -352,7 +352,7 @@ def test_pair_start_end_events_operation_type_flows_through(op_type):
         (start_event(1000, "q1", op_type), 0),
         (end_event(1050, "q1", "ok"), 100),
     ]
-    completed, still_open = pair_start_end_events(iter(events))
+    completed, _ = pair_start_end_events(iter(events))
     assert completed[0].op_type == op_type
 
 
@@ -361,7 +361,7 @@ def test_pair_start_end_events_without_type_leaves_it_none():
         (start_event(1000, "q1"), 0),
         (end_event(1050, "q1", "ok"), 100),
     ]
-    completed, still_open = pair_start_end_events(iter(events))
+    completed, _ = pair_start_end_events(iter(events))
     assert completed[0].op_type is None
 
 
@@ -440,7 +440,7 @@ def test_pair_start_end_events_status_flows_through(status):
         (start_event(1000, "q1"), 0),
         (end_event(1050, "q1", status), 100),
     ]
-    completed, still_open = pair_start_end_events(iter(events))
+    completed, _ = pair_start_end_events(iter(events))
     assert completed[0].status == status
 
 
