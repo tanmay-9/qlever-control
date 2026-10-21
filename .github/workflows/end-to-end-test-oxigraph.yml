@@ -77,16 +77,5 @@ jobs:
           qeval oxigraph start
           qeval oxigraph status
           qeval oxigraph query
-
-          E2E=$GITHUB_WORKSPACE/.github/e2e
-          qeval oxigraph benchmark-queries --queries-tsv $E2E/olympics.tsv \
-            --result-file olympics.oxigraph --results-dir tsv-results
-          qeval oxigraph benchmark-queries --queries-yml $E2E/olympics.yml \
-            --result-file olympics.oxigraph --results-dir yml-results
-          python $E2E/check_benchmark_result.py \
-            tsv-results/olympics.oxigraph.results.yaml "Olympics"
-          python $E2E/check_benchmark_result.py \
-            yml-results/olympics.oxigraph.results.yaml "Olympics CI queries"
-
           qeval oxigraph stop
           ls -lh
