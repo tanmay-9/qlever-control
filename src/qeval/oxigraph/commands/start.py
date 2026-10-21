@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import time
 from pathlib import Path
@@ -24,9 +25,9 @@ from qlever.util import (
 )
 
 
-def timeout_supported(args, serve_ps: str) -> bool:
+def timeout_supported(args, serve_subcommand: str) -> bool:
     """Check whether the oxigraph server binary supports query timeouts."""
-    help_cmd = f"{serve_ps} --help"
+    help_cmd = f"{serve_subcommand} --help"
     if args.system in Containerize.supported_systems():
         help_cmd = f"{args.system} run --rm {args.image} {help_cmd}"
     else:
@@ -106,16 +107,19 @@ class StartCommand(QleverCommand):
         )
 
     def execute(self, args) -> bool:
+        is_containerized = args.system in Containerize.supported_systems()
         # Inside a container, bind to 0.0.0.0 so the port mapping is
         # reachable from the host; natively, bind to the configured host.
         bind = (
             f"0.0.0.0:{args.port}"
-            if args.system in Containerize.supported_systems()
+            if is_containerized
             else f"{args.host_name}:{args.port}"
         )
-        process = "serve-read-only" if args.read_only == "yes" else "serve"
+        serve_subcommand = (
+            "serve-read-only" if args.read_only == "yes" else "serve"
+        )
         timeout_str = ""
-        if timeout_supported(args, process):
+        if timeout_supported(args, serve_subcommand):
             timeout_str = f"--timeout-s {timeout_seconds(args.timeout)}"
         else:
             log.info(
@@ -124,16 +128,19 @@ class StartCommand(QleverCommand):
             )
 
         start_cmd = (
-            f"{process} --location {args.name}_index/ {args.extra_args} "
-            f"{timeout_str} --bind={bind}"
+            f"{serve_subcommand} --location {args.name}_index/ "
+            f"{args.extra_args} {timeout_str} --bind={bind}"
         )
 
-        if args.system in Containerize.supported_systems():
+        if is_containerized:
             start_cmd = wrap_cmd_in_container(args, start_cmd)
         else:
             start_cmd = f"{args.server_binary} {start_cmd} > {args.name}.server-log.txt 2>&1"
             if not args.run_in_foreground:
-                start_cmd = f"nohup {start_cmd} &"
+                # The `echo $!` reports the PID of the server process, which
+                # the liveness check uses to detect a server that exits
+                # before it becomes ready.
+                start_cmd = f"nohup {start_cmd} & echo $!"
 
         # Show the command line.
         self.show(start_cmd, only_show=args.show)
@@ -145,7 +152,7 @@ class StartCommand(QleverCommand):
         )
 
         # When running natively, check if the binary exists and works.
-        if args.system not in Containerize.supported_systems():
+        if not is_containerized:
             if not binary_exists(args.server_binary, "server-binary", args):
                 return False
 
@@ -174,25 +181,31 @@ class StartCommand(QleverCommand):
         log_file = Path(f"{args.name}.server-log.txt")
         log_file.unlink(missing_ok=True)
 
+        # Keep what the liveness check needs: the process handle or the PID.
+        process = None
+        pid = None
         try:
-            process = run_command(
-                start_cmd,
-                use_popen=args.run_in_foreground,
-            )
-        except Exception as e:
-            log.error(f"Starting the Oxigraph server failed ({e})")
+            if args.run_in_foreground:
+                process = run_command(start_cmd, use_popen=True)
+            elif is_containerized:
+                run_command(start_cmd)
+            else:
+                output = run_command(start_cmd, return_output=True)
+                with contextlib.suppress(ValueError):
+                    pid = int(output.strip())
+        except Exception as error:
+            log.error(f"Starting the Oxigraph server failed ({error})")
             return False
 
         # Follow the server log until the server is ready. For containers,
         # use `docker/podman logs -f` as Oxigraph doesn't support
         # redirecting its log to a file.
-        in_container = args.system in Containerize.supported_systems()
-        if in_container:
+        if is_containerized:
             log_name = f"the logs of container {args.server_container}"
         else:
             log_name = str(log_file)
         show_log_follow_info(log_name, args.run_in_foreground)
-        if in_container:
+        if is_containerized:
             # A short delay ensures the container is up before attaching.
             # In a session of its own, like `tail_log_file`, so that
             # `stop_tailing` can stop it.
@@ -208,7 +221,7 @@ class StartCommand(QleverCommand):
         try:
             server_ready = wait_until_server_ready(
                 lambda: is_server_alive(endpoint_url),
-                make_server_liveness_check(args, process, pid=None),
+                make_server_liveness_check(args, process, pid),
             )
         except KeyboardInterrupt:
             # The log follower runs in a session of its own, so the Ctrl-C
@@ -234,7 +247,7 @@ class StartCommand(QleverCommand):
         if args.run_in_foreground:
 
             def stop_container() -> None:
-                if in_container:
+                if is_containerized:
                     stop_command = StopCommand()
                     args.cmdline_regex = stop_command.default_regex()
                     stop_command.execute(args)
