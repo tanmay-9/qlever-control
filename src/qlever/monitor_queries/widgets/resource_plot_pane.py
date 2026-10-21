@@ -12,10 +12,9 @@ terminal pane.
 from __future__ import annotations
 
 from datetime import datetime
-from math import isnan
+from math import ceil, floor, isnan, log10
 from typing import NamedTuple
 
-from textual.message import Message
 from textual.reactive import Reactive
 from textual_plotext import PlotextPlot
 
@@ -26,6 +25,7 @@ from qlever.monitor_queries.models import (
 )
 from qlever.monitor_queries.resource_data import OPERATION_KEYS
 from qlever.monitor_queries.resource_reader import REQUIRED_COLUMNS
+from qlever.monitor_queries.util import format_clock
 
 RgbColor = tuple[int, int, int]
 
@@ -92,17 +92,9 @@ def event_color(kind: str, dark: bool) -> RgbColor:
     return style.dark if dark else style.light
 
 
-# A plot column holds 2 braille dots across, so 2 buckets per usable
-# column is the most the plot can resolve; more just overplots. Reserve
-# columns for the two y-axis label gutters.
-Y_AXIS_CHROME = 16
-MIN_BUCKETS = 60
-
-
-def buckets_for_width(width: int) -> int:
-    """Buckets worth reading for a pane this wide (2 per braille column)."""
-    usable_cols = max(10, width - Y_AXIS_CHROME)
-    return max(MIN_BUCKETS, usable_cols * 2)
+# Columns taken by the two y-axis label gutters, which the plot area
+# does not get.
+Y_AXIS_CHROME = 14
 
 
 # Data rows = pane height minus the two borders, the x-axis label row
@@ -112,51 +104,102 @@ Y_PLOT_CHROME = 4
 MIN_ROWS_PER_TICK = 2
 MIN_Y_TICKS = 2
 MAX_Y_TICKS = 8
+# Use at least this many ticks whenever the pane is tall enough.
+PREFERRED_MIN_Y_TICKS = 4
 
 
 def tick_layout(
-    height: int, max_ticks: int, time_labels: bool
+    height: int, tops: tuple[float, ...], time_labels: bool
 ) -> tuple[int, int]:
     """Pick the y-tick count and interior row gaps for a pane this tall.
 
-    Returns (count, gaps), shared by both axes so ticks line up. Picks the
-    most ticks whose leftover rows stay below one gap, so the space above
-    the top tick never exceeds a tick interval. max_ticks caps the count
-    so the smaller axis keeps distinct labels. A plot without
-    `time_labels` gives the clock row to the data.
+    Returns (count, gaps), shared by both axes so ticks line up. Of the
+    counts that fit, picks the one whose worse axis leaves the least
+    empty space above its top, and the most ticks on a tie. Counts below
+    `PREFERRED_MIN_Y_TICKS` are tried only when it does not fit. Without
+    `time_labels`, the row that would show the times holds data instead.
     """
     chrome = Y_PLOT_CHROME if time_labels else Y_PLOT_CHROME - 1
     gaps = max(1, height - chrome - 1)
-    cap = min(MAX_Y_TICKS, max_ticks)
+    if gaps // (PREFERRED_MIN_Y_TICKS - 1) >= MIN_ROWS_PER_TICK:
+        fewest = PREFERRED_MIN_Y_TICKS
+    else:
+        fewest = MIN_Y_TICKS
     count = MIN_Y_TICKS
-    for candidate in range(MIN_Y_TICKS, cap + 1):
-        step = gaps // (candidate - 1)
-        if step < MIN_ROWS_PER_TICK:
+    least_waste = float("inf")
+    for candidate in range(fewest, MAX_Y_TICKS + 1):
+        if gaps // (candidate - 1) < MIN_ROWS_PER_TICK:
             break
-        if gaps - step * (candidate - 1) < step:
-            count = candidate
+        # How far the axis reaches past its top, where 1.0 means not at
+        # all. A top of zero has no axis to draw.
+        waste = max(
+            (
+                axis_ticks(top, candidate, gaps)[0] / top
+                for top in tops
+                if top > 0
+            ),
+            default=1.0,
+        )
+        if waste <= least_waste:
+            count, least_waste = candidate, waste
     return count, gaps
+
+
+# The steps an axis may count up by, times a power of ten, so its labels
+# are round numbers that are easy to read.
+ROUND_STEPS = (1, 2, 2.5, 3, 4, 5, 6, 8)
+
+
+def round_step(least: float) -> float:
+    """The smallest step in `ROUND_STEPS` that is at least `least`.
+
+    Only whole steps are picked, so no label shows a fraction. That
+    leaves out 2.5 itself, and makes 1 the smallest step.
+    """
+    power = 10 ** max(0, floor(log10(least)))
+    for multiple in ROUND_STEPS:
+        step = multiple * power
+        if step >= least and step % 1 == 0:
+            return step
+    return 10 * power
+
+
+# Every y label is padded to this width, so stacked plots line up in
+# time. Five fits the longest short number, like `17.5k`.
+Y_LABEL_WIDTH = 5
+
+
+def short_number(value: float) -> str:
+    """A tick value with a `k`, `M`, `G` or `T` suffix, like `17.5k`.
+
+    A tick is a round step times at most seven, so three digits always
+    show it in full.
+    """
+    suffix = ""
+    for next_suffix in ("k", "M", "G", "T"):
+        if value < 1000:
+            break
+        value /= 1000
+        suffix = next_suffix
+    return f"{value:.3g}{suffix}"
 
 
 def axis_ticks(
     top: float, count: int, gaps: int
-) -> tuple[float, list[int], list[str]]:
-    """Ticks by a constant integer step, ending near top.
+) -> tuple[float, list[float], list[str]]:
+    """Ticks that count up from 0 by a round step to at least `top`.
 
-    Labels rise by one whole-number step (0, s, 2s, ...) so the numbers
-    are as evenly spaced as the rows. The step is round(top / gaps
-    between ticks), so the last label is the closest step multiple to the
-    capacity. The axis maximum maps one label step onto the whole-row
-    step, keeping every gap equal. Returns (axis_max, positions, labels).
+    Each step spans the same number of rows, so the gaps look equal.
+    Returns the axis maximum, the tick positions and their labels.
     """
     if top <= 0:
         return 1.0, [0], ["0"]
     count = max(2, count)
     row_step = gaps // (count - 1)
-    value_step = max(1, round(top / (count - 1)))
+    value_step = round_step(top / (count - 1))
     axis_max = value_step * gaps / row_step
     positions = [value_step * index for index in range(count)]
-    return axis_max, positions, [str(pos) for pos in positions]
+    return axis_max, positions, [short_number(pos) for pos in positions]
 
 
 # The tops an adjustable axis steps through, starting at the plain
@@ -242,48 +285,82 @@ def next_step(
     return None
 
 
-def label_width(
-    window: ResourceWindow,
-    plots: list[Plot],
-    top_steps: dict[str, int] | None = None,
-) -> int:
-    """Digits in the longest y label these plots print for this window.
+DAY_S = 86_400
 
-    plotext sizes its gutters from the longest label it has, so stacked
-    plots whose numbers differ in length start their data at different
-    columns and the same moment does not line up down the stack.
-    Padding every label to this width lines them up.
+# The gaps the x-axis may put between its ticks, in seconds, each one a
+# span people count in.
+CLOCK_STEPS_S = (
+    # 1, 2, 3, 5, 10, 15 and 30 minutes
+    60,
+    120,
+    180,
+    300,
+    600,
+    900,
+    1_800,
+    # 1, 2, 3, 6 and 12 hours
+    3_600,
+    7_200,
+    10_800,
+    21_600,
+    43_200,
+    DAY_S,
+)
+
+# The most gaps the x-axis splits a window into.
+MAX_CLOCK_GAPS = 8
+
+
+def clock_step(span_s: float) -> int:
+    """The gap between ticks for a window this long.
+
+    The smallest step in `CLOCK_STEPS_S` with at most `MAX_CLOCK_GAPS`
+    gaps, preferring one that divides the window, so every gap is the
+    same. A window too long even for daily ticks steps by whole days.
     """
-    width = 0
-    for plot in plots:
-        step = (top_steps or {}).get(plot.name, 0)
-        for axis in (plot.left, plot.right):
-            highest = axis_top(window, axis, step)
-            width = max(width, len(str(round(highest))))
-    return width
+    fitting = [
+        step for step in CLOCK_STEPS_S if span_s / step <= MAX_CLOCK_GAPS
+    ]
+    if not fitting:
+        return DAY_S * ceil(span_s / (MAX_CLOCK_GAPS * DAY_S))
+    even = [step for step in fitting if span_s % step == 0]
+    return (even or fitting)[0]
 
 
-def clock_ticks(
-    start_s: float, end_s: float, count: int = 5
-) -> tuple[list[float], list[str]]:
-    """Evenly spaced x positions across the window with HH:MM:SS labels.
+def clock_ticks(start_s: float, end_s: float) -> tuple[list[float], list[str]]:
+    """Ticks in equal steps back from the window's end, with labels.
 
-    Returns the tick positions in epoch seconds and their clock-time
-    labels, so the x-axis reads as wall-clock time for both a rolling
-    live window and a fixed historic span.
+    Each label is the local minute its tick falls in. The leftover at
+    the start gets a tick only if it spans half a step and its minute
+    differs from the next tick's. Windows of a day or more show dates.
     """
     if end_s <= start_s:
-        return [start_s], [
-            datetime.fromtimestamp(start_s).strftime("%H:%M:%S")
-        ]
-    span = end_s - start_s
-    positions = [
-        start_s + span * index / (count - 1) for index in range(count)
-    ]
-    labels = [
-        datetime.fromtimestamp(position).strftime("%H:%M:%S")
-        for position in positions
-    ]
+        return [start_s], [format_clock(start_s * 1000, with_seconds=False)]
+    step = clock_step(end_s - start_s)
+    positions = []
+    tick_s = end_s
+    while tick_s >= start_s:
+        positions.append(tick_s)
+        tick_s -= step
+    if (
+        positions[-1] - start_s >= step / 2
+        and start_s // 60 != positions[-1] // 60
+    ):
+        positions.append(start_s)
+    positions.reverse()
+    show_dates = end_s - start_s >= DAY_S
+    labels = []
+    previous_day = None
+    for index, position in enumerate(positions):
+        moment = datetime.fromtimestamp(position)
+        is_edge = index in (0, len(positions) - 1)
+        with_date = show_dates and (is_edge or moment.date() != previous_day)
+        labels.append(
+            format_clock(
+                position * 1000, with_date=with_date, with_seconds=False
+            )
+        )
+        previous_day = moment.date()
     return positions, labels
 
 
@@ -491,17 +568,6 @@ class ResourcePlotPane(PlotextPlot):
 
     can_focus = False
 
-    class BucketsChanged(Message):
-        """Posted when a resize changes how many buckets the pane fits.
-
-        Bubbles up so whoever holds the readings decides whether they
-        are worth re-reading at the new width.
-        """
-
-        def __init__(self, buckets: int) -> None:
-            super().__init__()
-            self.buckets = buckets
-
     window = Reactive(None, init=False)
     plot = Reactive(None, init=False)
     # Each plot's axis top step into `TOP_PERCENTILES`, by plot name,
@@ -514,7 +580,6 @@ class ResourcePlotPane(PlotextPlot):
         plot: Plot,
         top_steps: dict[str, int] | None = None,
         time_labels: bool = True,
-        label_width: int = 0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -528,10 +593,6 @@ class ResourcePlotPane(PlotextPlot):
         # Stacked plots share one clock row, printed under the last of
         # them, so the ones above give their row back to the data.
         self.time_labels = time_labels
-        # Width to pad the y labels to, so a stack's gutters come out
-        # the same size. Zero for a plot drawn on its own.
-        self.label_width = label_width
-        self.last_buckets = None
 
     def on_mount(self) -> None:
         """Draw once, and again whenever the theme's colors change."""
@@ -557,19 +618,20 @@ class ResourcePlotPane(PlotextPlot):
         """The axis top step of the plot being shown."""
         return self.top_steps.get(self.plot.name, 0)
 
-    def on_resize(self) -> None:
-        """Redraw at the new size, and say so if the bucket count moved.
+    def step_top(self, direction: int) -> None:
+        """Raise (1) or lower (-1) the shown plot's axis top.
 
-        Staying quiet unless the count moved keeps a resize that only
-        changed the height from asking for a re-read. A hidden pane has
-        width 0 and is skipped.
+        The ends hold instead of wrapping, so the plot stays where it
+        is put.
         """
+        wanted = next_step(self.window, self.plot, self.top_step, direction)
+        if wanted is not None:
+            # A new dict, since the pane only redraws when one is assigned.
+            self.top_steps = {**self.top_steps, self.plot.name: wanted}
+
+    def on_resize(self) -> None:
+        """Redraw at the new size."""
         self.replot()
-        if self.size.width > 0:
-            buckets = buckets_for_width(self.size.width)
-            if buckets != self.last_buckets:
-                self.last_buckets = buckets
-                self.post_message(self.BucketsChanged(buckets))
 
     def replot(self) -> None:
         """Draw the current window, and set the marker tooltip.
@@ -588,10 +650,6 @@ class ResourcePlotPane(PlotextPlot):
         self.draw_series(window, plot, left_axis_max, right_axis_max)
         self.refresh()
 
-    def padded(self, labels: list[str]) -> list[str]:
-        """Right-justify y labels so a stack's gutters match."""
-        return [label.rjust(self.label_width) for label in labels]
-
     def draw_axes(
         self, window: ResourceWindow, plot: Plot
     ) -> tuple[float, float | None]:
@@ -600,23 +658,24 @@ class ResourcePlotPane(PlotextPlot):
         Each axis reaches one row above its top, which keeps the names
         row clear of data. Returns the axis maximums the names sit at,
         the right one None when it has nothing to read. Labels are
-        padded to `label_width` so a stack's gutters line up.
+        padded to `Y_LABEL_WIDTH` on the side away from their axis line.
         """
         plt = self.plt
         left_top = axis_top(window, plot.left, self.top_step)
         right_top = axis_top(window, plot.right, self.top_step)
-        # Cap the shared tick count by the smaller axis so its labels stay
-        # distinct.
-        smaller_top = min(left_top, right_top) if right_top > 0 else left_top
         count, gaps = tick_layout(
-            self.size.height, round(smaller_top) + 1, self.time_labels
+            self.size.height, (left_top, right_top), self.time_labels
         )
         left_axis_max, left_positions, left_labels = axis_ticks(
             left_top, count, gaps
         )
         left_axis_max = left_axis_max * (gaps + 1) / gaps
         plt.ylim(0, left_axis_max, yside="left")
-        plt.yticks(left_positions, self.padded(left_labels), yside="left")
+        plt.yticks(
+            left_positions,
+            [label.rjust(Y_LABEL_WIDTH) for label in left_labels],
+            yside="left",
+        )
         right_axis_max = None
         if right_top > 0:
             right_axis_max, right_positions, right_labels = axis_ticks(
@@ -625,7 +684,9 @@ class ResourcePlotPane(PlotextPlot):
             right_axis_max = right_axis_max * (gaps + 1) / gaps
             plt.ylim(0, right_axis_max, yside="right")
             plt.yticks(
-                right_positions, self.padded(right_labels), yside="right"
+                right_positions,
+                [label.ljust(Y_LABEL_WIDTH) for label in right_labels],
+                yside="right",
             )
         else:
             plt.ylim(0, None, yside="right")
@@ -683,7 +744,7 @@ class ResourcePlotPane(PlotextPlot):
         # top, so say what they really reached. It shares the label
         # row, which is already spent, rather than taking a data row.
         if plot.left.adjustable and self.top_step > 0:
-            chip = f" ⇡ peak {round(axis_top(window, plot.left))} "
+            chip = f" ⇡ peak {short_number(axis_top(window, plot.left))} "
             plt.text(
                 chip,
                 window.start_s + next_col * seconds_per_col,
@@ -732,8 +793,8 @@ class ResourcePlotPane(PlotextPlot):
         """
         if axis_max is None:
             return None
-        # The row count does not depend on the tick cap.
-        _, gaps = tick_layout(self.size.height, MAX_Y_TICKS, self.time_labels)
+        # The row count does not depend on the tops.
+        _, gaps = tick_layout(self.size.height, (), self.time_labels)
         return axis_max * gaps / (gaps + 1)
 
     def draw_series(
