@@ -9,6 +9,7 @@ from bisect import bisect_left
 from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 from typing import Literal, NamedTuple
 
@@ -24,7 +25,12 @@ from qlever.monitor_queries.resource_reader import (
     iter_samples,
 )
 
-LIVE_RESOURCE_WINDOW_MS = 300_000
+# Live keeps an hour of samples, matching the metrics history, and
+# draws whichever part of it the window stepper asks for.
+LIVE_RESOURCE_BUFFER_MS = 3_600_000
+
+# The window sizes Live offers, none reaching past what the buffer holds.
+LIVE_WINDOW_PRESETS = ("5m", "15m", "30m", "1h")
 
 # Intervals without a sample before the server counts as gone. Three, so
 # a single missed sample still counts as live.
@@ -140,22 +146,24 @@ ALL_COLUMNS = COLUMNS + tuple(OPERATION_COLUMNS.values())
 OPERATION_KEYS = frozenset(column.key for column in OPERATION_COLUMNS.values())
 
 
-def buffer_size(sample_interval_s: int) -> int:
-    """Samples the live window holds at this logging interval."""
-    return max(1, LIVE_RESOURCE_WINDOW_MS // (sample_interval_s * 1000))
+def sample_count(span_ms: int, sample_interval_s: int) -> int:
+    """Number of samples logged over `span_ms` at this interval."""
+    return max(1, span_ms // (sample_interval_s * 1000))
 
 
 class SampleBuffer:
     """Rolling buffer of the most recent resource samples.
 
-    `maxlen` drops the oldest sample when a new one arrives, so the
-    buffer always holds the last `LIVE_RESOURCE_WINDOW_MS` of readings.
-    Its size follows the log's sampling interval, so the window stays
-    five minutes whatever interval the server was started with.
+    `maxlen` drops the oldest sample when a new one arrives. The size
+    follows the log's sampling interval, so the buffer always reaches
+    far enough back to fill Live's widest window.
     """
 
     def __init__(self, sample_interval_s: int) -> None:
-        self.size = buffer_size(sample_interval_s)
+        span_ms = live_buffer_span_ms(sample_interval_s)
+        # One more sample than fit in the span, since n samples are only
+        # n - 1 intervals apart.
+        self.size = sample_count(span_ms, sample_interval_s) + 1
         self.samples = deque(maxlen=self.size)
 
     def add(self, sample: Sample) -> None:
@@ -174,6 +182,70 @@ def is_sample_fresh(
         return False
     fresh_ms = FRESH_INTERVALS * sample_interval_s * 1000
     return now_ms - last_ts_ms <= fresh_ms
+
+
+def coverage_note(window: ResourceWindow, sample_interval_s: int) -> str:
+    """How far back the readings reach, when they miss the window start.
+
+    Empty when they cover the window, so nothing is said in the common
+    case. A gap shorter than one sampling interval is no gap at all,
+    since no reading could have landed in it.
+    """
+    if not window.times_s:
+        return ""
+    if window.times_s[0] - window.start_s < sample_interval_s:
+        return ""
+    age_s = window.end_s - window.times_s[0]
+    age = f"{int(age_s)}s" if age_s < 60 else f"{int(age_s // 60)}m"
+    return f"{age} of data"
+
+
+# The most buckets a window is split into, enough to fill a full-screen
+# plot on a wide monitor and few enough to rebuild on every sample.
+MAX_BUCKETS = 600
+
+
+def bucket_width_ms(span_ms: int, sample_interval_s: int) -> int:
+    """How wide each bucket of a window this long should be.
+
+    A whole number of sampling intervals, so every full bucket holds the
+    same number of samples and each point is made the same way.
+    """
+    interval_ms = sample_interval_s * 1000
+    return interval_ms * ceil(span_ms / (MAX_BUCKETS * interval_ms))
+
+
+def bucket_count(span_ms: int, sample_interval_s: int) -> int:
+    """How many buckets of `bucket_width_ms` cover a window this long."""
+    return ceil(span_ms / bucket_width_ms(span_ms, sample_interval_s))
+
+
+def live_window_bounds(
+    now_ms: int, span_ms: int, sample_interval_s: int
+) -> tuple[int, int, int]:
+    """Start, end and bucket count of Live's window, on the clock's grid.
+
+    A bucket holds a whole number of sampling intervals, so every full
+    bucket holds the same number of samples. Its edges are multiples of
+    its width, so a full bucket never changes and the window moves on
+    one whole bucket at a time.
+    """
+    bucket_ms = bucket_width_ms(span_ms, sample_interval_s)
+    end_ms = (now_ms // bucket_ms + 1) * bucket_ms
+    buckets = ceil(span_ms / bucket_ms)
+    return end_ms - buckets * bucket_ms, end_ms, buckets
+
+
+def live_buffer_span_ms(sample_interval_s: int) -> int:
+    """How far back Live's samples must reach to fill its widest window.
+
+    That window holds whole buckets, so it can be a little longer than
+    `LIVE_RESOURCE_BUFFER_MS`. Its length does not depend on the time.
+    """
+    start_ms, end_ms, _ = live_window_bounds(
+        0, LIVE_RESOURCE_BUFFER_MS, sample_interval_s
+    )
+    return end_ms - start_ms
 
 
 def bucket_value(column: Column, running: float, count: int) -> float:
