@@ -34,9 +34,10 @@ def qleverfile_args(all_args: dict[str, dict[str, tuple]]) -> None:
         type=str,
         default="",
         help=(
-            "Additional arguments to pass directly to the oxigraph load process. "
-            "This allows advanced users to specify options not exposed in "
-            "Qleverfile. The string is appended verbatim to the command."
+            "Additional arguments to pass directly to the oxigraph load "
+            "process. This allows advanced users to specify options not "
+            "exposed in Qleverfile. The string is appended verbatim to "
+            "the command."
         ),
     )
 

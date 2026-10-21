@@ -30,9 +30,8 @@ class LogCommand(QleverLogCommand):
         if args.system not in Containerize.supported_systems():
             return super().execute(args)
 
-        # Handle container logging using docker/podman logs command instead of tail
-        # This is because we don't have <args.name>.server-log.txt for
-        # containerized execution
+        # A container has no `<name>.server-log.txt`, so show its logs with
+        # `docker/podman logs` instead of `tail`.
         log_cmd = f"{args.system} logs "
 
         if not args.from_beginning:

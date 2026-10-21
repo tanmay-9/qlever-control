@@ -98,10 +98,11 @@ class IndexCommand(QleverCommand):
             return plot_path is not None
 
         cmds_to_execute = []
+        log_file_name = f"{args.name}.index-log.txt"
         index_cmd = (
             f"load {'--lenient ' if args.lenient == 'yes' else ''}"
             f"--location {args.name}_index/ --file {args.input_files} "
-            f"{args.extra_args} |& tee {args.name}.index-log.txt"
+            f"{args.extra_args} |& tee {log_file_name}"
         )
 
         ulimit = args.ulimit
@@ -143,8 +144,9 @@ class IndexCommand(QleverCommand):
         if args.system in Containerize.supported_systems():
             if Containerize().is_running(args.system, args.index_container):
                 log.info(
-                    f"{args.system} container {args.index_container} is still up, "
-                    "which means that data loading is in progress. Please wait..."
+                    f"{args.system} container {args.index_container} is "
+                    "still up, which means that data loading is in progress. "
+                    "Please wait..."
                 )
                 return False
         else:
@@ -153,10 +155,7 @@ class IndexCommand(QleverCommand):
 
         # Abort if a previous index already exists. RocksDB .sst files in
         # the index directory indicate an existing store.
-        if (
-            len([p.name for p in Path(f"{args.name}_index").glob("*.sst")])
-            != 0
-        ):
+        if any(Path(f"{args.name}_index").glob("*.sst")):
             log.error(
                 f"Index files (*.sst) found in {args.name}_index directory "
                 "which shows presence of a previous index"
@@ -169,8 +168,6 @@ class IndexCommand(QleverCommand):
         # file. Oxigraph's progress output is unreliable (may not print a
         # final summary line when loading multiple files), so we measure
         # the time externally.
-        #
-        log_file_name = f"{args.name}.index-log.txt"
         with ResourceMonitor.from_args(args):
             try:
                 load_start = time.time()

@@ -37,8 +37,8 @@ def timeout_supported(args, serve_subcommand: str) -> bool:
         return "timeout-s" in help_output
     except Exception as e:
         log.warning(
-            "Could not determine if query timeouts are supported by this version "
-            f"of Oxigraph! Falling back to no timeouts. Error: {e}",
+            "Could not determine if query timeouts are supported by this "
+            f"version of Oxigraph! Falling back to no timeouts. Error: {e}",
         )
         return False
 
@@ -135,7 +135,10 @@ class StartCommand(QleverCommand):
         if is_containerized:
             start_cmd = wrap_cmd_in_container(args, start_cmd)
         else:
-            start_cmd = f"{args.server_binary} {start_cmd} > {args.name}.server-log.txt 2>&1"
+            start_cmd = (
+                f"{args.server_binary} {start_cmd} "
+                f"> {args.name}.server-log.txt 2>&1"
+            )
             if not args.run_in_foreground:
                 # The `echo $!` reports the PID of the server process, which
                 # the liveness check uses to detect a server that exits
@@ -157,10 +160,7 @@ class StartCommand(QleverCommand):
                 return False
 
         # Check if index files (*.sst) present in index directory
-        if (
-            len([p.name for p in Path(f"{args.name}_index/").glob("*.sst")])
-            == 0
-        ):
+        if not any(Path(f"{args.name}_index").glob("*.sst")):
             log.error(f"No Oxigraph index files for {args.name} found!\n")
             log.info(
                 f"Did you call `{args.main_command_name} index`? If you did, "
