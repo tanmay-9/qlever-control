@@ -109,7 +109,18 @@ ResourceRow .resource-center {
     box-sizing: content-box;
     height: 3;
     padding: 0 4;
-    content-align: center bottom;
+}
+
+/* The stepper takes the row the sparkline titles sit on, so it names
+   the span the bars either side of it cover. */
+ResourceRow WindowStepper {
+    width: 100%;
+    height: 1;
+    align-horizontal: center;
+}
+
+ResourceRow .resource-status {
+    height: 2;
     text-align: center;
     text-style: italic;
     color: $text;
@@ -131,6 +142,12 @@ QueryTable.stale, MetricsRow.stale {
 /* Frozen resource gauges. text-opacity, not color, so the bars'
    inline per-cell colors dim along with the title and status. */
 ResourceRow.stale {
+    text-opacity: 50%;
+}
+
+/* A plot whose window is still being read. text-opacity again, since
+   plotext colors its lines inline. */
+ResourcePlotPane.stale {
     text-opacity: 50%;
 }
 
@@ -165,12 +182,14 @@ Timeline {
     height: 1;
 }
 
-.timeline-arrow {
+.timeline-arrow,
+.range-arrow {
     width: auto;
     padding: 0 1;
 }
 
-.timeline-arrow:hover {
+.timeline-arrow:hover,
+.range-arrow:hover {
     background: $primary-lighten-2;
 }
 
@@ -182,7 +201,8 @@ Timeline {
     text-align: center;
 }
 
-.timeline-arrow:disabled {
+.timeline-arrow:disabled,
+.range-arrow:disabled {
     color: $text-disabled;
 }
 
@@ -543,8 +563,85 @@ ResourcePlotModal {
     background: $surface;
 }
 
-#resource-plot-modal PlotextPlot {
+.modal-plot-row {
     height: 1fr;
+}
+
+.modal-plot-row PlotextPlot {
+    width: 1fr;
+    height: 1fr;
+}
+
+/* The inline left gutter's width and gap, beside each plot's left
+   axis. The two rails share the spare height, which keeps the arrows
+   level with the axis middle, and run down the gutter's center. */
+.modal-gutter {
+    width: 3;
+    height: 1fr;
+    margin-right: 1;
+    align-horizontal: center;
+}
+
+/* Each rail holds a tick next to its arrow, shown only on the plot the
+   keys step. The margin puts it in the gutter's middle column. */
+.axis-top-rail {
+    width: 1;
+    height: 1fr;
+    margin-left: 1;
+    color: $accent;
+    visibility: hidden;
+}
+
+.modal-plot-row.-picked .axis-top-rail {
+    visibility: visible;
+}
+
+.axis-top-rail.-above {
+    content-align-vertical: bottom;
+}
+
+/* One row between each arrow and the pill that picks the plot. Below
+   the lower arrow that row is its help pill, so the top pill gets a
+   blank row to match. */
+.modal-gutter > .gutter-key.-above {
+    margin-bottom: 1;
+}
+
+.modal-gutter > .gutter-control:last-of-type {
+    margin-bottom: 0;
+}
+
+/* In help mode a pill shows only where its key does something. */
+.-help .modal-plot-row .gutter-key {
+    visibility: hidden;
+}
+
+.-help .modal-plot-row .gutter-key.-shown {
+    visibility: visible;
+}
+
+/* The stepper and the range each take half the row, centered in it. */
+#modal-top-row {
+    height: 1;
+}
+
+#modal-top-row > WindowStepper,
+#modal-top-row > WindowRange {
+    width: 1fr;
+    align-horizontal: center;
+}
+
+WindowRange {
+    height: 1;
+}
+
+WindowRange > Static {
+    width: auto;
+}
+
+#range-text {
+    padding: 0 1;
+    text-style: bold;
 }
 
 /* Footer */
