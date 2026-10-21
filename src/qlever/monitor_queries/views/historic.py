@@ -36,11 +36,11 @@ from qlever.monitor_queries.models import (
     FilterState,
     HistoricQueryRow,
     MetricsCounts,
-    ResourceWindow,
     SparqlContent,
     TimelineBounds,
 )
 from qlever.monitor_queries.resource_data import (
+    bucket_count,
     read_resource_window,
     window_for_samples,
 )
@@ -66,14 +66,11 @@ from qlever.monitor_queries.widgets.metrics_row import MetricsRow
 from qlever.monitor_queries.widgets.mode_picker import MODES, ModePicker
 from qlever.monitor_queries.widgets.nav_pill import NavPill
 from qlever.monitor_queries.widgets.query_table import HistoricQueryTable
-from qlever.monitor_queries.widgets.resource_plot_pane import (
-    MIN_BUCKETS,
-    ResourcePlotPane,
-    buckets_for_width,
-)
+from qlever.monitor_queries.widgets.resource_plot_pane import ResourcePlotPane
 from qlever.monitor_queries.widgets.selected_window import SelectedWindow
 from qlever.monitor_queries.widgets.timeline import Timeline
 from qlever.monitor_queries.widgets.timeline_row import TimelineRow
+from qlever.monitor_queries.widgets.window_arrows import WindowArrows
 from qlever.monitor_queries.widgets.window_stepper import (
     WindowStepper,
     available_presets,
@@ -256,7 +253,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
             capacity=self.app.capacity,
             start_ms=self.window_start_ms,
             end_ms=self.window_end_ms,
-            buckets=MIN_BUCKETS,
+            buckets=self.resource_buckets(),
         )
         controls = ControlsState(
             window_size=self.window_size,
@@ -392,6 +389,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Dim the rows so a window change registers before the scan lands."""
         self.query_one(HistoricQueryTable).add_class("stale")
         self.query_one(MetricsRow).add_class("stale")
+        self.app.mark_plots_stale()
         self.query_one("#table-status", Static).update("Loading window…")
 
     def refresh_view(self, rescan: bool) -> None:
@@ -432,27 +430,23 @@ class HistoricScreen(Screen, inherit_bindings=False):
             )
             self.refresh_data(rescan=False)
 
-    def schedule_rescan(self) -> None:
-        """Collapse a fast window scrub into one scan of where the user lands.
+    def resource_buckets(self) -> int:
+        """Buckets the resource readings of the current window are read into."""
+        return bucket_count(
+            self.window_end_ms - self.window_start_ms,
+            self.app.sample_interval_s,
+        )
 
-        The pane is measured when the timer fires, not when it is set:
-        on the first scan the screen is not laid out yet and the pane
-        still has no width.
-        """
+    def schedule_rescan(self) -> None:
+        """Collapse a fast window scrub into one scan of where the user lands."""
         if self.rescan_timer is not None:
             self.rescan_timer.stop()
         self.rescan_timer = self.set_timer(
-            RESCAN_DEBOUNCE_S,
-            lambda: self.refresh_data(
-                rescan=True,
-                buckets=buckets_for_width(
-                    self.query_one(ResourcePlotPane).size.width
-                ),
-            ),
+            RESCAN_DEBOUNCE_S, lambda: self.refresh_data(rescan=True)
         )
 
     @work(thread=True, exclusive=True, group="refresh_data")
-    def refresh_data(self, rescan: bool, buckets: int = MIN_BUCKETS) -> None:
+    def refresh_data(self, rescan: bool) -> None:
         """Scan and/or re-filter the window, push rows + metrics + status.
 
         On `rescan` the log is read into a fresh list of window queries
@@ -488,7 +482,7 @@ class HistoricScreen(Screen, inherit_bindings=False):
                 capacity=self.app.capacity,
                 start_ms=self.window_start_ms,
                 end_ms=self.window_end_ms,
-                buckets=buckets,
+                buckets=self.resource_buckets(),
                 should_cancel=lambda: worker.is_cancelled,
             )
             if worker.is_cancelled:
@@ -537,36 +531,6 @@ class HistoricScreen(Screen, inherit_bindings=False):
         self.refresh_sort_indicator()
         self.app.push_resource_window(self.resource_window)
 
-    @work(thread=True, exclusive=True, group="reread_resource_window")
-    def reread_resource_window(self, buckets: int) -> None:
-        """Re-read the resource readings at a new width, off the UI thread.
-
-        A resized plot says how many buckets it now fits, whether it is
-        the inline one or the maximized one. An exclusive worker means a
-        fast drag cancels superseded reads, so only the final width
-        lands. Reads the resource log alone and re-buckets the
-        operations already scanned, since a resize has no reason to
-        redo the query table.
-        """
-        worker = get_current_worker()
-        resource_window = read_resource_window(
-            path=self.app.resource_log,
-            operations=completed_operations(self.window_queries or []),
-            capacity=self.app.capacity,
-            start_ms=self.window_start_ms,
-            end_ms=self.window_end_ms,
-            buckets=buckets,
-            should_cancel=lambda: worker.is_cancelled,
-        )
-        if worker.is_cancelled:
-            return
-        self.app.call_from_thread(self.apply_resource_window, resource_window)
-
-    def apply_resource_window(self, resource_window: ResourceWindow) -> None:
-        """Store the re-read readings and hand them to the plot."""
-        self.resource_window = resource_window
-        self.app.push_resource_window(resource_window)
-
     def action_show_plot(self, step: int = 1) -> None:
         """Show the resource plot, or step to the next or previous one.
 
@@ -585,16 +549,18 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Open the resource plot as a full-screen modal.
 
         Shows every plot this log can carry, on the readings the inline
-        plot is showing. A wider pane then fits more buckets and says
-        so, which brings back a window read at that size, so maximizing
-        shows more detail as well as more plots.
+        plot is showing.
         """
+        pane = self.query_one(ResourcePlotPane)
         self.app.push_screen(
             ResourcePlotModal(
-                self.resource_window,
-                self.app.offered_plots(),
-                self.query_one(ResourcePlotPane).top_steps,
-            )
+                owner=self,
+                window=self.resource_window,
+                plots=self.app.offered_plots(),
+                top_steps=pane.top_steps,
+                shown_plot=pane.plot.name,
+            ),
+            self.query_one(DetailSwitcher).set_top_steps,
         )
 
     def action_show_sparql(self) -> None:
@@ -847,11 +813,11 @@ class HistoricScreen(Screen, inherit_bindings=False):
         """Recenter the window on the clicked timeline position."""
         self.center_window_at(message.center_ms)
 
-    def on_timeline_row_shifted(self, message: TimelineRow.Shifted) -> None:
+    def on_window_arrows_shifted(self, message: WindowArrows.Shifted) -> None:
         """Shift the window when a timeline arrow is clicked."""
         self.shift_window(message.direction)
 
-    def on_timeline_row_jumped(self, message: TimelineRow.Jumped) -> None:
+    def on_window_arrows_jumped(self, message: WindowArrows.Jumped) -> None:
         """Jump to a log edge when a jump arrow is clicked."""
         if message.direction < 0:
             self.action_snap_start()

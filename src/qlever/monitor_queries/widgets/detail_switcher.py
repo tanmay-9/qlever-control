@@ -14,7 +14,6 @@ from qlever.monitor_queries.widgets.resource_plot_pane import (
     PLOTS,
     Plot,
     ResourcePlotPane,
-    next_step,
 )
 from qlever.monitor_queries.widgets.sparql_pane import SparqlPane
 
@@ -56,18 +55,15 @@ class DetailSwitcher(ContentSwitcher):
         pane.plot = offered[(place + step) % len(offered)]
 
     def step_top(self, direction: int) -> None:
-        """Raise or lower the top of the shown plot's axis.
-
-        `direction` is 1 to raise the top and -1 to lower it. The ends
-        hold instead of wrapping, so the plot stays where it is put.
-        """
+        """Raise (1) or lower (-1) the shown plot's axis top, if it has one."""
         if self.current != PLOT_ID:
             return
         pane = self.query_one(ResourcePlotPane)
-        wanted = next_step(pane.window, pane.plot, pane.top_step, direction)
-        if wanted is not None:
-            # A new dict, since the pane only redraws when one is assigned.
-            pane.top_steps = {**pane.top_steps, pane.plot.name: wanted}
+        pane.step_top(direction)
+
+    def set_top_steps(self, steps: dict[str, int]) -> None:
+        """Take over the axis tops the full-screen view was closed with."""
+        self.query_one(ResourcePlotPane).top_steps = steps
 
     def show_sparql(self) -> None:
         """Switch to the SPARQL pane."""
