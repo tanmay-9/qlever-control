@@ -98,7 +98,7 @@ def sample_container(system: str, container: str) -> Sample:
 
 
 def find_process_by_binary(
-    parent_pid: int | None, binary: str
+    parent_pid: int, binary: str
 ) -> psutil.Process | None:
     """Find a descendant of parent_pid whose argv[0] basename matches binary."""
     try:
@@ -175,8 +175,8 @@ class ResourceMonitor:
 
     def take_sample(self) -> Sample:
         """
-        Dispatch to container or native sampling, caching the resolved
-        process.
+        Read one sample from the container or from the index process.
+        The process is only searched for again once it is gone.
         """
         if self.system in Containerize.supported_systems():
             return sample_container(self.system, self.container)
@@ -201,7 +201,7 @@ class ResourceMonitor:
         while not self.stop_event.is_set():
             sample = self.take_sample()
             sample.elapsed_s = round(time.monotonic() - self.start_time, 1)
-            if sample.rss is not None and self.log_file is not None:
+            if sample.rss is not None:
                 self.peak_rss = max(self.peak_rss, sample.rss)
                 self.log_file.write(sample_to_tsv_row(sample))
                 self.log_file.flush()
