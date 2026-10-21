@@ -338,11 +338,10 @@ def render_usage_plot(
     *,
     engine_overlay: OverlayType | None = None,
     engine_subtitle: SubtitleType | None = None,
-    output_dir: Path | None = None,
 ) -> Path | None:
     """
     Render `<prefix>.resource-usage-plot.png` from
-    `<prefix>.index.resource-usage-log.tsv` in `output_dir`, where
+    `<prefix>.index.resource-usage-log.tsv` in the current directory, where
     `prefix` comes from `resource_usage_prefix`, falling back to
     `<prefix>.resource-usage-log.tsv` as written by older qlever
     versions. `engine_overlay` and `engine_subtitle` are called with
@@ -354,13 +353,12 @@ def render_usage_plot(
     engine_subtitle = engine_subtitle or subtitle
     dataset = args.name
     prefix = resource_usage_prefix(args.engine_short_name, dataset)
-    output_dir = output_dir or Path.cwd()
-    tsv_path = output_dir / f"{prefix}.index.resource-usage-log.tsv"
+    tsv_path = Path(f"{prefix}.index.resource-usage-log.tsv")
     # Backwards compatibility with older resource-usage log filename
     if not tsv_path.exists():
-        tsv_path = output_dir / f"{prefix}.resource-usage-log.tsv"
-    log_path = output_dir / f"{dataset}.index-log.txt"
-    plot_path = output_dir / f"{prefix}.resource-usage-plot.png"
+        tsv_path = Path(f"{prefix}.resource-usage-log.tsv")
+    log_path = Path(f"{dataset}.index-log.txt")
+    plot_path = Path(f"{prefix}.resource-usage-plot.png")
     if not tsv_path.exists():
         log.warning(f"Resource-usage log not found: `{tsv_path.name}`")
         return None

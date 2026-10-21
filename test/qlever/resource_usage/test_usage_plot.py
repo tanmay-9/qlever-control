@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -248,38 +249,41 @@ def plot_args(name):
     )
 
 
-def render(name, tmp_path):
-    """Render a QLever usage plot for `name` in `tmp_path`."""
-    return render_usage_plot(plot_args(name), output_dir=tmp_path)
+def test_render_usage_plot_missing_tsv(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert render_usage_plot(plot_args("missing")) is None
 
 
-def test_render_usage_plot_missing_tsv(tmp_path):
-    assert render("missing", tmp_path) is None
-
-
-def test_render_usage_plot_header_only_tsv_renders_nothing(tmp_path):
+def test_render_usage_plot_header_only_tsv_renders_nothing(
+    tmp_path, monkeypatch
+):
     # A TSV with only the header (no samples) must not report success
     # or leave a PNG behind.
+    monkeypatch.chdir(tmp_path)
     tsv_path = tmp_path / "data.index.resource-usage-log.tsv"
     tsv_path.write_text("elapsed_s\trss\tcpu_percent\n")
-    assert render("data", tmp_path) is None
+    assert render_usage_plot(plot_args("data")) is None
     assert not (tmp_path / "data.resource-usage-plot.png").exists()
 
 
-def test_render_usage_plot_falls_back_to_old_tsv_name(tmp_path):
+def test_render_usage_plot_falls_back_to_old_tsv_name(tmp_path, monkeypatch):
     # Older qlever versions wrote the log without the `.index.` part.
+    monkeypatch.chdir(tmp_path)
     tsv_path = tmp_path / "data.resource-usage-log.tsv"
     tsv_path.write_text(
         "elapsed_s\trss\tcpu_percent\n1.0\t100\t5.0\n2.0\t200\t6.0\n"
     )
-    plot_path = render("data", tmp_path)
-    assert plot_path == tmp_path / "data.resource-usage-plot.png"
-    assert plot_path.exists()
+    plot_path = render_usage_plot(plot_args("data"))
+    assert plot_path == Path("data.resource-usage-plot.png")
+    assert (tmp_path / plot_path).exists()
 
 
-def test_render_usage_plot_passes_args_and_log_to_engine_hooks(tmp_path):
+def test_render_usage_plot_passes_args_and_log_to_engine_hooks(
+    tmp_path, monkeypatch
+):
     # Another engine passes its own hooks and gets `<dataset>.<engine>`
     # file names.
+    monkeypatch.chdir(tmp_path)
     tsv_path = tmp_path / "data.testengine.index.resource-usage-log.tsv"
     tsv_path.write_text(
         "elapsed_s\trss\tcpu_percent\n1.0\t100\t5.0\n2.0\t200\t6.0\n"
@@ -300,12 +304,11 @@ def test_render_usage_plot_passes_args_and_log_to_engine_hooks(tmp_path):
         args,
         engine_overlay=overlay,
         engine_subtitle=subtitle,
-        output_dir=tmp_path,
     )
-    log_path = tmp_path / "data.index-log.txt"
+    log_path = Path("data.index-log.txt")
     assert received == {
         "overlay": (args, log_path),
         "subtitle": (args, log_path),
     }
-    assert plot_path == tmp_path / "data.testengine.resource-usage-plot.png"
-    assert plot_path.exists()
+    assert plot_path == Path("data.testengine.resource-usage-plot.png")
+    assert (tmp_path / plot_path).exists()
