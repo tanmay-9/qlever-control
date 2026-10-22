@@ -64,7 +64,12 @@ class BaseStopCommand(QleverCommand):
             return True
 
         if is_containerized:
-            return stop_container(args.server_container)
+            if stop_container(args.server_container):
+                return True
+            log.error(
+                f'No container with name "{args.server_container}" found'
+            )
+            return False
 
         stop_process_results = stop_process_with_regex(cmdline_regex)
         if stop_process_results is None:
